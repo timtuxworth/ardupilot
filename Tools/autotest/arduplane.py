@@ -2388,12 +2388,49 @@ function'''
             self.context_pop()
         self.reboot_sitl()
 
-    def fly_terrain_mission(self):
+    def TerrainMission(self):
 
         self.wait_ready_to_arm()
         self.arm_vehicle()
 
         self.fly_mission("ap-terrain.txt", mission_timeout=600)
+
+    def Terrain(self):
+        '''test AP_Terrain'''
+        self.reboot_sitl()  # we know the terrain height at CMAC
+
+        mavproxy = self.start_mavproxy()
+
+        self.wait_ready_to_arm()
+        loc = self.mav.location()
+
+        lng_int = int(loc.lng * 1e7)
+        lat_int = int(loc.lat * 1e7)
+
+        # FIXME: once we have a pre-populated terrain cache this
+        # should require an instantly correct report to pass
+        tstart = self.get_sim_time_cached()
+        while True:
+            if self.get_sim_time_cached() - tstart > 60:
+                raise NotAchievedException("Did not get correct terrain report")
+
+            self.mav.mav.terrain_check_send(lat_int, lng_int)
+
+            report = self.mav.recv_match(type='TERRAIN_REPORT', blocking=True, timeout=60)
+            self.progress(self.dump_message_verbose(report))
+            if report.spacing != 0:
+                break
+
+            self.delay_sim_time(1)
+
+        self.progress(self.dump_message_verbose(report))
+
+        expected_terrain_height = 583.5
+        if abs(report.terrain_height - expected_terrain_height) > 0.5:
+            raise NotAchievedException("Expected terrain height=%f got=%f" %
+                                       (expected_terrain_height, report.terrain_height))
+
+        self.stop_mavproxy(mavproxy)
 
     def test_loiter_terrain(self):
         default_rad = self.get_parameter("WP_LOITER_RAD")
@@ -3604,8 +3641,12 @@ function'''
              self.fly_soaring),
 
             ("Terrain",
+             "Test AP_Terrain",
+             self.Terrain),
+
+            ("TerrainMission",
              "Test terrain following in mission",
-             self.fly_terrain_mission),
+             self.TerrainMission),
 
             ("Terrain-loiter",
              "Test terrain following in loiter",
