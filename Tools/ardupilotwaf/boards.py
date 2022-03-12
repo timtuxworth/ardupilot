@@ -677,6 +677,7 @@ class sitl_periph_gps(sitl):
             HAL_MISSION_ENABLED = 0,
             HAL_RALLY_ENABLED = 0,
             HAL_SCHEDULER_ENABLED = 0,
+            CANARD_ENABLE_TAO_OPTION = 1,
         )
         # libcanard is written for 32bit platforms
         env.CXXFLAGS += [
@@ -936,6 +937,12 @@ class chibios(Board):
             ('9','3','1'),
             ('10','2','1'),
         ]
+
+        if cfg.env.AP_PERIPH:
+            if cfg.env.HAL_CANFD_SUPPORTED:
+                env.DEFINES.update(CANARD_ENABLE_CANFD=1)
+            else:
+                env.DEFINES.update(CANARD_ENABLE_TAO_OPTION=1)
 
         if cfg.options.Werror or cfg.env.CC_VERSION in gcc_whitelist:
             cfg.msg("Enabling -Werror", "yes")

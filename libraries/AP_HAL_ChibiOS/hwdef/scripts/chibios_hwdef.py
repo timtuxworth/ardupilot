@@ -690,6 +690,15 @@ def enable_can(f):
         f.write('#define CAN1_BASE CAN_BASE\n')
     env_vars['HAL_NUM_CAN_IFACES'] = str(len(base_list))
 
+    if mcu_series.startswith("STM32H7") and not args.bootloader:
+        # set maximum supported canfd bit rate in MBits/sec
+        canfd_supported = int(get_config('CANFD_SUPPORTED', 0, default=4, required=False))
+        f.write('#define HAL_CANFD_SUPPORTED %d\n' % canfd_supported)
+        env_vars['HAL_CANFD_SUPPORTED'] = canfd_supported
+    else:
+        canfd_supported = int(get_config('CANFD_SUPPORTED', 0, default=0, required=False))
+        f.write('#define HAL_CANFD_SUPPORTED %d\n' % canfd_supported)
+        env_vars['HAL_CANFD_SUPPORTED'] = canfd_supported
 
 def has_sdcard_spi():
     '''check for sdcard connected to spi bus'''
