@@ -680,6 +680,10 @@ local RC_Channel_ud = {}
 function RC_Channel_ud:norm_input_ignore_trim() end
 
 -- desc
+---@param PWM integer
+function RC_Channel_ud:set_override(PWM) end
+
+-- desc
 ---@return integer
 function RC_Channel_ud:get_aux_switch_pos() end
 
@@ -738,6 +742,9 @@ function periph:get_vehicle_state() end
 ---@return number
 function periph:get_yaw_earth() end
 
+-- desc
+---@param text string
+function periph:can_printf(text) end
 
 -- desc
 ---@class ins
@@ -1500,8 +1507,9 @@ function terrain:height_terrain_difference_home(extrapolate) end
 
 -- desc
 ---@param loc Location_ud
+---@param corrected boolean
 ---@return number|nil
-function terrain:height_amsl(loc) end
+function terrain:height_amsl(loc, corrected) end
 
 -- desc
 ---@return integer

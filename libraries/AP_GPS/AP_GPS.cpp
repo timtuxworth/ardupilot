@@ -37,6 +37,9 @@
 #include "AP_GPS_MSP.h"
 #include "AP_GPS_ExternalAHRS.h"
 #include "GPS_Backend.h"
+#if HAL_SIM_GPS_ENABLED
+#include "AP_GPS_SITL.h"
+#endif
 
 #if HAL_ENABLE_LIBUAVCAN_DRIVERS
 #include <AP_CANManager/AP_CANManager.h>
@@ -360,7 +363,7 @@ const AP_Param::GroupInfo AP_GPS::var_info[] = {
 #if HAL_ENABLE_LIBUAVCAN_DRIVERS
     // @Param: _CAN_NODEID1
     // @DisplayName: GPS Node ID 1
-    // @Description: GPS Node id for discovered first.
+    // @Description: GPS Node id for first-discovered GPS.
     // @ReadOnly: True
     // @User: Advanced
     AP_GROUPINFO("_CAN_NODEID1", 28, AP_GPS, _node_id[0], 0),
@@ -368,21 +371,21 @@ const AP_Param::GroupInfo AP_GPS::var_info[] = {
 #if GPS_MAX_RECEIVERS > 1
     // @Param: _CAN_NODEID2
     // @DisplayName: GPS Node ID 2
-    // @Description: GPS Node id for discovered second.
+    // @Description: GPS Node id for second-discovered GPS.
     // @ReadOnly: True
     // @User: Advanced
     AP_GROUPINFO("_CAN_NODEID2", 29, AP_GPS, _node_id[1], 0),
 #endif // GPS_MAX_RECEIVERS > 1
     // @Param: 1_CAN_OVRIDE
     // @DisplayName: First DroneCAN GPS NODE ID
-    // @Description: GPS Node id for first GPS. If 0 the gps will be automatically selected on first come basis.
+    // @Description: GPS Node id for first GPS. If 0 the gps will be automatically selected on a first-come-first-GPS basis.
     // @User: Advanced
     AP_GROUPINFO("1_CAN_OVRIDE", 30, AP_GPS, _override_node_id[0], 0),
 
 #if GPS_MAX_RECEIVERS > 1
     // @Param: 2_CAN_OVRIDE
     // @DisplayName: Second DroneCAN GPS NODE ID
-    // @Description: GPS Node id for second GPS. If 0 the gps will be automatically selected on first come basis.
+    // @Description: GPS Node id for second GPS. If 0 the gps will be automatically selected on a second-come-second-GPS basis.
     // @User: Advanced
     AP_GROUPINFO("2_CAN_OVRIDE", 31, AP_GPS, _override_node_id[1], 0),
 #endif // GPS_MAX_RECEIVERS > 1
@@ -655,6 +658,13 @@ void AP_GPS::detect_instance(uint8_t instance)
         new_gps = new AP_GPS_NOVA(*this, state[instance], _port[instance]);
         break;
 #endif //AP_GPS_NOVA_ENABLED
+
+#if HAL_SIM_GPS_ENABLED
+    case GPS_TYPE_SITL:
+        new_gps = new AP_GPS_SITL(*this, state[instance], _port[instance]);
+        break;
+#endif  // HAL_SIM_GPS_ENABLED
+
     default:
         break;
     }
@@ -1114,13 +1124,34 @@ void AP_GPS::update_primary(void)
     if (primary_instance == GPS_BLENDED_INSTANCE) {
         primary_instance = 0;
         for (uint8_t i=1; i<GPS_MAX_RECEIVERS; i++) {
-            // choose GPS with highest state or higher number of satellites
-            if ((state[i].status > state[primary_instance].status) ||
-                ((state[i].status == state[primary_instance].status) && (state[i].num_sats > state[primary_instance].num_sats))) {
+            // choose GPS with highest state or higher number of
+            // satellites. Reject a GPS with an old update time, as it
+            // may be the old timestamp that triggered the loss of
+            // blending
+            const uint32_t delay_threshold = 400;
+            const bool higher_status = state[i].status > state[primary_instance].status;
+            const bool old_data_primary = (now - state[primary_instance].last_gps_time_ms) > delay_threshold;
+            const bool old_data = (now - state[i].last_gps_time_ms) > delay_threshold;
+            const bool equal_status = state[i].status == state[primary_instance].status;
+            const bool more_sats = state[i].num_sats > state[primary_instance].num_sats;
+            if (old_data && !old_data_primary) {
+                // don't switch to a GPS that has not updated in 400ms
+                continue;
+            }
+            if (state[i].status < GPS_OK_FIX_3D) {
+                // don't use a GPS without 3D fix
+                continue;
+            }
+            // select the new GPS if the primary has old data, or new
+            // GPS either has higher status, or has the same status
+            // and more satellites
+            if ((old_data_primary && !old_data) ||
+                higher_status ||
+                (equal_status && more_sats)) {
                 primary_instance = i;
-                _last_instance_swap_ms = now;
             }
         }
+        _last_instance_swap_ms = now;
         return;
     }
 #endif  // defined(GPS_BLENDED_INSTANCE)

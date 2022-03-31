@@ -32,6 +32,10 @@
 #include <GCS_MAVLink/GCS.h>
 #endif
 
+#if AP_SIM_ENABLED
+#include <AP_HAL/SIMState.h>
+#endif
+
 #if HAL_USE_PWM == TRUE
 #include <SRV_Channel/SRV_Channel.h>
 
@@ -58,6 +62,18 @@ static const eventmask_t EVT_PWM_START  = EVENT_MASK(12);
 static const eventmask_t EVT_PWM_SYNTHETIC_SEND  = EVENT_MASK(13);
 static const eventmask_t EVT_PWM_SEND_NEXT  = EVENT_MASK(14);
 static const eventmask_t EVT_LED_SEND  = EVENT_MASK(15);
+
+static const uint32_t DSHOT_BIT_WIDTH_TICKS = 8;
+static const uint32_t DSHOT_BIT_0_TICKS = 3;
+static const uint32_t DSHOT_BIT_1_TICKS = 6;
+
+// See WS2812B spec for expected pulse widths
+static const uint32_t NEOP_BIT_WIDTH_TICKS = 11;
+static const uint32_t NEOP_BIT_0_TICKS = 4;
+static const uint32_t NEOP_BIT_1_TICKS = 9;
+// neopixel does not use pulse widths at all
+static const uint32_t PROFI_BIT_0_TICKS = 4;
+static const uint32_t PROFI_BIT_1_TICKS = 9;
 
 // #pragma GCC optimize("Og")
 
@@ -197,6 +213,16 @@ void RCOutput::rcout_thread()
 
         // process any pending RC output requests
         timer_tick(time_out_us);
+#if RCOU_DSHOT_TIMING_DEBUG
+        static bool output_masks = true;
+        if (AP_HAL::millis() > 5000 && output_masks) {
+            output_masks = false;
+            hal.console->printf("bdmask 0x%x, en_mask 0x%lx, 3dmask 0x%x:\n", _bdshot.mask, en_mask, _reversible_mask);
+            for (auto &group : pwm_group_list) {
+                hal.console->printf("  timer %u: ch_mask 0x%x, en_mask 0x%x\n", group.timer_id, group.ch_mask, group.en_mask);
+            }
+        }
+#endif
     }
 }
 
@@ -512,10 +538,16 @@ void RCOutput::disable_ch(uint8_t chan)
 
 void RCOutput::write(uint8_t chan, uint16_t period_us)
 {
+
     if (chan >= max_channels) {
         return;
     }
     last_sent[chan] = period_us;
+
+#if AP_SIM_ENABLED
+    hal.simstate->pwm_output[chan] = period_us;
+    return;
+#endif
 
 #if HAL_WITH_IO_MCU
     // handle IO MCU channels
@@ -872,7 +904,6 @@ void RCOutput::set_group_mode(pwm_group &group)
         }
 
         const uint32_t rate = protocol_bitrate(group.current_mode);
-        const uint32_t bit_period = 20;
 
         // configure timer driver for DMAR at requested rate
         const uint8_t pad_end_bits = 8;
@@ -883,7 +914,7 @@ void RCOutput::set_group_mode(pwm_group &group)
         // calculate min time between pulses taking into account the DMAR parallelism
         const uint32_t pulse_time_us = 1000000UL * bit_length / rate;
 
-        if (!setup_group_DMA(group, rate, bit_period, active_high, buffer_length, pulse_time_us, false)) {
+        if (!setup_group_DMA(group, rate, NEOP_BIT_WIDTH_TICKS, active_high, buffer_length, pulse_time_us, false)) {
             group.current_mode = MODE_PWM_NONE;
             break;
         }
@@ -892,13 +923,12 @@ void RCOutput::set_group_mode(pwm_group &group)
 
     case MODE_PWM_DSHOT150 ... MODE_PWM_DSHOT1200: {
         const uint32_t rate = protocol_bitrate(group.current_mode);
-        const uint32_t bit_period = 20;
         bool active_high = is_bidir_dshot_enabled() ? false : true;
         // calculate min time between pulses
         const uint32_t pulse_send_time_us = 1000000UL * dshot_bit_length / rate;
 
         // configure timer driver for DMAR at requested rate
-        if (!setup_group_DMA(group, rate, bit_period, active_high,
+        if (!setup_group_DMA(group, rate, DSHOT_BIT_WIDTH_TICKS, active_high,
                              MAX(DSHOT_BUFFER_LENGTH, GCR_TELEMETRY_BUFFER_LEN), pulse_send_time_us, true)) {
             group.current_mode = MODE_PWM_NORMAL;
             break;
@@ -1283,8 +1313,8 @@ uint16_t RCOutput::create_dshot_packet(const uint16_t value, bool telem_request,
  */
 void RCOutput::fill_DMA_buffer_dshot(uint32_t *buffer, uint8_t stride, uint16_t packet, uint16_t clockmul)
 {
-    const uint32_t DSHOT_MOTOR_BIT_0 = 7 * clockmul;
-    const uint32_t DSHOT_MOTOR_BIT_1 = 14 * clockmul;
+    const uint32_t DSHOT_MOTOR_BIT_0 = DSHOT_BIT_0_TICKS * clockmul;
+    const uint32_t DSHOT_MOTOR_BIT_1 = DSHOT_BIT_1_TICKS * clockmul;
     uint16_t i = 0;
     for (; i < dshot_pre; i++) {
         buffer[i * stride] = 0;
@@ -1328,8 +1358,9 @@ void RCOutput::dshot_send(pwm_group &group, uint32_t time_out_us)
     // assume that we won't be able to get the input capture lock
     group.bdshot.enabled = false;
 
+    uint16_t active_channels = group.ch_mask & group.en_mask;
     // now grab the input capture lock if we are able, we can only enable bi-dir on a group basis
-    if (((_bdshot.mask & group.ch_mask) == group.ch_mask) && group.has_ic()) {
+    if (((_bdshot.mask & active_channels) == active_channels) && group.has_ic()) {
         if (group.has_shared_ic_up_dma()) {
             // no locking required
             group.bdshot.enabled = true;
@@ -1388,23 +1419,24 @@ void RCOutput::dshot_send(pwm_group &group, uint32_t time_out_us)
 #endif
             _bdshot.erpm[chan] = erpm;
 #endif
+            if (safety_on && !(safety_mask & (1U<<(chan+chan_offset)))) {
+                // safety is on, don't output anything
+                continue;
+            }
+
             uint16_t pwm = period[chan];
 
-            if (safety_on && !(safety_mask & (1U<<(chan+chan_offset)))) {
-                // safety is on, overwride pwm
-                pwm = 0;
+            if (pwm == 0) {
+                // no pwm, don't output anything
+                continue;
             }
 
             const uint16_t chan_mask = (1U<<chan);
-            if (pwm == 0) {
-                // no output
-                continue;
-            }
 
             pwm = constrain_int16(pwm, 1000, 2000);
             uint16_t value = MIN(2 * (pwm - 1000), 1999);
 
-            if (chan_mask & (_reversible_mask>>chan_offset)) {
+            if ((chan_mask & _reversible_mask) != 0) {
                 // this is a DShot-3D output, map so that 1500 PWM is zero throttle reversed
                 if (value < 1000) {
                     value = 1999 - value;
@@ -2171,8 +2203,8 @@ void RCOutput::_set_neopixel_rgb_data(pwm_group *grp, uint8_t idx, uint8_t led, 
     const uint8_t stride = 4;
     uint32_t *buf = grp->dma_buffer + (led * neopixel_bit_length + pad_start_bits) * stride + idx;
     uint32_t bits = (green<<16) | (red<<8) | blue;
-    const uint32_t BIT_0 = 7 * grp->bit_width_mul;
-    const uint32_t BIT_1 = 14 * grp->bit_width_mul;
+    const uint32_t BIT_0 = NEOP_BIT_0_TICKS * grp->bit_width_mul;
+    const uint32_t BIT_1 = NEOP_BIT_1_TICKS * grp->bit_width_mul;
     for (uint16_t b=0; b < 24; b++) {
         buf[b * stride] = (bits & 0x800000) ? BIT_1 : BIT_0;
         bits <<= 1;
@@ -2190,7 +2222,7 @@ void RCOutput::_set_profiled_rgb_data(pwm_group *grp, uint8_t idx, uint8_t led, 
     const uint8_t stride = 4;
     uint32_t *buf = grp->dma_buffer + (led * bit_length + pad_start_bits) * stride + idx;
     uint32_t bits = 0x1000000 | (blue<<16) | (red<<8) | green;
-    const uint32_t BIT_1 = 14 * grp->bit_width_mul;
+    const uint32_t BIT_1 = PROFI_BIT_1_TICKS * grp->bit_width_mul;
     for (uint16_t b=0; b < bit_length; b++) {
         buf[b * stride] = (bits & 0x1000000) ? 0 : BIT_1;
         bits <<= 1;
@@ -2207,7 +2239,7 @@ void RCOutput::_set_profiled_blank_frame(pwm_group *grp, uint8_t idx, uint8_t le
     const uint8_t bit_length = 25;
     const uint8_t stride = 4;
     uint32_t *buf = grp->dma_buffer + (led * bit_length + pad_start_bits) * stride + idx;
-    const uint32_t BIT_1 = 14 * grp->bit_width_mul;
+    const uint32_t BIT_1 = PROFI_BIT_1_TICKS * grp->bit_width_mul;
     for (uint16_t b=0; b < bit_length; b++) {
         buf[b * stride] = BIT_1;
     }
@@ -2222,7 +2254,7 @@ void RCOutput::_set_profiled_clock(pwm_group *grp, uint8_t idx, uint8_t led)
     const uint8_t bit_length = 25;
     const uint8_t stride = 4;
     uint32_t *buf = grp->dma_buffer + (led * bit_length + pad_start_bits) * stride + idx;
-    const uint32_t BIT_1 = 7 * grp->bit_width_mul;
+    const uint32_t BIT_1 = PROFI_BIT_0_TICKS * grp->bit_width_mul;
     for (uint16_t b=0; b < bit_length; b++) {
         buf[b * stride] = BIT_1;
     }
@@ -2360,7 +2392,14 @@ void RCOutput::timer_info(ExpandingString &str)
     str.printf("TIMERV1\n");
 
     for (auto &group : pwm_group_list) {
-        const uint32_t target_freq = &group == serial_group ? 19200 * 10 : protocol_bitrate(group.current_mode) * 20;
+        uint32_t target_freq;
+        if (&group == serial_group) {
+            target_freq = 19200 * 10;
+        } else if (is_dshot_protocol(group.current_mode)) {
+            target_freq = protocol_bitrate(group.current_mode) * DSHOT_BIT_WIDTH_TICKS;
+        } else {
+            target_freq = protocol_bitrate(group.current_mode) * NEOP_BIT_WIDTH_TICKS;
+        }
         const uint32_t prescaler = calculate_bitrate_prescaler(group.pwm_drv->clock, target_freq, is_dshot_protocol(group.current_mode));
         str.printf("TIM%-2u CLK=%4uMhz MODE=%5s FREQ=%8u TGT=%8u\n", group.timer_id, unsigned(group.pwm_drv->clock / 1000000),
             get_output_mode_string(group.current_mode),
