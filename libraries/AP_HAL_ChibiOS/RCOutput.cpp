@@ -63,18 +63,6 @@ static const eventmask_t EVT_PWM_SYNTHETIC_SEND  = EVENT_MASK(13);
 static const eventmask_t EVT_PWM_SEND_NEXT  = EVENT_MASK(14);
 static const eventmask_t EVT_LED_SEND  = EVENT_MASK(15);
 
-static const uint32_t DSHOT_BIT_WIDTH_TICKS = 8;
-static const uint32_t DSHOT_BIT_0_TICKS = 3;
-static const uint32_t DSHOT_BIT_1_TICKS = 6;
-
-// See WS2812B spec for expected pulse widths
-static const uint32_t NEOP_BIT_WIDTH_TICKS = 11;
-static const uint32_t NEOP_BIT_0_TICKS = 4;
-static const uint32_t NEOP_BIT_1_TICKS = 9;
-// neopixel does not use pulse widths at all
-static const uint32_t PROFI_BIT_0_TICKS = 4;
-static const uint32_t PROFI_BIT_1_TICKS = 9;
-
 // #pragma GCC optimize("Og")
 
 /*
@@ -144,9 +132,7 @@ void RCOutput::init()
     // setup default output rate of 50Hz
     set_freq(0xFFFF ^ ((1U<<chan_offset)-1), 50);
 
-#ifdef HAL_GPIO_PIN_SAFETY_IN
     safety_state = AP_HAL::Util::SAFETY_DISARMED;
-#endif
 
 #if RCOU_DSHOT_TIMING_DEBUG
     hal.gpio->pinMode(54, 1);
@@ -253,14 +239,24 @@ void RCOutput::dshot_collect_dma_locks(uint32_t time_out_us)
             // if we have time left wait for the event
             eventmask_t mask = 0;
             const uint32_t pulse_elapsed_us = now - group.last_dmar_send_us;
+            uint32_t wait_us = 0;
             if (now < time_out_us) {
-                mask = chEvtWaitOneTimeout(group.dshot_event_mask,
-                    chTimeUS2I(MAX(time_out_us - now, group.dshot_pulse_send_time_us - pulse_elapsed_us)));
-            } else if (pulse_elapsed_us < group.dshot_pulse_send_time_us) {
-                // better to let the burst write in progress complete rather than cancelling mid way through
-                mask = chEvtWaitOneTimeout(group.dshot_event_mask,
-                    chTimeUS2I(group.dshot_pulse_send_time_us - pulse_elapsed_us));
+                wait_us = time_out_us - now;
             }
+            if (pulse_elapsed_us < group.dshot_pulse_send_time_us) {
+                // better to let the burst write in progress complete rather than cancelling mid way through
+                wait_us = MAX(wait_us, group.dshot_pulse_send_time_us - pulse_elapsed_us);
+            }
+
+            // waiting for a very short period of time can cause a
+            // timer wrap with ChibiOS timers. Use CH_CFG_ST_TIMEDELTA
+            // as minimum. Don't allow for a very long delay (over _dshot_period_us)
+            // to prevent bugs in handling timer wrap
+            const uint32_t max_delay_us = _dshot_period_us;
+            const uint32_t min_delay_us = 10; // matches our CH_CFG_ST_TIMEDELTA
+            wait_us = constrain_uint32(wait_us, min_delay_us, max_delay_us);
+            mask = chEvtWaitOneTimeout(group.dshot_event_mask, chTimeUS2I(wait_us));
+
             // no time left cancel and restart
             if (!mask) {
                 dma_cancel(group);
@@ -499,6 +495,33 @@ RCOutput::pwm_group *RCOutput::find_chan(uint8_t chan, uint8_t &group_idx)
     return nullptr;
 }
 
+/*
+ * return mask of channels that must be disabled because they share a group with a digital channel
+ */
+uint32_t RCOutput::get_disabled_channels(uint32_t digital_mask)
+{
+    uint32_t dmask = (digital_mask >> chan_offset);
+    uint32_t disabled_chan_mask = 0;
+    for (auto &group : pwm_group_list) {
+        bool digital_group = false;
+        for (uint8_t j = 0; j < 4; j++) {
+            if ((1U << group.chan[j]) & dmask) {
+                digital_group = true;
+            }
+        }
+        if (digital_group) {
+            for (uint8_t j = 0; j < 4; j++) {
+                if (!((1U << group.chan[j]) & dmask)) {
+                    disabled_chan_mask |= (1U << group.chan[j]);
+                }
+            }
+        }
+    }
+
+    disabled_chan_mask <<= chan_offset;
+    return disabled_chan_mask;
+}
+
 uint16_t RCOutput::get_freq(uint8_t chan)
 {
 #if HAL_WITH_IO_MCU
@@ -546,7 +569,9 @@ void RCOutput::write(uint8_t chan, uint16_t period_us)
 
 #if AP_SIM_ENABLED
     hal.simstate->pwm_output[chan] = period_us;
-    return;
+    if (!(AP::sitl()->on_hardware_output_enable_mask & (1U<<chan))) {
+        return;
+    }
 #endif
 
 #if HAL_WITH_IO_MCU
@@ -590,7 +615,7 @@ void RCOutput::push_local(void)
     if (active_fmu_channels == 0) {
         return;
     }
-    uint16_t outmask = (1U<<active_fmu_channels)-1;
+    uint32_t outmask = (1U<<active_fmu_channels)-1;
     outmask &= en_mask;
 
     uint16_t widest_pulse = 0;
@@ -974,7 +999,7 @@ void RCOutput::set_group_mode(pwm_group &group)
 /*
   setup output mode
  */
-void RCOutput::set_output_mode(uint16_t mask, const enum output_mode mode)
+void RCOutput::set_output_mode(uint32_t mask, const enum output_mode mode)
 {
     for (auto &group : pwm_group_list) {
         enum output_mode thismode = mode;
@@ -1358,7 +1383,7 @@ void RCOutput::dshot_send(pwm_group &group, uint32_t time_out_us)
     // assume that we won't be able to get the input capture lock
     group.bdshot.enabled = false;
 
-    uint16_t active_channels = group.ch_mask & group.en_mask;
+    uint32_t active_channels = group.ch_mask & group.en_mask;
     // now grab the input capture lock if we are able, we can only enable bi-dir on a group basis
     if (((_bdshot.mask & active_channels) == active_channels) && group.has_ic()) {
         if (group.has_shared_ic_up_dma()) {
@@ -1431,7 +1456,7 @@ void RCOutput::dshot_send(pwm_group &group, uint32_t time_out_us)
                 continue;
             }
 
-            const uint16_t chan_mask = (1U<<chan);
+            const uint32_t chan_mask = (1U<<chan);
 
             pwm = constrain_int16(pwm, 1000, 2000);
             uint16_t value = MIN(2 * (pwm - 1000), 1999);
@@ -1557,7 +1582,7 @@ void RCOutput::send_pulses_DMAR(pwm_group &group, uint32_t buffer_length)
 
     dmaStreamEnable(group.dma);
     // record when the transaction was started
-    group.last_dmar_send_us = AP_HAL::micros64();
+    group.last_dmar_send_us = AP_HAL::micros();
 #endif //#ifndef DISABLE_DSHOT
 }
 
@@ -1635,7 +1660,7 @@ void RCOutput::dma_cancel(pwm_group& group)
   While serial output is active normal output to the channel group is
   suspended.
 */
-bool RCOutput::serial_setup_output(uint8_t chan, uint32_t baudrate, uint16_t chanmask)
+bool RCOutput::serial_setup_output(uint8_t chan, uint32_t baudrate, uint32_t chanmask)
 {
     // account for IOMCU channels
     chan -= chan_offset;
@@ -2097,7 +2122,7 @@ uint32_t RCOutput::protocol_bitrate(const enum output_mode mode)
   setup serial led output for a given channel number, with
   the given max number of LEDs in the chain.
 */
-bool RCOutput::set_serial_led_num_LEDs(const uint16_t chan, uint8_t num_leds, output_mode mode, uint16_t clock_mask)
+bool RCOutput::set_serial_led_num_LEDs(const uint16_t chan, uint8_t num_leds, output_mode mode, uint32_t clock_mask)
 {
     if (!_initialised || num_leds == 0) {
         return false;

@@ -12,11 +12,12 @@
  */
 #pragma once
 
+#include <AP_HAL/AP_HAL.h>
+
 #ifndef HAL_MISSION_ENABLED
 #define HAL_MISSION_ENABLED 1
 #endif
 
-#include <AP_HAL/AP_HAL.h>
 #include <GCS_MAVLink/GCS_MAVLink.h>
 #include <AP_Math/AP_Math.h>
 #include <AP_Common/AP_Common.h>
@@ -312,6 +313,10 @@ public:
         uint16_t id;                // mavlink command id
         uint16_t p1;                // general purpose parameter 1
         Content content;
+
+        // for items which store in location, we offer a few more bits
+        // of storage:
+        uint8_t type_specific_bits;  // bitmask of set/unset bits
 
         // return a human-readable interpretation of the ID stored in this command
         const char *type() const;

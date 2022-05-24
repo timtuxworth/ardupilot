@@ -31,11 +31,11 @@
 #include <uavcan/protocol/param/GetSet.hpp>
 #include <uavcan/protocol/param/ExecuteOpcode.hpp>
 #include <uavcan/helpers/heap_based_pool_allocator.hpp>
-
+#include <SRV_Channel/SRV_Channel.h>
 
 
 #ifndef UAVCAN_SRV_NUMBER
-#define UAVCAN_SRV_NUMBER 18
+#define UAVCAN_SRV_NUMBER NUM_SERVO_CHANNELS
 #endif
 
 #define AP_UAVCAN_SW_VERS_MAJOR 1
@@ -260,6 +260,7 @@ private:
     AP_Int8 _uavcan_node;
     AP_Int32 _servo_bm;
     AP_Int32 _esc_bm;
+    AP_Int8 _esc_offset;
     AP_Int16 _servo_rate_hz;
     AP_Int16 _options;
     AP_Int16 _notify_state_hz;
