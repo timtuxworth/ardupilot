@@ -42,7 +42,8 @@ void AP_ESC_Telem_SITL::update()
 
 #if HAL_WITH_ESC_TELEM
     for (uint8_t i = 0; i < sitl->state.num_motors; i++) {
-        update_rpm(i, sitl->state.rpm[sitl->state.vtol_motor_start+i]);
+        // update_rpm is expecting an integer while state.rpm stores the values as float
+        update_rpm(i, (int32_t)sitl->state.rpm[sitl->state.vtol_motor_start+i]);
     }
 #endif
 
