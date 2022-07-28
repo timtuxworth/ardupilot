@@ -26,6 +26,8 @@
 #include <AP_OLC/AP_OLC.h>
 #include <AP_MSP/msp.h>
 #include <AP_Baro/AP_Baro.h>
+#include <GCS_MAVLink/GCS_MAVLink.h>
+#include <AC_Fence/AC_Fence.h>
 
 #ifndef OSD_ENABLED
 #define OSD_ENABLED !HAL_MINIMIZE_FEATURES
@@ -274,7 +276,9 @@ private:
     void draw_current2(uint8_t x, uint8_t y);
     void draw_vtx_power(uint8_t x, uint8_t y);
     void draw_hgt_abvterr(uint8_t x, uint8_t y);
+#if AP_FENCE_ENABLED
     void draw_fence(uint8_t x, uint8_t y);
+#endif
     void draw_rngf(uint8_t x, uint8_t y);
 
 

@@ -97,10 +97,6 @@
 #include "afs_plane.h"
 #endif
 
-#if AC_FENCE == ENABLED
-#include <AC_Fence/AC_Fence.h>
-#endif
-
 // Local modules
 #include "defines.h"
 #include "mode.h"
@@ -252,10 +248,6 @@ private:
 
 #if OSD_ENABLED || OSD_PARAM_ENABLED
     AP_OSD osd;
-#endif
-
-#if AC_FENCE == ENABLED
-    AC_Fence fence;
 #endif
 
     ModeCircle mode_circle;
@@ -937,6 +929,15 @@ private:
     bool verify_command_callback(const AP_Mission::Mission_Command& cmd);
     float get_wp_radius() const;
 
+    void do_nav_delay(const AP_Mission::Mission_Command& cmd);
+    bool verify_nav_delay(const AP_Mission::Mission_Command& cmd);
+
+    // Delay the next navigation command
+    struct {
+        uint32_t time_max_ms;
+        uint32_t time_start_ms;
+    } nav_delay;
+    
 #if AP_SCRIPTING_ENABLED
     // nav scripting support
     void do_nav_script_time(const AP_Mission::Mission_Command& cmd);
@@ -974,7 +975,7 @@ private:
     void handle_battery_failsafe(const char* type_str, const int8_t action);
     bool failsafe_in_landing_sequence() const;  // returns true if the vehicle is in landing sequence.  Intended only for use in failsafe code.
 
-#if AC_FENCE == ENABLED
+#if AP_FENCE_ENABLED
     // fence.cpp
     void fence_check();
     bool fence_stickmixing() const;
@@ -1048,7 +1049,6 @@ private:
     bool set_mode(Mode& new_mode, const ModeReason reason);
     bool set_mode(const uint8_t mode, const ModeReason reason) override;
     bool set_mode_by_number(const Mode::Number new_mode_number, const ModeReason reason);
-    ModeReason _last_reason;
     void check_long_failsafe();
     void check_short_failsafe();
     void startup_INS_ground(void);
@@ -1201,6 +1201,9 @@ private:
     float roll_in_expo(bool use_dz) const;
     float pitch_in_expo(bool use_dz) const;
     float rudder_in_expo(bool use_dz) const;
+
+    // mode reason for entering previous mode
+    ModeReason previous_mode_reason = ModeReason::UNKNOWN;
 
 public:
     void failsafe_check(void);

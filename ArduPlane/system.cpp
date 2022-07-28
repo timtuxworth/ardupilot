@@ -147,11 +147,6 @@ void Plane::init_ardupilot()
 #if GRIPPER_ENABLED == ENABLED
     g2.gripper.init();
 #endif
-
-    // init fence
-#if AC_FENCE == ENABLED
-    fence.init();
-#endif
 }
 
 //********************************************************************************
@@ -204,14 +199,11 @@ void Plane::startup_ground(void)
 
 bool Plane::set_mode(Mode &new_mode, const ModeReason reason)
 {
-    // update last reason
-    const ModeReason last_reason = _last_reason;
-    _last_reason = reason;
 
     if (control_mode == &new_mode) {
         // don't switch modes if we are already in the correct mode.
         // only make happy noise if using a difent method to switch, this stops beeping for repeated change mode requests from GCS
-        if ((reason != last_reason) && (reason != ModeReason::INITIALISED)) {
+        if ((reason != control_mode_reason) && (reason != ModeReason::INITIALISED)) {
             AP_Notify::events.user_mode_change = 1;
         }
         return true;
@@ -260,7 +252,8 @@ bool Plane::set_mode(Mode &new_mode, const ModeReason reason)
     // TODO: move these to be after enter() once start_command_callback() no longer checks control_mode
     previous_mode = control_mode;
     control_mode = &new_mode;
-    const ModeReason previous_mode_reason = control_mode_reason;
+    const ModeReason  old_previous_mode_reason = previous_mode_reason;
+    previous_mode_reason = control_mode_reason;
     control_mode_reason = reason;
 
     // attempt to enter new mode
@@ -272,6 +265,7 @@ bool Plane::set_mode(Mode &new_mode, const ModeReason reason)
         previous_mode = &old_previous_mode;
         control_mode = &old_mode;
         control_mode_reason = previous_mode_reason;
+        previous_mode_reason = old_previous_mode_reason;
 
         // make sad noise
         if (reason != ModeReason::INITIALISED) {
@@ -287,9 +281,6 @@ bool Plane::set_mode(Mode &new_mode, const ModeReason reason)
 
     // exit previous mode
     old_mode.exit();
-
-    // record reasons
-    control_mode_reason = reason;
 
     // log and notify mode change
     logger.Write_Mode(control_mode->mode_number(), control_mode_reason);

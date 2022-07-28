@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # encoding: utf-8
 
 from collections import OrderedDict
@@ -136,6 +135,13 @@ class Board:
         # Use a dictionary instead of the convetional list for definitions to
         # make easy to override them. Convert back to list before consumption.
         env.DEFINES = {}
+
+        # potentially set extra defines from an environment variable:
+        if cfg.options.define is not None:
+            for (n, v) in [d.split("=") for d in cfg.options.define]:
+                cfg.msg("Defining: %s" % (n, ), v)
+                env.CFLAGS += ['-D%s=%s' % (n, v)]
+                env.CXXFLAGS += ['-D%s=%s' % (n, v)]
 
         env.CFLAGS += [
             '-ffunction-sections',
@@ -548,6 +554,7 @@ class sitl(Board):
         cfg.define('AP_SIM_ENABLED', 1)
         cfg.define('HAL_WITH_SPI', 1)
         cfg.define('HAL_WITH_RAMTRON', 1)
+        cfg.define('AP_GENERATOR_RICHENPOWER_ENABLED', 1)
 
         if self.with_can:
             cfg.define('HAL_NUM_CAN_IFACES', 2)
@@ -557,6 +564,22 @@ class sitl(Board):
         env.CXXFLAGS += [
             '-Werror=float-equal'
         ]
+
+        if cfg.options.ubsan or cfg.options.ubsan_abort:
+            env.CXXFLAGS += [
+                "-fsanitize=undefined",
+                "-fsanitize=float-cast-overflow",
+                "-DUBSAN_ENABLED",
+            ]
+            env.LINKFLAGS += [
+                "-fsanitize=undefined",
+                "-lubsan",
+            ]
+
+        if cfg.options.ubsan_abort:
+            env.CXXFLAGS += [
+                "-fno-sanitize-recover"
+            ]
 
         if not cfg.env.DEBUG:
             env.CXXFLAGS += [

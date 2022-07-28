@@ -224,7 +224,7 @@ __RAMFUNC__ void RCOutput::dshot_update_tick(void* p)
     chSysUnlockFromISR();
 }
 
-#ifndef HAL_NO_SHARED_DMA
+#if AP_HAL_SHARED_DMA_ENABLED
 // release locks on the groups that are pending in reverse order
 void RCOutput::dshot_collect_dma_locks(uint32_t time_out_us)
 {
@@ -279,7 +279,7 @@ void RCOutput::dshot_collect_dma_locks(uint32_t time_out_us)
         }
     }
 }
-#endif // HAL_NO_SHARED_DMA
+#endif // AP_HAL_SHARED_DMA_ENABLED
 
 /*
   setup the output frequency for a group and start pwm output
@@ -470,6 +470,28 @@ void RCOutput::set_dshot_rate(uint8_t dshot_rate, uint16_t loop_rate_hz)
     }
     _dshot_period_us = 1000000UL / drate;
 }
+
+#ifndef DISABLE_DSHOT
+/*
+ Set/get the dshot esc_type
+ */
+void RCOutput::set_dshot_esc_type(DshotEscType dshot_esc_type)
+{
+    _dshot_esc_type = dshot_esc_type;
+    switch (_dshot_esc_type) {
+        case DSHOT_ESC_BLHELI_S:
+            DSHOT_BIT_WIDTH_TICKS = DSHOT_BIT_WIDTH_TICKS_S;
+            DSHOT_BIT_0_TICKS = DSHOT_BIT_0_TICKS_S;
+            DSHOT_BIT_1_TICKS = DSHOT_BIT_1_TICKS_S;
+            break;
+        default:
+            DSHOT_BIT_WIDTH_TICKS = DSHOT_BIT_WIDTH_TICKS_DEFAULT;
+            DSHOT_BIT_0_TICKS = DSHOT_BIT_0_TICKS_DEFAULT;
+            DSHOT_BIT_1_TICKS = DSHOT_BIT_1_TICKS_DEFAULT;
+            break;
+    }
+}
+#endif
 
 /*
   find pwm_group and index in group given a channel number

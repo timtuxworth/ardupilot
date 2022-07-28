@@ -17,7 +17,6 @@ def build(bld):
             'AP_AdvancedFailsafe',
             'AP_WheelEncoder',
             'AP_SmartRTL',
-            'AC_Fence',
             'AC_AttitudeControl',
             'AP_LTM_Telem',
             'AP_Devo_Telem',
@@ -26,7 +25,6 @@ def build(bld):
             'AP_WindVane',
             'AR_Motors',
             'AP_Torqeedo',
-            'AP_AIS',
         ],
     )
 

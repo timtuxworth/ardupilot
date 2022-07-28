@@ -3,10 +3,18 @@
 #include <AP_Common/AP_Common.h>
 
 #include "RC_Channel.h"
+#include <AC_Avoidance/AC_Avoid.h>
 #include "AC_Sprayer/AC_Sprayer.h"
+#include <AP_AIS/AP_AIS.h>
+#include <AP_Beacon/AP_Beacon.h>
+#include <AP_Follow/AP_Follow.h>
 #include "AP_Gripper/AP_Gripper.h"
+#include <AP_Proximity/AP_Proximity.h>
 #include "AP_Rally.h"
+#include <AP_SmartRTL/AP_SmartRTL.h>
+#include <AP_Stats/AP_Stats.h>
 #include "AP_Torqeedo/AP_Torqeedo.h"
+#include <AP_WindVane/AP_WindVane.h>
 
 // Global parameter class.
 //
@@ -326,9 +334,6 @@ public:
     // frame class for vehicle
     AP_Int8 frame_class;
 
-    // fence library
-    AC_Fence fence;
-
 #if HAL_PROXIMITY_ENABLED
     // proximity library
     AP_Proximity proximity;
@@ -407,16 +412,14 @@ public:
     AP_Torqeedo torqeedo;
 #endif
 
-#if HAL_AIS_ENABLED
-    // Automatic Identification System - for tracking sea-going vehicles
-    AP_AIS ais;
-#endif
-
     // position controller
     AR_PosControl pos_control;
 
     // guided options bitmask
     AP_Int32 guided_options;
+
+    // Rover options
+    AP_Int32 manual_options;
 };
 
 extern const AP_Param::Info var_info[];

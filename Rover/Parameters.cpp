@@ -478,10 +478,6 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
     // @User: Standard
     AP_GROUPINFO("FRAME_CLASS", 16, ParametersG2, frame_class, 1),
 
-    // @Group: FENCE_
-    // @Path: ../libraries/AC_Fence/AC_Fence.cpp
-    AP_SUBGROUPINFO(fence, "FENCE_", 17, ParametersG2, AC_Fence),
-
 #if HAL_PROXIMITY_ENABLED
     // @Group: PRX
     // @Path: ../libraries/AP_Proximity/AP_Proximity.cpp
@@ -650,12 +646,6 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
     AP_SUBGROUPINFO(torqeedo, "TRQD_", 49, ParametersG2, AP_Torqeedo),
 #endif
 
-#if HAL_AIS_ENABLED
-    // @Group: AIS_
-    // @Path: ../libraries/AP_AIS/AP_AIS.cpp
-    AP_SUBGROUPINFO(ais, "AIS_",  50, ParametersG2, AP_AIS),
-#endif
-
     // @Group: PSC
     // @Path: ../libraries/APM_Control/AR_PosControl.cpp
     AP_SUBGROUPINFO(pos_control, "PSC", 51, ParametersG2, AR_PosControl),
@@ -666,6 +656,13 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
     // @Bitmask: 6:SCurves used for navigation
     // @User: Advanced
     AP_GROUPINFO("GUID_OPTIONS", 52, ParametersG2, guided_options, 0),
+
+    // @Param: MANUAL_OPTIONS
+    // @DisplayName: Manual mode options
+    // @Description: Manual mode specific options
+    // @Bitmask: 0:Enable steering speed scaling
+    // @User: Advanced
+    AP_GROUPINFO("MANUAL_OPTIONS", 53, ParametersG2, manual_options, 0),
 
     AP_GROUPEND
 };
@@ -705,7 +702,7 @@ ParametersG2::ParametersG2(void)
 #if ADVANCED_FAILSAFE == ENABLED
     afs(),
 #endif
-    beacon(rover.serial_manager),
+    beacon(),
     motors(rover.ServoRelayEvents, wheel_rate_control),
     wheel_rate_control(wheel_encoder),
     attitude_control(),
@@ -781,6 +778,7 @@ void Rover::load_parameters(void)
         g.format_version.set_and_save(Parameters::k_format_version);
         hal.console->printf("done.\n");
     }
+    g.format_version.set_default(Parameters::k_format_version);
 
     const uint32_t before = micros();
     // Load all auto-loaded EEPROM variables
@@ -845,16 +843,28 @@ void Rover::load_parameters(void)
                                                       AP_BoardConfig::BOARD_SAFETY_OPTION_BUTTON_ACTIVE_ARMED);
 #endif
 
-// PARAMETER_CONVERSION - Added: JAN-2022
-#if AP_AIRSPEED_ENABLED
+#if AP_AIRSPEED_ENABLED | AP_AIS_ENABLED | AP_FENCE_ENABLED
     // Find G2's Top Level Key
     AP_Param::ConversionInfo info;
     if (!AP_Param::find_top_level_key_by_pointer(&g2, info.old_key)) {
         return;
     }
+#endif
 
+// PARAMETER_CONVERSION - Added: JAN-2022
+#if AP_AIRSPEED_ENABLED
     const uint16_t old_index = 37;          // Old parameter index in the tree
     const uint16_t old_top_element = 4069;  // Old group element in the tree for the first subgroup element
     AP_Param::convert_class(info.old_key, &airspeed, airspeed.var_info, old_index, old_top_element, false);
+#endif
+
+// PARAMETER_CONVERSION - Added: MAR-2022
+#if AP_AIS_ENABLED
+    AP_Param::convert_class(info.old_key, &ais, ais.var_info, 50, 114, false);
+#endif
+
+// PARAMETER_CONVERSION - Added: Mar-2022
+#if AP_FENCE_ENABLED
+    AP_Param::convert_class(info.old_key, &fence, fence.var_info, 17, 4049, false);
 #endif
 }

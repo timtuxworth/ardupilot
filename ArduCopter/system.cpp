@@ -31,10 +31,6 @@ void Copter::init_ardupilot()
     g2.gripper.init();
 #endif
 
-#if AC_FENCE == ENABLED
-    fence.init();
-#endif
-
     // init winch
 #if WINCH_ENABLED == ENABLED
     g2.winch.init();
@@ -77,7 +73,7 @@ void Copter::init_ardupilot()
     init_rc_in();               // sets up rc channels from radio
 
     // initialise surface to be tracked in SurfaceTracking
-    // must be before rc init to not override inital switch position
+    // must be before rc init to not override initial switch position
     surface_tracking.init((SurfaceTracking::Surface)copter.g2.surftrak_mode.get());
 
     // allocate the motors class
@@ -273,7 +269,7 @@ bool Copter::ekf_has_relative_position() const
         return false;
     }
 
-    // return immediately if neither optflow nor visual odometry is enabled
+    // return immediately if neither optflow nor visual odometry is enabled and dead reckoning is inactive
     bool enabled = false;
 #if AP_OPTICALFLOW_ENABLED
     if (optflow.enabled()) {
@@ -285,6 +281,9 @@ bool Copter::ekf_has_relative_position() const
         enabled = true;
     }
 #endif
+    if (dead_reckoning.active && !dead_reckoning.timeout) {
+        enabled = true;
+    }
     if (!enabled) {
         return false;
     }

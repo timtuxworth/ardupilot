@@ -294,7 +294,7 @@ void Tailsitter::output(void)
     // handle forward flight modes and transition to VTOL modes
     if (!active() || in_vtol_transition()) {
         // get FW controller throttle demand and mask of motors enabled during forward flight
-        if (hal.util->get_soft_armed() && in_vtol_transition() && !quadplane.throttle_wait && quadplane.is_flying()) {
+        if (hal.util->get_soft_armed() && in_vtol_transition() && !quadplane.throttle_wait) {
             /*
               during transitions to vtol mode set the throttle to hover thrust, center the rudder
             */
@@ -796,6 +796,7 @@ void Tailsitter_Transition::update()
         // multiply by 0.1 to convert (degrees/second * milliseconds) to centi degrees
         plane.nav_pitch_cd = constrain_float(fw_transition_initial_pitch - (quadplane.tailsitter.transition_rate_fw * dt) * 0.1f * (plane.fly_inverted()?-1.0f:1.0f), -8500, 8500);
         plane.nav_roll_cd = 0;
+        quadplane.disable_yaw_rate_time_constant();
         quadplane.attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(plane.nav_roll_cd,
                                                                       plane.nav_pitch_cd,
                                                                       0);
@@ -832,7 +833,7 @@ void Tailsitter_Transition::VTOL_update()
     if (transition_state == TRANSITION_ANGLE_WAIT_VTOL) {
         float aspeed;
         bool have_airspeed = quadplane.ahrs.airspeed_estimate(aspeed);
-        // provide assistance in forward flight portion of tailsitter transistion
+        // provide assistance in forward flight portion of tailsitter transition
         quadplane.assisted_flight = quadplane.should_assist(aspeed, have_airspeed);
         if (!quadplane.tailsitter.transition_vtol_complete()) {
             return;
@@ -937,7 +938,7 @@ void Tailsitter_Transition::restart()
 }
 
 // force state to FW and setup for the transition back to VTOL
-void Tailsitter_Transition::force_transistion_complete()
+void Tailsitter_Transition::force_transition_complete()
 {
     transition_state = TRANSITION_DONE;
     vtol_transition_start_ms = AP_HAL::millis();

@@ -4,7 +4,7 @@
 #include "AP_RangeFinder_Backend_Serial.h"
 
 #ifndef AP_RANGEFINDER_LEDDARVU8_ENABLED
-#define AP_RANGEFINDER_LEDDARVU8_ENABLED 1
+#define AP_RANGEFINDER_LEDDARVU8_ENABLED AP_RANGEFINDER_BACKEND_DEFAULT_ENABLED
 #endif
 
 #if AP_RANGEFINDER_LEDDARVU8_ENABLED
@@ -16,7 +16,11 @@ class AP_RangeFinder_LeddarVu8 : public AP_RangeFinder_Backend_Serial
 
 public:
 
-    using AP_RangeFinder_Backend_Serial::AP_RangeFinder_Backend_Serial;
+    static AP_RangeFinder_Backend_Serial *create(
+        RangeFinder::RangeFinder_State &_state,
+        AP_RangeFinder_Params &_params) {
+        return new AP_RangeFinder_LeddarVu8(_state, _params);
+    }
 
 protected:
 
@@ -37,6 +41,8 @@ protected:
     uint16_t read_timeout_ms() const override { return 500; }
 
 private:
+
+    using AP_RangeFinder_Backend_Serial::AP_RangeFinder_Backend_Serial;
 
     // function codes
     enum class FunctionCode : uint8_t {
@@ -97,4 +103,4 @@ private:
     uint32_t last_distance_request_ms;              // system time of last request to sensor to send distances
 };
 
-#endif
+#endif  // AP_RANGEFINDER_LEDDARVU8_ENABLED

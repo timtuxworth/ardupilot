@@ -9,6 +9,7 @@ Andrew Tridgell, October 2011
 from __future__ import print_function
 import atexit
 import fnmatch
+import copy
 import glob
 import optparse
 import os
@@ -39,6 +40,8 @@ from pymavlink.generator import mavtemplate
 from common import Test
 
 tester = None
+
+build_opts = None
 
 
 def buildlogs_dirpath():
@@ -447,10 +450,14 @@ def run_step(step):
         "extra_configure_args": opts.waf_configure_args,
         "coverage": opts.coverage,
         "sitl_32bit" : opts.sitl_32bit,
+        "ubsan" : opts.ubsan,
+        "ubsan_abort" : opts.ubsan_abort,
     }
 
     if opts.Werror:
         build_opts['extra_configure_args'].append("--Werror")
+
+    build_opts = build_opts
 
     vehicle_binary = None
     if step == 'build.Plane':
@@ -531,6 +538,7 @@ def run_step(step):
         "logs_dir": buildlogs_dirpath(),
         "sup_binaries": supplementary_binaries,
         "reset_after_every_test": opts.reset_after_every_test,
+        "build_opts": copy.copy(build_opts),
     }
     if opts.speedup is not None:
         fly_opts["speedup"] = opts.speedup
@@ -959,6 +967,16 @@ if __name__ == "__main__":
                            action='store_true',
                            dest="sitl_32bit",
                            help="compile sitl using 32-bit")
+    group_build.add_option("", "--ubsan",
+                           default=False,
+                           action='store_true',
+                           dest="ubsan",
+                           help="compile sitl with undefined behaviour sanitiser")
+    group_build.add_option("", "--ubsan-abort",
+                           default=False,
+                           action='store_true',
+                           dest="ubsan_abort",
+                           help="compile sitl with undefined behaviour sanitiser and abort on error")
     parser.add_option_group(group_build)
 
     group_sim = optparse.OptionGroup(parser, "Simulation options")
@@ -1094,7 +1112,8 @@ if __name__ == "__main__":
         'build.SITLPeriphGPS',
         'test.CAN',
 
-        'convertgpx',
+        # convertgps disabled as it takes 5 hours
+        # 'convertgpx',
     ]
 
     moresteps = [

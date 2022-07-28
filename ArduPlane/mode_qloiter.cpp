@@ -77,6 +77,9 @@ void ModeQLoiter::run()
         pos_control->set_externally_limited_xy();
     }
 
+    // Pilot input, use yaw rate time constant
+    quadplane.set_pilot_yaw_rate_time_constant();
+
     // call attitude controller with conservative smoothing gain of 4.0f
     attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(plane.nav_roll_cd,
                                                                   plane.nav_pitch_cd,
@@ -86,10 +89,12 @@ void ModeQLoiter::run()
         if (poscontrol.get_state() < QuadPlane::QPOS_LAND_FINAL && quadplane.check_land_final()) {
             poscontrol.set_state(QuadPlane::QPOS_LAND_FINAL);
             quadplane.setup_target_position();
+#if AP_ICENGINE_ENABLED
             // cut IC engine if enabled
             if (quadplane.land_icengine_cut != 0) {
                 plane.g2.ice_control.engine_control(0, 0, 0);
             }
+#endif  // AP_ICENGINE_ENABLED
         }
         float height_above_ground = plane.relative_ground_altitude(plane.g.rangefinder_landing);
         float descent_rate_cms = quadplane.landing_descent_rate_cms(height_above_ground);

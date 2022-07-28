@@ -394,7 +394,9 @@ void Plane::set_servos_manual_passthrough(void)
         int8_t min_throttle = aparm.throttle_min.get();
 
         // apply idle governor
+#if AP_ICENGINE_ENABLED
         g2.ice_control.update_idle_governor(min_throttle);
+#endif
         throttle = MAX(throttle, min_throttle);
         SRV_Channels::set_output_scaled(SRV_Channel::k_throttle, throttle);
     }
@@ -430,8 +432,8 @@ void Plane::throttle_voltage_comp(int8_t &min_throttle, int8_t &max_throttle) co
     const float ratio = g2.fwd_thr_batt_voltage_max / batt_voltage_resting_estimate;
 
     // Scale the throttle limits to prevent subsequent clipping
-    min_throttle = MAX((int8_t)(ratio * (float)min_throttle), -100);
-    max_throttle = MIN((int8_t)(ratio * (float)max_throttle),  100);
+    min_throttle = int8_t(MAX((ratio * (float)min_throttle), -100));
+    max_throttle = int8_t(MIN((ratio * (float)max_throttle),  100));
 
     SRV_Channels::set_output_scaled(SRV_Channel::k_throttle,
                                         constrain_float(SRV_Channels::get_output_scaled(SRV_Channel::k_throttle) * ratio, -100, 100));
@@ -499,9 +501,11 @@ void Plane::set_servos_controlled(void)
     int8_t min_throttle = aparm.throttle_min.get();
     int8_t max_throttle = aparm.throttle_max.get();
 
+#if AP_ICENGINE_ENABLED
     // apply idle governor
     g2.ice_control.update_idle_governor(min_throttle);
-    
+#endif
+
     if (min_throttle < 0 && !allow_reverse_thrust()) {
         // reverse thrust is available but inhibited.
         min_throttle = 0;
@@ -886,6 +890,10 @@ void Plane::set_servos(void)
     // slew rate limit throttle
     throttle_slew_limit(SRV_Channel::k_throttle);
 
+#if AP_ICENGINE_ENABLED
+    const float base_throttle = SRV_Channels::get_output_scaled(SRV_Channel::k_throttle);
+#endif
+
     if (!arming.is_armed()) {
         //Some ESCs get noisy (beep error msgs) if PWM == 0.
         //This little segment aims to avoid this.
@@ -911,11 +919,16 @@ void Plane::set_servos(void)
         }
     }
 
-    uint8_t override_pct;
-    if (g2.ice_control.throttle_override(override_pct)) {
-        // the ICE controller wants to override the throttle for starting
+#if AP_ICENGINE_ENABLED
+    float override_pct = SRV_Channels::get_output_scaled(SRV_Channel::k_throttle);
+    if (g2.ice_control.throttle_override(override_pct, base_throttle)) {
+        // the ICE controller wants to override the throttle for starting, idle, or redline
         SRV_Channels::set_output_scaled(SRV_Channel::k_throttle, override_pct);
+#if HAL_QUADPLANE_ENABLED
+        quadplane.vel_forward.integrator = 0;
+#endif
     }
+#endif  // AP_ICENGINE_ENABLED
 
     // run output mixer and send values to the hal for output
     servos_output();

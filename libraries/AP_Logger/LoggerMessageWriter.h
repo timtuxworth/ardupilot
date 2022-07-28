@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AP_Logger_Backend.h"
+#include <AP_Rally/AP_Rally.h>
 
 class LoggerMessageWriter {
 public:
@@ -139,6 +140,7 @@ private:
 
     AP_Param::ParamToken token;
     AP_Param *ap;
+    float param_default;
     enum ap_var_type type;
 
 

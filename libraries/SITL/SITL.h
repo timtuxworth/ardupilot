@@ -96,10 +96,6 @@ class SIM {
 public:
 
     SIM() {
-        // set a default compass offset
-        for (uint8_t i = 0; i < HAL_COMPASS_MAX_SENSORS; i++) {
-            mag_ofs[i].set(Vector3f(5, 13, -18));
-        }
         AP_Param::setup_object_defaults(this, var_info);
         AP_Param::setup_object_defaults(this, var_info2);
         AP_Param::setup_object_defaults(this, var_info3);
@@ -116,6 +112,10 @@ public:
         }
         for (uint8_t i=0; i<AIRSPEED_MAX_SENSORS; i++) {
             AP_Param::setup_object_defaults(&airspeed[i], airspeed[i].var_info);
+        }
+        // set compass offset
+        for (uint8_t i = 0; i < HAL_COMPASS_MAX_SENSORS; i++) {
+            mag_ofs[i].set(Vector3f(5, 13, -18));
         }
         if (_singleton != nullptr) {
             AP_HAL::panic("Too many SITL instances");
@@ -330,6 +330,10 @@ public:
     AP_Float vibe_motor;
     // amplitude scaling of motor noise relative to gyro/accel noise
     AP_Float vibe_motor_scale;
+
+    // what harmonics to generate
+    AP_Int16 vibe_motor_harmonics;
+
     // minimum throttle for addition of ins noise
     AP_Float ins_noise_throttle_min;
 

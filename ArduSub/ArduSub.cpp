@@ -84,9 +84,6 @@ const AP_Scheduler::Task Sub::scheduler_tasks[] = {
     SCHED_TASK(one_hz_loop,            1,    100,  33),
     SCHED_TASK_CLASS(GCS,                 (GCS*)&sub._gcs,   update_receive,     400, 180,  36),
     SCHED_TASK_CLASS(GCS,                 (GCS*)&sub._gcs,   update_send,        400, 550,  39),
-#if AC_FENCE == ENABLED
-    SCHED_TASK_CLASS(AC_Fence,            &sub.fence,        update,              10, 100,  42),
-#endif
 #if HAL_MOUNT_ENABLED
     SCHED_TASK_CLASS(AP_Mount,            &sub.camera_mount, update,              50,  75,  45),
 #endif
@@ -247,10 +244,10 @@ void Sub::three_hz_loop()
     // check if we've lost terrain data
     failsafe_terrain_check();
 
-#if AC_FENCE == ENABLED
+#if AP_FENCE_ENABLED
     // check if we have breached a fence
     fence_check();
-#endif // AC_FENCE_ENABLED
+#endif // AP_FENCE_ENABLED
 
     ServoRelayEvents.update_events();
 }
@@ -269,17 +266,11 @@ void Sub::one_hz_loop()
     }
 
     if (!motors.armed()) {
-        // make it possible to change ahrs orientation at runtime during initial config
-        ahrs.update_orientation();
-
         motors.update_throttle_range();
     }
 
     // update assigned functions and enable auxiliary servos
     SRV_Channels::enable_aux_servos();
-
-    // update position controller alt limits
-    update_poscon_alt_max();
 
     // log terrain data
     terrain_logging();

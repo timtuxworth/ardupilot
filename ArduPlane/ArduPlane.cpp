@@ -78,11 +78,10 @@ const AP_Scheduler::Task Plane::scheduler_tasks[] = {
     SCHED_TASK_CLASS(AP_BattMonitor, &plane.battery, read,   10, 300,  66),
     SCHED_TASK_CLASS(AP_Baro, &plane.barometer, accumulate,  50, 150,  69),
     SCHED_TASK_CLASS(AP_Notify,      &plane.notify,  update, 50, 300,  72),
-#if AC_FENCE == ENABLED
-    SCHED_TASK_CLASS(AC_Fence,       &plane.fence,   update, 10, 100, 75),
-#endif
     SCHED_TASK(read_rangefinder,       50,    100, 78),
+#if AP_ICENGINE_ENABLED
     SCHED_TASK_CLASS(AP_ICEngine,      &plane.g2.ice_control, update,     10, 100,  81),
+#endif
     SCHED_TASK_CLASS(Compass,          &plane.compass,        cal_update, 50,  50,  84),
 #if AP_OPTICALFLOW_ENABLED
     SCHED_TASK_CLASS(OpticalFlow, &plane.optflow, update,    50,    50,  87),
@@ -273,7 +272,7 @@ void Plane::update_logging2(void)
 void Plane::afs_fs_check(void)
 {
     // perform AFS failsafe checks
-#if AC_FENCE == ENABLED
+#if AP_FENCE_ENABLED
     const bool fence_breached = fence.get_breaches() != 0;
 #else
     const bool fence_breached = false;
@@ -296,8 +295,6 @@ void Plane::one_second_loop()
     iomcu.setup_mixing(&rcmap, g.override_channel.get(), g.mixing_gain, g2.manual_rc_mask);
 #endif
 
-    // make it possible to change orientation at runtime
-    ahrs.update_orientation();
 #if HAL_ADSB_ENABLED
     adsb.set_stall_speed_cm(aparm.airspeed_min * 100); // convert m/s to cm/s
     adsb.set_max_speed(aparm.airspeed_max);
@@ -336,11 +333,18 @@ void Plane::one_second_loop()
             // reset the landing altitude correction
             landing.alt_offset = 0;
     }
+
+    // this ensures G_Dt is correct, catching startup issues with constructors
+    // calling the scheduler methods
+    if (!is_equal(1.0f/scheduler.get_loop_rate_hz(), scheduler.get_loop_period_s()) ||
+        !is_equal(G_Dt, scheduler.get_loop_period_s())) {
+        INTERNAL_ERROR(AP_InternalError::error_t::flow_of_control);
+    }
 }
 
 void Plane::three_hz_loop()
 {
-#if AC_FENCE == ENABLED
+#if AP_FENCE_ENABLED
     fence_check();
 #endif
 }

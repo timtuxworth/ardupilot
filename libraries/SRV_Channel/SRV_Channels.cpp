@@ -30,7 +30,6 @@
   #if APM_BUILD_COPTER_OR_HELI || APM_BUILD_TYPE(APM_BUILD_ArduPlane) || APM_BUILD_TYPE(APM_BUILD_ArduSub)
     #include <AP_KDECAN/AP_KDECAN.h>
   #endif
-  #include <AP_ToshibaCAN/AP_ToshibaCAN.h>
   #include <AP_PiccoloCAN/AP_PiccoloCAN.h>
 #endif
 
@@ -231,7 +230,7 @@ const AP_Param::GroupInfo SRV_Channels::var_info[] = {
     // @Param: _DSHOT_ESC
     // @DisplayName: Servo DShot ESC type
     // @Description: This sets the DShot ESC type for all outputs. The ESC type affects the range of DShot commands available. None means that no dshot commands will be executed.
-    // @Values: 0:None,1:BLHeli32/BLHeli_S/Kiss
+    // @Values: 0:None,1:BLHeli32/Kiss,2:BLHeli_S
     // @User: Advanced
     AP_GROUPINFO("_DSHOT_ESC",  24, SRV_Channels, dshot_esc_type, 0),
 
@@ -554,14 +553,6 @@ void SRV_Channels::push()
                 }
                 ap_kdecan->update();
 #endif
-                break;
-            }
-            case AP_CANManager::Driver_Type_ToshibaCAN: {
-                AP_ToshibaCAN *ap_tcan = AP_ToshibaCAN::get_tcan(i);
-                if (ap_tcan == nullptr) {
-                    continue;
-                }
-                ap_tcan->update();
                 break;
             }
 #if HAL_PICCOLO_CAN_ENABLE

@@ -23,6 +23,7 @@
 #include <AP_MSP/msp.h>
 #include <AP_ExternalAHRS/AP_ExternalAHRS.h>
 #include <SITL/SIM_GPS.h>
+#include <GCS_MAVLink/GCS_MAVLink.h>
 
 /**
    maximum number of GPS instances available on this platform. If more
@@ -588,6 +589,19 @@ protected:
 
     uint32_t _log_gps_bit = -1;
 
+    enum DriverOptions : int16_t {
+        UBX_MBUseUart2    = (1U << 0U),
+        SBF_UseBaseForYaw = (1U << 1U),
+        UBX_Use115200     = (1U << 2U),
+        UAVCAN_MBUseDedicatedBus  = (1 << 3U),
+        HeightEllipsoid   = (1U << 4),
+    };
+
+    // check if an option is set
+    bool option_set(const DriverOptions option) const {
+        return (uint8_t(_driver_options.get()) & uint8_t(option)) != 0;
+    }
+
 private:
     static AP_GPS *_singleton;
     HAL_Semaphore rsem;
@@ -652,6 +666,10 @@ private:
     static const char _initialisation_raw_blob[];
 
     void detect_instance(uint8_t instance);
+    // run detection step for one GPS instance. If this finds a GPS then it
+    // will return it - otherwise nullptr
+    AP_GPS_Backend *_detect_instance(uint8_t instance);
+
     void update_instance(uint8_t instance);
 
     /*

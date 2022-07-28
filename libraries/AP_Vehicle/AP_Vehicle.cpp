@@ -9,6 +9,7 @@
 #include <AP_OSD/AP_OSD.h>
 #include <AP_RPM/AP_RPM.h>
 #include <SRV_Channel/SRV_Channel.h>
+#include <AP_Motors/AP_Motors.h>
 #if CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS
 #include <AP_HAL_ChibiOS/sdcard.h>
 #endif
@@ -79,6 +80,24 @@ const AP_Param::GroupInfo AP_Vehicle::var_info[] = {
     // @Group: CUST_ROT
     // @Path: ../AP_CustomRotations/AP_CustomRotations.cpp
     AP_SUBGROUPINFO(custom_rotations, "CUST_ROT", 11, AP_Vehicle, AP_CustomRotations),
+
+#if HAL_WITH_ESC_TELEM
+    // @Group: ESC_TLM
+    // @Path: ../AP_ESC_Telem/AP_ESC_Telem.cpp
+    AP_SUBGROUPINFO(esc_telem, "ESC_TLM", 12, AP_Vehicle, AP_ESC_Telem),
+#endif
+
+#if AP_AIS_ENABLED
+    // @Group: AIS_
+    // @Path: ../AP_AIS/AP_AIS.cpp
+    AP_SUBGROUPINFO(ais, "AIS_",  13, AP_Vehicle, AP_AIS),
+#endif
+
+#if AP_FENCE_ENABLED
+    // @Group: FENCE_
+    // @Path: ../AC_Fence/AC_Fence.cpp
+    AP_SUBGROUPINFO(fence, "FENCE_", 14, AP_Vehicle, AC_Fence),
+#endif
 
     AP_GROUPEND
 };
@@ -196,6 +215,10 @@ void AP_Vehicle::setup()
     smartaudio.init();
 #endif
 
+#if AP_TRAMP_ENABLED
+    tramp.init();
+#endif
+
 #if AP_PARAM_KEY_DUMP
     AP_Param::show_all(hal.console, true);
 #endif
@@ -209,6 +232,14 @@ void AP_Vehicle::setup()
 // init EFI monitoring
 #if HAL_EFI_ENABLED
     efi.init();
+#endif
+
+#if AP_AIS_ENABLED
+    ais.init();
+#endif
+
+#if AP_FENCE_ENABLED
+    fence.init();
 #endif
 
     custom_rotations.init();
@@ -288,6 +319,9 @@ const AP_Scheduler::Task AP_Vehicle::scheduler_tasks[] = {
 #endif
     SCHED_TASK(update_dynamic_notch_at_specified_rate,      LOOP_RATE,                    200, 215),
     SCHED_TASK_CLASS(AP_VideoTX,   &vehicle.vtx,            update,                    2, 100, 220),
+#if AP_TRAMP_ENABLED
+    SCHED_TASK_CLASS(AP_Tramp,     &vehicle.tramp,          update,                   50,  50, 225),
+#endif
     SCHED_TASK(send_watchdog_reset_statustext,         0.1,     20, 225),
 #if HAL_WITH_ESC_TELEM
     SCHED_TASK_CLASS(AP_ESC_Telem, &vehicle.esc_telem,      update,                  100,  50, 230),
@@ -300,6 +334,12 @@ const AP_Scheduler::Task AP_Vehicle::scheduler_tasks[] = {
 #endif
 #if HAL_INS_ACCELCAL_ENABLED
     SCHED_TASK(accel_cal_update,      10,    100, 245),
+#endif
+#if AP_FENCE_ENABLED
+    SCHED_TASK_CLASS(AC_Fence,     &vehicle.fence,          update,                   10, 100, 248),
+#endif
+#if AP_AIS_ENABLED
+    SCHED_TASK_CLASS(AP_AIS,       &vehicle.ais,            update,                    5, 100, 249),
 #endif
 #if HAL_EFI_ENABLED
     SCHED_TASK_CLASS(AP_EFI,       &vehicle.efi,            update,                   10, 200, 250),
@@ -390,6 +430,27 @@ bool AP_Vehicle::is_crashed() const
     return AP::arming().last_disarm_method() == AP_Arming::Method::CRASH;
 }
 
+// update the harmonic notch filter for throttle based notch
+void AP_Vehicle::update_throttle_notch(AP_InertialSensor::HarmonicNotch &notch)
+{
+#if APM_BUILD_TYPE(APM_BUILD_ArduPlane)||APM_BUILD_COPTER_OR_HELI
+    const float ref_freq = notch.params.center_freq_hz();
+    const float ref = notch.params.reference();
+    const float min_ratio = notch.params.freq_min_ratio();
+
+    const AP_Motors* motors = AP::motors();
+    if (motors->get_spool_state() == AP_Motors::SpoolState::SHUT_DOWN) {
+        notch.set_inactive(true);
+    } else {
+        notch.set_inactive(false);
+    }
+    const float motors_throttle = motors != nullptr ? MAX(0,motors->get_throttle_out()) : 0;
+    float throttle_freq = ref_freq * MAX(min_ratio, sqrtf(motors_throttle / ref));
+
+    notch.update_freq_hz(throttle_freq);
+#endif
+}
+
 // update the harmonic notch filter center frequency dynamically
 void AP_Vehicle::update_dynamic_notch(AP_InertialSensor::HarmonicNotch &notch)
 {
@@ -404,14 +465,10 @@ void AP_Vehicle::update_dynamic_notch(AP_InertialSensor::HarmonicNotch &notch)
         return;
     }
 
-    const AP_Motors* motors = AP::motors();
-    const float motors_throttle = motors != nullptr ? MAX(0,motors->get_throttle_out()) : 0;
-    const float throttle_freq = ref_freq * MAX(1.0f, sqrtf(motors_throttle / ref));
-
     switch (notch.params.tracking_mode()) {
         case HarmonicNotchDynamicMode::UpdateThrottle: // throttle based tracking
             // set the harmonic notch filter frequency approximately scaled on motor rpm implied by throttle
-            notch.update_freq_hz(throttle_freq);
+            update_throttle_notch(notch);
             break;
 
         case HarmonicNotchDynamicMode::UpdateRPM: // rpm sensor based tracking
@@ -440,7 +497,7 @@ void AP_Vehicle::update_dynamic_notch(AP_InertialSensor::HarmonicNotch &notch)
                 if (num_notches > 0) {
                     notch.update_frequencies_hz(num_notches, notches);
                 } else {    // throttle fallback
-                    notch.update_freq_hz(throttle_freq);
+                    update_throttle_notch(notch);
                 }
             } else {
                 notch.update_freq_hz(MAX(ref_freq, AP::esc_telem().get_average_motor_frequency_hz() * ref));

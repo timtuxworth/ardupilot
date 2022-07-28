@@ -46,7 +46,7 @@
 #include <AP_AHRS/AP_AHRS.h>
 #include <AP_Mission/AP_Mission.h>         // Mission command library
 #include <AC_AttitudeControl/AC_AttitudeControl_Sub.h> // Attitude control library
-#include <AC_AttitudeControl/AC_PosControl_Sub.h>      // Position control library
+#include <AC_AttitudeControl/AC_PosControl.h>      // Position control library
 #include <AP_Motors/AP_Motors.h>          // AP Motors library
 #include <Filter/Filter.h>             // Filter library
 #include <AP_Relay/AP_Relay.h>           // APM relay
@@ -56,7 +56,6 @@
 #include <AC_WPNav/AC_WPNav.h>           // Waypoint navigation library
 #include <AC_WPNav/AC_Loiter.h>
 #include <AC_WPNav/AC_Circle.h>          // circle navigation library
-#include <AC_Fence/AC_Fence.h>           // Fence library
 #include <AP_Scheduler/AP_Scheduler.h>       // main loop scheduler
 #include <AP_Scheduler/PerfInfo.h>       // loop perf monitoring
 #include <AP_BattMonitor/AP_BattMonitor.h>     // Battery monitor library
@@ -328,7 +327,7 @@ private:
     // To-Do: move inertial nav up or other navigation variables down here
     AC_AttitudeControl_Sub attitude_control;
 
-    AC_PosControl_Sub pos_control;
+    AC_PosControl pos_control;
 
     AC_WPNav wp_nav;
     AC_Loiter loiter_nav;
@@ -342,11 +341,6 @@ private:
     // Camera/Antenna mount tracking and stabilisation stuff
 #if HAL_MOUNT_ENABLED
     AP_Mount camera_mount;
-#endif
-
-    // AC_Fence library to reduce fly-aways
-#if AC_FENCE == ENABLED
-    AC_Fence fence;
 #endif
 
 #if AVOIDANCE_ENABLED == ENABLED
@@ -401,7 +395,6 @@ private:
     float get_look_ahead_yaw();
     float get_pilot_desired_climb_rate(float throttle_control);
     float get_surface_tracking_climb_rate(int16_t target_rate, float current_alt_target, float dt);
-    void update_poscon_alt_max();
     void rotate_body_frame_to_NE(float &x, float &y);
     void Log_Write_Control_Tuning();
     void Log_Write_Attitude();

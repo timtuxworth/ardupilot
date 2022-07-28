@@ -207,6 +207,10 @@ bool Copter::set_mode(Mode::Number mode, ModeReason reason)
     // return immediately if we are already in the desired mode
     if (mode == flightmode->mode_number()) {
         control_mode_reason = reason;
+        // set yaw rate time constant during autopilot startup
+        if (reason == ModeReason::INITIALISED && mode == Mode::Number::STABILIZE) {
+            attitude_control->set_yaw_rate_tc(g2.command_model_pilot.get_rate_tc());
+        }
         // make happy noise
         if (copter.ap.initialised && (reason != last_reason)) {
             AP_Notify::events.user_mode_change = 1;
@@ -308,7 +312,7 @@ bool Copter::set_mode(Mode::Number mode, ModeReason reason)
     adsb.set_is_auto_mode((mode == Mode::Number::AUTO) || (mode == Mode::Number::RTL) || (mode == Mode::Number::GUIDED));
 #endif
 
-#if AC_FENCE == ENABLED
+#if AP_FENCE_ENABLED
     // pilot requested flight mode change during a fence breach indicates pilot is attempting to manually recover
     // this flight mode change could be automatic (i.e. fence, battery, GPS or GCS failsafe)
     // but it should be harmless to disable the fence temporarily in these situations as well
@@ -317,6 +321,17 @@ bool Copter::set_mode(Mode::Number mode, ModeReason reason)
 
 #if CAMERA == ENABLED
     camera.set_is_auto_mode(flightmode->mode_number() == Mode::Number::AUTO);
+#endif
+
+    // set rate shaping time constants
+#if MODE_ACRO_ENABLED == ENABLED || MODE_SPORT_ENABLED == ENABLED
+    attitude_control->set_roll_pitch_rate_tc(g2.command_model_acro_rp.get_rate_tc());
+#endif
+    attitude_control->set_yaw_rate_tc(g2.command_model_pilot.get_rate_tc());
+#if MODE_ACRO_ENABLED == ENABLED || MODE_DRIFT_ENABLED == ENABLED
+    if (mode== Mode::Number::ACRO || mode== Mode::Number::DRIFT) {
+        attitude_control->set_yaw_rate_tc(g2.command_model_acro_y.get_rate_tc());
+    }
 #endif
 
     // update notify object
@@ -405,33 +420,15 @@ void Mode::get_pilot_desired_lean_angles(float &roll_out_cd, float &pitch_out_cd
         pitch_out_cd = 0.0;
         return;
     }
-    // fetch roll and pitch stick positions
-    float thrust_angle_x_cd = - channel_pitch->get_control_in();
-    float thrust_angle_y_cd = channel_roll->get_control_in();
 
-    // limit max lean angle
-    angle_limit_cd = constrain_float(angle_limit_cd, 1000.0f, angle_max_cd);
+    //transform pilot's normalised roll or pitch stick input into a roll and pitch euler angle command
+    float roll_out_deg;
+    float pitch_out_deg;
+    rc_input_to_roll_pitch(channel_roll->get_control_in()*(1.0/ROLL_PITCH_YAW_INPUT_MAX), channel_pitch->get_control_in()*(1.0/ROLL_PITCH_YAW_INPUT_MAX), angle_max_cd * 0.01,  angle_limit_cd * 0.01, roll_out_deg, pitch_out_deg);
 
-    // scale roll and pitch inputs to +- angle_max
-    float scaler = angle_max_cd/(float)ROLL_PITCH_YAW_INPUT_MAX;
-    thrust_angle_x_cd *= scaler;
-    thrust_angle_y_cd *= scaler;
-
-    // convert square mapping to circular mapping with maximum magnitude of angle_limit
-    float total_in = norm(thrust_angle_x_cd, thrust_angle_y_cd);
-    if (total_in > angle_limit_cd) {
-        float ratio = angle_limit_cd / total_in;
-        thrust_angle_x_cd *= ratio;
-        thrust_angle_y_cd *= ratio;
-    }
-
-    // thrust_angle_x and thrust_angle_y represents a level body frame thrust vector in the
-    // direction of [thrust_angle_x, thrust_angle_y] and a magnitude
-    // tan(mag([thrust_angle_x, thrust_angle_y])) * 9.81 * aircraft mass.
-
-    // Conversion from angular thrust vector to euler angles.
-    roll_out_cd = (18000/M_PI) * atanf(cosf(thrust_angle_x_cd*(M_PI/18000))*tanf(thrust_angle_y_cd*(M_PI/18000)));
-    pitch_out_cd = - thrust_angle_x_cd;
+    // Convert to centi-degrees
+    roll_out_cd = roll_out_deg * 100.0;
+    pitch_out_cd = pitch_out_deg * 100.0;
 }
 
 // transform pilot's roll or pitch input into a desired velocity
@@ -775,7 +772,7 @@ void Mode::precland_retry_position(const Vector3f &retry_pos)
         }
 
         // allow user to take control during repositioning. Note: copied from land_run_horizontal_control()
-        // To-Do: this code exists at several different places in slightly diffrent forms and that should be fixed
+        // To-Do: this code exists at several different places in slightly different forms and that should be fixed
         if (g.land_repositioning) {
             float target_roll = 0.0f;
             float target_pitch = 0.0f;
@@ -799,7 +796,7 @@ void Mode::precland_retry_position(const Vector3f &retry_pos)
     }
 
     Vector3p retry_pos_NEU{retry_pos.x, retry_pos.y, retry_pos.z * -1.0f};
-    //pos contoller expects input in NEU cm's
+    // pos controller expects input in NEU cm's
     retry_pos_NEU = retry_pos_NEU * 100.0f;
     pos_control->input_pos_xyz(retry_pos_NEU, 0.0f, 1000.0f);
 
@@ -980,7 +977,7 @@ float Mode::get_pilot_desired_yaw_rate(float yaw_in)
     }
 
     // convert pilot input to the desired yaw rate
-    return g2.pilot_y_rate * 100.0 * input_expo(yaw_in, g2.pilot_y_expo);
+    return g2.command_model_pilot.get_rate() * 100.0 * input_expo(yaw_in, g2.command_model_pilot.get_expo());
 }
 
 // pass-through functions to reduce code churn on conversion;

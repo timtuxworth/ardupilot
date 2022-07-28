@@ -229,7 +229,26 @@ public:
         float arg1;
         float arg2;
     };
-    
+
+    // Scripting NAV command (with verify)
+    struct PACKED nav_attitude_time_Command {
+        uint16_t time_sec;
+        int16_t roll_deg;
+        int8_t pitch_deg;
+        int16_t yaw_deg;
+        float climb_rate;
+    };
+
+    // MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW support
+    struct PACKED gimbal_manager_pitchyaw_Command {
+        int8_t pitch_angle_deg;
+        int16_t yaw_angle_deg;
+        int8_t pitch_rate_degs;
+        int8_t yaw_rate_degs;
+        uint8_t flags;
+        uint8_t gimbal_id;
+    };
+
     union Content {
         // jump structure
         Jump_Command jump;
@@ -302,7 +321,13 @@ public:
 
         // nav scripting
         nav_script_time_Command nav_script_time;
-        
+
+        // nav attitude time
+        nav_attitude_time_Command nav_attitude_time;
+
+        // MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW
+        gimbal_manager_pitchyaw_Command gimbal_manager_pitchyaw;
+
         // location
         Location location{};      // Waypoint location
     };
@@ -688,6 +713,9 @@ private:
     // check if command is a landing type command.  Asside the obvious, MAV_CMD_DO_PARACHUTE is considered a type of landing
     bool is_landing_type_cmd(uint16_t id) const;
 
+    // check if command is a takeoff type command.
+    bool is_takeoff_type_cmd(uint16_t id) const;
+
     // approximate the distance travelled to get to a landing.  DO_JUMP commands are observed in look forward.
     bool distance_to_landing(uint16_t index, float &tot_distance,Location current_loc);
 
@@ -748,7 +776,7 @@ private:
 
     bool start_command_do_sprayer(const AP_Mission::Mission_Command& cmd);
     bool start_command_do_scripting(const AP_Mission::Mission_Command& cmd);
-
+    bool start_command_do_gimbal_manager_pitchyaw(const AP_Mission::Mission_Command& cmd);
 };
 
 namespace AP

@@ -725,6 +725,9 @@ def get_ram_map():
         ram_map = get_mcu_config('RAM_MAP_EXTERNAL_FLASH', False)
         if ram_map is not None:
             return ram_map
+    elif int(env_vars.get('USE_ALT_RAM_MAP',0)) == 1:
+        print("Using ALT_RAM_MAP")
+        return get_mcu_config('ALT_RAM_MAP', True)
     return get_mcu_config('RAM_MAP', True)
 
 def get_flash_pages_sizes():
@@ -1106,7 +1109,9 @@ def write_mcu_config(f):
 #define HAL_NO_TIMER_THREAD
 #define HAL_NO_RCOUT_THREAD
 #define HAL_NO_RCIN_THREAD
-#define HAL_NO_SHARED_DMA FALSE
+#ifndef AP_HAL_SHARED_DMA_ENABLED
+#define AP_HAL_SHARED_DMA_ENABLED 0
+#endif
 #define HAL_NO_ROMFS_SUPPORT TRUE
 #define CH_CFG_USE_TM FALSE
 #define CH_CFG_USE_REGISTRY FALSE
@@ -1433,8 +1438,10 @@ def parse_i2c_device(dev):
 
 def seen_str(dev):
     '''return string representation of device for checking for duplicates'''
-    return str(dev[:2])
-
+    ret = dev[:2]
+    if dev[-1].startswith("BOARD_MATCH("):
+        ret.append(dev[-1])
+    return str(ret)
 
 def write_IMU_config(f):
     '''write IMU config defines'''
@@ -1454,9 +1461,14 @@ def write_IMU_config(f):
                 (wrapper, dev[i]) = parse_i2c_device(dev[i])
         n = len(devlist)+1
         devlist.append('HAL_INS_PROBE%u' % n)
-        f.write(
-            '#define HAL_INS_PROBE%u %s ADD_BACKEND(AP_InertialSensor_%s::probe(*this,%s))\n'
-            % (n, wrapper, driver, ','.join(dev[1:])))
+        if dev[-1].startswith("BOARD_MATCH("):
+            f.write(
+                '#define HAL_INS_PROBE%u %s ADD_BACKEND_BOARD_MATCH(%s, AP_InertialSensor_%s::probe(*this,%s))\n'
+                % (n, wrapper, dev[-1], driver, ','.join(dev[1:-1])))
+        else:
+            f.write(
+                '#define HAL_INS_PROBE%u %s ADD_BACKEND(AP_InertialSensor_%s::probe(*this,%s))\n'
+                % (n, wrapper, driver, ','.join(dev[1:])))
     if len(devlist) > 0:
         if len(devlist) < 3:
             f.write('#define INS_MAX_INSTANCES %u\n' % len(devlist))
@@ -2782,6 +2794,10 @@ def add_apperiph_defaults(f):
 #define AP_ROBOTISSERVO_ENABLED 0
 #endif
 
+#ifndef AP_STATS_ENABLED
+#define AP_STATS_ENABLED 0
+#endif
+
 /*
  * GPS Backends - we selectively turn backends on.
  *   Note also that f103-GPS explicitly disables some of these backends.
@@ -2834,6 +2850,11 @@ def add_apperiph_defaults(f):
 #ifndef AP_AIRSPEED_ANALOG_ENABLED
 #define AP_AIRSPEED_ANALOG_ENABLED 0
 #endif
+
+// disable various rangefinder backends
+#define AP_RANGEFINDER_ANALOG_ENABLED 0
+#define AP_RANGEFINDER_HC_SR04_ENABLED 0
+#define AP_RANGEFINDER_PWM_ENABLED 0
 
 ''')
 

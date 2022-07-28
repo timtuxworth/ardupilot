@@ -38,7 +38,9 @@ void GCS::get_sensor_status_flags(uint32_t &present,
 
 MissionItemProtocol_Waypoints *GCS::_missionitemprotocol_waypoints;
 MissionItemProtocol_Rally *GCS::_missionitemprotocol_rally;
+#if AP_FENCE_ENABLED
 MissionItemProtocol_Fence *GCS::_missionitemprotocol_fence;
+#endif
 
 const MAV_MISSION_TYPE GCS_MAVLINK::supported_mission_types[] = {
     MAV_MISSION_TYPE_MISSION,
@@ -267,7 +269,7 @@ void GCS::update_sensor_status_flags()
     }
 #endif
 
-#if !defined(HAL_BUILD_AP_PERIPH)
+#if !defined(HAL_BUILD_AP_PERIPH) && AP_FENCE_ENABLED
     const AC_Fence *fence = AP::fence();
     if (fence != nullptr) {
         if (fence->sys_status_enabled()) {
@@ -348,7 +350,7 @@ bool GCS::out_of_time() const
     return true;
 }
 
-void gcs_out_of_space_to_send_count(mavlink_channel_t chan)
+void gcs_out_of_space_to_send(mavlink_channel_t chan)
 {
     gcs().chan(chan)->out_of_space_to_send();
 }

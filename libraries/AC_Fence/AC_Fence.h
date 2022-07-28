@@ -1,5 +1,9 @@
 #pragma once
 
+#include "AC_Fence_config.h"
+
+#if AP_FENCE_ENABLED
+
 #include <inttypes.h>
 #include <AP_Common/AP_Common.h>
 #include <AP_Param/AP_Param.h>
@@ -224,3 +228,5 @@ private:
 namespace AP {
     AC_Fence *fence();
 };
+
+#endif // AP_FENCE_ENABLED
