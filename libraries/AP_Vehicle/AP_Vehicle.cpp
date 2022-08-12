@@ -99,6 +99,11 @@ const AP_Param::GroupInfo AP_Vehicle::var_info[] = {
     AP_SUBGROUPINFO(fence, "FENCE_", 14, AP_Vehicle, AC_Fence),
 #endif
 
+#if AP_OPENDRONEID_ENABLED
+    // @Group: DID_
+    // @Path: ../AP_OpenDroneID/AP_OpenDroneID.cpp
+    AP_SUBGROUPINFO(opendroneid, "DID_", 15, AP_Vehicle, AP_OpenDroneID),
+#endif
     AP_GROUPEND
 };
 
@@ -229,6 +234,10 @@ void AP_Vehicle::setup()
     generator.init();
 #endif
 
+#if AP_OPENDRONEID_ENABLED
+    opendroneid.init();
+#endif
+
 // init EFI monitoring
 #if HAL_EFI_ENABLED
     efi.init();
@@ -328,6 +337,9 @@ const AP_Scheduler::Task AP_Vehicle::scheduler_tasks[] = {
 #endif
 #if HAL_GENERATOR_ENABLED
     SCHED_TASK_CLASS(AP_Generator, &vehicle.generator,      update,                   10,  50, 235),
+#endif
+#if AP_OPENDRONEID_ENABLED
+    SCHED_TASK_CLASS(AP_OpenDroneID, &vehicle.opendroneid,  update,                   10,  50, 236),
 #endif
 #if OSD_ENABLED
     SCHED_TASK(publish_osd_info, 1, 10, 240),
@@ -490,12 +502,14 @@ void AP_Vehicle::update_dynamic_notch(AP_InertialSensor::HarmonicNotch &notch)
             if (notch.params.hasOption(HarmonicNotchFilterParams::Options::DynamicHarmonic)) {
                 float notches[INS_MAX_NOTCHES];
                 const uint8_t num_notches = AP::esc_telem().get_motor_frequencies_hz(notch.num_dynamic_notches, notches);
-
-                for (uint8_t i = 0; i < num_notches; i++) {
-                    notches[i] =  MAX(ref_freq, notches[i]);
+                // ESC telemetry will return 0 for missing data, but only after 1s
+                for (uint8_t i = 0; i < notch.num_dynamic_notches; i++) {
+                    if (!is_zero(notches[i])) {
+                        notches[i] =  MAX(ref_freq, notches[i]);
+                    }
                 }
                 if (num_notches > 0) {
-                    notch.update_frequencies_hz(num_notches, notches);
+                    notch.update_frequencies_hz(notch.num_dynamic_notches, notches);
                 } else {    // throttle fallback
                     update_throttle_notch(notch);
                 }

@@ -487,7 +487,9 @@ class AutoTestCopter(AutoTest):
 
             self.change_mode('LOITER')
 
-            self.wait_ready_to_arm()
+            mavproxy = self.start_mavproxy()
+            self.wait_ready_to_arm(timeout=120*60)  # terrain takes time
+            self.stop_mavproxy(mavproxy)
 
             self.arm_vehicle()
 
@@ -899,10 +901,10 @@ class AutoTestCopter(AutoTest):
         self.setGCSfailsafe(0)
         self.set_parameter('FS_OPTIONS', 0)
         self.progress("All GCS failsafe tests complete")
-        self.reboot_sitl()
 
     # Tests all actions and logic behind the battery failsafe
     def fly_battery_failsafe(self, timeout=300):
+        self.context_push()
         ex = None
         try:
             self.test_battery_failsafe(timeout=timeout)
@@ -910,14 +912,7 @@ class AutoTestCopter(AutoTest):
             self.print_exception_caught(e)
             self.disarm_vehicle(force=True)
             ex = e
-
-        self.set_parameters({
-            'BATT_LOW_VOLT': 0,
-            'BATT_CRT_VOLT': 0,
-            'BATT_FS_LOW_ACT': 0,
-            'BATT_FS_CRT_ACT': 0,
-            'FS_OPTIONS': 0,
-        })
+        self.context_pop()
         self.reboot_sitl()
 
         if ex is not None:
@@ -4387,7 +4382,7 @@ class AutoTestCopter(AutoTest):
         if ex is not None:
             raise ex
 
-    def fly_guided_change_submode(self):
+    def GuidedSubModeChange(self):
         """"Ensure we can move around in guided after a takeoff command."""
 
         '''start by disabling GCS failsafe, otherwise we immediately disarm
@@ -4415,6 +4410,16 @@ class AutoTestCopter(AutoTest):
         self.start_subtest("move the vehicle using MAVLINK_MSG_ID_SET_POSITION_TARGET_LOCAL_NED")
         self.fly_guided_stop(groundspeed_tolerance=0.1)
         self.fly_guided_move_local(5, 5, 10)
+
+        self.start_subtest("Checking that WP_YAW_BEHAVIOUR 0 works")
+        orig_heading = self.get_heading()
+        self.set_parameter('WP_YAW_BEHAVIOR', 0)
+        self.fly_guided_move_local(5, 0, 10)
+        # ensure our heading hasn't changed:
+        self.assert_heading(orig_heading)
+        self.fly_guided_move_local(0, 5, 10)
+        # ensure our heading hasn't changed:
+        self.assert_heading(orig_heading)
 
         self.start_subtest("Check target position received by vehicle using SET_MESSAGE_INTERVAL")
         self.test_guided_local_position_target(5, 5, 10)
@@ -6137,7 +6142,7 @@ class AutoTestCopter(AutoTest):
         last_send = 0
         while True:
             now = self.get_sim_time_cached()
-            if now - tstart > 10:
+            if now - tstart > 100:
                 raise NotAchievedException("Did not get correct angle back")
 
             if now - last_send > 0.1:
@@ -6986,7 +6991,13 @@ class AutoTestCopter(AutoTest):
     def fly_rangefinder_mavlink_distance_sensor(self):
         self.start_subtest("Test mavlink rangefinder using DISTANCE_SENSOR messages")
         self.context_push()
-        self.set_parameter('RTL_ALT_TYPE', 0)
+        self.set_parameters({
+            "RTL_ALT_TYPE": 0,
+            "LGR_ENABLE": 1,
+            "LGR_DEPLOY_ALT": 1,
+            "LGR_RETRACT_ALT": 10, # metres
+            "SERVO10_FUNCTION": 29
+        })
         ex = None
         try:
             self.set_parameter("SERIAL5_PROTOCOL", 1)
@@ -7039,11 +7050,6 @@ class AutoTestCopter(AutoTest):
                     255  # covariance
                 )
             self.arm_vehicle()
-            self.set_parameters({
-                "SERVO10_FUNCTION": 29,
-                "LGR_DEPLOY_ALT": 1,
-                "LGR_RETRACT_ALT": 10,  # metres
-            })
             self.delay_sim_time(1)  # servo function maps only periodically updated
 #            self.send_debug_trap()
 
@@ -7290,6 +7296,7 @@ class AutoTestCopter(AutoTest):
             ("lanbao", 26),
             ("benewake_tf03", 27),
             ("gyus42v2", 31),
+            ("teraranger_serial", 35),
         ]
         while len(drivers):
             do_drivers = drivers[0:3]
@@ -8750,7 +8757,7 @@ class AutoTestCopter(AutoTest):
 
             ("GuidedSubModeChange",
              "Test submode change",
-             self.fly_guided_change_submode),
+             self.GuidedSubModeChange),
 
             ("MAV_CMD_CONDITION_YAW",
              "Test response to MAV_CMD_CONDITION_YAW",

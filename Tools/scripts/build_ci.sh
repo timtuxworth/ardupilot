@@ -69,13 +69,13 @@ function run_autotest() {
     if [ $c_compiler == "clang" ]; then
         w="$w --check-c-compiler=clang --check-cxx-compiler=clang++"
     fi
-    if [ $NAME == "Rover" ]; then
+    if [ "$NAME" == "Rover" ]; then
         w="$w --enable-math-check-indexes"
     fi
     if [ "x$CI_BUILD_DEBUG" != "x" ]; then
         w="$w --debug"
     fi
-    if [ $NAME == "Examples" ]; then
+    if [ "$NAME" == "Examples" ]; then
         w="$w --speedup=5 --timeout=14400 --debug --no-clean"
     fi
     Tools/autotest/autotest.py --show-test-timings --waf-configure-args="$w" "$BVEHICLE" "$RVEHICLE"
@@ -291,6 +291,15 @@ for t in $CI_BUILD_TARGET; do
         continue
     fi
 
+    if [ "$t" == "CubeOrange-ODID" ]; then
+        echo "Building CubeOrange-ODID"
+        $waf configure --board CubeOrange-ODID
+        $waf clean
+        $waf copter
+        $waf plane
+        continue
+    fi
+    
     if [ "$t" == "fmuv2-plane" ]; then
         echo "Building fmuv2 plane"
         $waf configure --board fmuv2

@@ -42,13 +42,17 @@ bool AP_Arming_Copter::run_pre_arm_checks(bool display_failure)
         return false;
     }
 
+    // always check motors
+    if (!motor_checks(display_failure)) {
+        return false;
+    }
+
     // if pre arm checks are disabled run only the mandatory checks
     if (checks_to_perform == 0) {
         return mandatory_checks(display_failure);
     }
 
     return parameter_checks(display_failure)
-        & motor_checks(display_failure)
         & oa_checks(display_failure)
         & gcs_failsafe_check(display_failure)
         & winch_checks(display_failure)
@@ -114,6 +118,17 @@ bool AP_Arming_Copter::board_voltage_checks(bool display_failure)
     }
 
     return true;
+}
+
+// expected to return true if the terrain database is required to have
+// all data loaded
+bool AP_Arming_Copter::terrain_database_required() const
+{
+    if (copter.wp_nav->get_terrain_source() == AC_WPNav::TerrainSource::TERRAIN_FROM_TERRAINDATABASE &&
+        copter.mode_rtl.get_alt_type() == ModeRTL::RTLAltType::RTL_ALTTYPE_TERRAIN) {
+        return true;
+    }
+    return AP_Arming::terrain_database_required();
 }
 
 bool AP_Arming_Copter::parameter_checks(bool display_failure)
@@ -224,22 +239,7 @@ bool AP_Arming_Copter::parameter_checks(bool display_failure)
                 }
                 break;
             case AC_WPNav::TerrainSource::TERRAIN_FROM_TERRAINDATABASE:
-#if AP_TERRAIN_AVAILABLE
-                if (!copter.terrain.enabled()) {
-                    check_failed(ARMING_CHECK_PARAMETERS, display_failure, failure_template, "terrain disabled");
-                    return false;
-                }
-                // check terrain data is loaded
-                uint16_t terr_pending, terr_loaded;
-                copter.terrain.get_statistics(terr_pending, terr_loaded);
-                if (terr_pending != 0) {
-                    check_failed(ARMING_CHECK_PARAMETERS, display_failure, failure_template, "waiting for terrain data");
-                    return false;
-                }
-#else
-                check_failed(ARMING_CHECK_PARAMETERS, display_failure, failure_template, "terrain disabled");
-                return false;
-#endif
+                // these checks are done in AP_Arming
                 break;
             }
         }
@@ -284,10 +284,6 @@ bool AP_Arming_Copter::motor_checks(bool display_failure)
         return false;
     }
 #endif
-    // further checks enabled with parameters
-    if (!check_enabled(ARMING_CHECK_PARAMETERS)) {
-        return true;
-    }
 
     return true;
 }
@@ -573,11 +569,6 @@ bool AP_Arming_Copter::arm_checks(AP_Arming::Method method)
     // always check if the current mode allows arming
     if (!copter.flightmode->allows_arming(method)) {
         check_failed(true, "Mode not armable");
-        return false;
-    }
-
-    // always check motors
-    if (!motor_checks(true)) {
         return false;
     }
 

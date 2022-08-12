@@ -1434,11 +1434,12 @@ class LocationInt(object):
 
 class Test(object):
     '''a test definition - information about a test'''
-    def __init__(self, name, description, function, attempts=1):
+    def __init__(self, name, description, function, attempts=1, speedup=None):
         self.name = name
         self.description = description
         self.function = function
         self.attempts = attempts
+        self.speedup = speedup
 
 
 class AutoTest(ABC):
@@ -3223,9 +3224,10 @@ class AutoTest(ABC):
     #################################################
     # SIM UTILITIES
     #################################################
-    def get_sim_time(self, timeout=60):
+    def get_sim_time(self, timeout=60, drain_mav=True):
         """Get SITL time in seconds."""
-        self.drain_mav()
+        if drain_mav:
+            self.drain_mav()
         tstart = time.time()
         while True:
             self.drain_all_pexpects()
@@ -4428,6 +4430,22 @@ class AutoTest(ABC):
             0,
             0)
 
+    def send_mavlink_run_prearms_command(self):
+        target_sysid = 1
+        target_compid = 1
+        self.mav.mav.command_long_send(
+            target_sysid,
+            target_compid,
+            mavutil.mavlink.MAV_CMD_RUN_PREARM_CHECKS,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0)
+
     def analog_rangefinder_parameters(self):
         return {
             "RNGFND1_TYPE": 1,
@@ -5573,6 +5591,13 @@ class AutoTest(ABC):
             if m.heading == int(heading):
                 return
 
+    def assert_heading(self, heading, accuracy=1):
+        '''assert vehicle yaw is to heading (0-360)'''
+        m = self.assert_receive_message('VFR_HUD')
+        if self.heading_delta(heading, m.heading) > accuracy:
+            raise NotAchievedException("Unexpected heading=%f want=%f" %
+                                       (m.heading, heading))
+
     def do_set_relay(self, relay_num, on_off, timeout=10):
         """Set relay with a command long message."""
         self.progress("Set relay %d to %d" % (relay_num, on_off))
@@ -5626,7 +5651,7 @@ class AutoTest(ABC):
             r += " for %s" % reason
         self.progress(r % (seconds_to_wait,))
         while tstart + seconds_to_wait > tnow:
-            tnow = self.get_sim_time()
+            tnow = self.get_sim_time(drain_mav=False)
 
     def get_altitude(self, relative=False, timeout=30):
         '''returns vehicles altitude in metres, possibly relative-to-home'''
@@ -6041,16 +6066,22 @@ class AutoTest(ABC):
                  str(maximum),
                  str(sum_of_achieved_values / count_of_achieved_values) if count_of_achieved_values != 0 else str(last_value)))
 
+    def heading_delta(self, heading1, heading2):
+        '''return angle between two 0-360 headings'''
+        return math.fabs((heading1 - heading2 + 180) % 360 - 180)
+
+    def get_heading(self, timeout=1):
+        '''return heading 0-359'''
+        m = self.assert_receive_message('VFR_HUD', timeout=timeout)
+        return m.heading
+
     def wait_heading(self, heading, accuracy=5, timeout=30, **kwargs):
         """Wait for a given heading."""
         def get_heading_wrapped(timeout2):
-            msg = self.mav.recv_match(type='VFR_HUD', blocking=True, timeout=timeout2)
-            if msg:
-                return msg.heading
-            raise MsgRcvTimeoutException("Failed to get heading")
+            return self.get_heading(timeout=timeout2)
 
         def validator(value2, target2):
-            return math.fabs((value2 - target2 + 180) % 360 - 180) <= accuracy
+            return self.heading_delta(value2, target2) <= accuracy
 
         self.wait_and_maintain(
             value_name="Heading",
@@ -6631,7 +6662,50 @@ class AutoTest(ABC):
         if m is not None:
             raise NotAchievedException("Fence status received unexpectedly")
 
-    def assert_prearm_failure(self, expected_statustext, timeout=5, ignore_prearm_failures=[]):
+    def assert_prearm_failure(self,
+                              expected_statustext,
+                              timeout=5,
+                              ignore_prearm_failures=[],
+                              other_prearm_failures_fatal=True):
+        seen_statustext = False
+        seen_command_ack = False
+
+        self.drain_mav()
+        tstart = self.get_sim_time_cached()
+        arm_last_send = 0
+        while True:
+            if seen_command_ack and seen_statustext:
+                break
+            now = self.get_sim_time_cached()
+            if now - tstart > timeout:
+                raise NotAchievedException(
+                    "Did not see failure-to-arm messages (statustext=%s command_ack=%s" %
+                    (seen_statustext, seen_command_ack))
+            if now - arm_last_send > 1:
+                arm_last_send = now
+                self.send_mavlink_run_prearms_command()
+            m = self.mav.recv_match(blocking=True, timeout=1)
+            if m is None:
+                continue
+            if m.get_type() == "STATUSTEXT":
+                if expected_statustext in m.text:
+                    self.progress("Got: %s" % str(m))
+                    seen_statustext = True
+                elif other_prearm_failures_fatal and "PreArm" in m.text and m.text[8:] not in ignore_prearm_failures:
+                    self.progress("Got: %s" % str(m))
+                    raise NotAchievedException("Unexpected prearm failure (%s)" % m.text)
+
+            if m.get_type() == "COMMAND_ACK":
+                print("Got: %s" % str(m))
+                if m.command == mavutil.mavlink.MAV_CMD_RUN_PREARM_CHECKS:
+                    if m.result != mavutil.mavlink.MAV_RESULT_ACCEPTED:
+                        raise NotAchievedException("command-ack says we didn't run prearms")
+                    self.progress("Got: %s" % str(m))
+                    seen_command_ack = True
+            if self.mav.motors_armed():
+                raise NotAchievedException("Armed when we shouldn't have")
+
+    def assert_arm_failure(self, expected_statustext, timeout=5, ignore_prearm_failures=[]):
         seen_statustext = False
         seen_command_ack = False
 
@@ -6968,6 +7042,10 @@ Also, ignores heartbeats not from our target system'''
     def remove_bin_logs(self):
         util.run_cmd('/bin/rm -f logs/*.BIN logs/LASTLOG.TXT')
 
+    def remove_ardupilot_terrain_cache(self):
+        '''removes the terrain files ArduPilot keeps in its onboiard storage'''
+        util.run_cmd('/bin/rm -f %s' % util.reltopdir("terrain/*.DAT"))
+
     def check_logs(self, name):
         '''called to move relevant log files from our working directory to the
         buildlogs directory'''
@@ -7047,6 +7125,8 @@ Also, ignores heartbeats not from our target system'''
 
         start_time = time.time()
 
+        orig_speedup = None
+
         ex = None
         try:
             self.check_rc_defaults()
@@ -7056,6 +7136,10 @@ Also, ignores heartbeats not from our target system'''
             self.set_current_waypoint(0, check_afterwards=False)
             self.drain_mav()
             self.drain_all_pexpects()
+            if test.speedup is not None:
+                self.progress("Overriding speedup to %u" % test.speedup)
+                orig_speedup = self.get_parameter("SIM_SPEEDUP")
+                self.set_parameter("SIM_SPEEDUP", test.speedup)
 
             test_function()
         except Exception as e:
@@ -7068,6 +7152,9 @@ Also, ignores heartbeats not from our target system'''
                     self.mav.message_hooks.remove(h)
         self.test_timings[desc] = time.time() - start_time
         reset_needed = self.contexts[-1].sitl_commandline_customised
+
+        if orig_speedup is not None:
+            self.set_parameter("SIM_SPEEDUP", orig_speedup)
 
         passed = True
         if ex is not None:
