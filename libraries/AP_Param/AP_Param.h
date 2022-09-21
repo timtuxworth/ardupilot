@@ -547,6 +547,8 @@ public:
     static bool load_int32(uint16_t key, uint32_t group_element, int32_t &value);
 #endif
 
+    static bool load_defaults_file(const char *filename, bool last_pass);
+
 protected:
 
     // store default value in linked list
@@ -696,14 +698,11 @@ private:
 
     static bool parse_param_line(char *line, char **vname, float &value, bool &read_only);
 
-#if HAL_OS_POSIX_IO == 1
     /*
       load a parameter defaults file. This happens as part of load_all()
      */
     static bool count_defaults_in_file(const char *filename, uint16_t &num_defaults);
     static bool read_param_defaults_file(const char *filename, bool last_pass);
-    static bool load_defaults_file(const char *filename, bool last_pass);
-#endif
 
     /*
       load defaults from embedded parameters
@@ -820,70 +819,30 @@ public:
     }
 
     // set a parameter that is an ENABLE param
-    void set_enable(const T &v) {
-        if (v != _value) {
-            invalidate_count();
-        }
-        _value = v;
-    }
+    void set_enable(const T &v);
     
     /// Sets if the parameter is unconfigured
     ///
-    void set_default(const T &v) {
-#if AP_PARAM_DEFAULTS_ENABLED
-        add_default(this, (float)v);
-#endif
-        if (!configured()) {
-            set(v);
-        }
-    }
+    void set_default(const T &v);
 
     /// Sets parameter and default
     ///
-    void set_and_default(const T &v) {
-#if AP_PARAM_DEFAULTS_ENABLED
-        add_default(this, (float)v);
-#endif
-        set(v);
-    }
+    void set_and_default(const T &v);
 
     /// Value setter - set value, tell GCS
     ///
-    void set_and_notify(const T &v) {
-// We do want to compare each value, even floats, since it being the same here
-// is the result of previously setting it.
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wfloat-equal"
-        if (v != _value) {
-#pragma GCC diagnostic pop
-            set(v);
-            notify();
-        }
-    }
+    void set_and_notify(const T &v);
 
     /// Combined set and save
     ///
-    void set_and_save(const T &v) {
-        bool force = fabsf((float)(_value - v)) < FLT_EPSILON;
-        set(v);
-        save(force);
-    }
+    void set_and_save(const T &v);
 
     /// Combined set and save, but only does the save if the value if
     /// different from the current ram value, thus saving us a
     /// scan(). This should only be used where we have not set() the
     /// value separately, as otherwise the value in EEPROM won't be
     /// updated correctly.
-    void set_and_save_ifchanged(const T &v) {
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wfloat-equal"
-        if (v == _value) {
-#pragma GCC diagnostic pop
-            return;
-        }
-        set(v);
-        save(true);
-    }
+    void set_and_save_ifchanged(const T &v);
 
     /// Conversion to T returns a reference to the value.
     ///
@@ -895,9 +854,7 @@ public:
 
     /// AP_ParamT types can implement AP_Param::cast_to_float
     ///
-    float cast_to_float(void) const {
-        return (float)_value;
-    }
+    float cast_to_float(void) const;
 
 protected:
     T _value;
@@ -933,36 +890,18 @@ public:
 
     /// Value setter - set value, tell GCS
     ///
-    void set_and_notify(const T &v) {
-        if (v != _value) {
-            set(v);
-            notify();
-        }
-    }
+    void set_and_notify(const T &v);
 
     /// Combined set and save
     ///
-    void set_and_save(const T &v) {
-        bool force = (_value != v);
-        set(v);
-        save(force);
-    }
+    void set_and_save(const T &v);
 
     /// Combined set and save, but only does the save if the value is
     /// different from the current ram value, thus saving us a
     /// scan(). This should only be used where we have not set() the
     /// value separately, as otherwise the value in EEPROM won't be
     /// updated correctly.
-    void set_and_save_ifchanged(const T &v) {
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wfloat-equal"
-        if (_value == v) {
-#pragma GCC diagnostic pop
-            return;
-        }
-        set(v);
-        save(true);
-    }
+    void set_and_save_ifchanged(const T &v);
 
 
     /// Conversion to T returns a reference to the value.

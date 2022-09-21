@@ -2,6 +2,7 @@
 
 import os
 import re
+import fnmatch
 
 '''
 list of boards for build_binaries.py and custom build server
@@ -23,6 +24,14 @@ class Board(object):
             'Rover',
             'Sub',
         ]
+
+
+def in_blacklist(blacklist, b):
+    '''return true if board b is in the blacklist, including wildcards'''
+    for bl in blacklist:
+        if fnmatch.fnmatch(b, bl):
+            return True
+    return False
 
 
 class BoardList(object):
@@ -128,7 +137,12 @@ class BoardList(object):
             # bdshot
             "fmuv3-bdshot",
             "OMNIBUSF7V2-bdshot",
-            "Pixhawk1-1M-bdshot",
+
+            # renamed to KakuteH7Mini-Nand
+            "KakuteH7Miniv2",
+
+            # renamed to AtomRCF405NAVI
+            "AtomRCF405"
 
             # other
             "crazyflie2",
@@ -137,9 +151,11 @@ class BoardList(object):
             "MazzyStarDrone",
             "omnibusf4pro-one",
             "skyviper-f412-rev1",
+            "*-ODID",
+            "*-ODID-heli",
         ]
 
-        ret = filter(lambda x : x not in blacklist, ret)
+        ret = filter(lambda x : not in_blacklist(blacklist, x), ret)
 
         # if the caller has supplied a vehicle to limit to then we do that here:
         if build_target is not None:

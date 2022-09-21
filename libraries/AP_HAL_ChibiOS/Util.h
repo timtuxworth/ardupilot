@@ -20,6 +20,9 @@
 #include "AP_HAL_ChibiOS_Namespace.h"
 #include "AP_HAL_ChibiOS.h"
 #include <ch.h>
+#if !defined(HAL_BOOTLOADER_BUILD)
+#include <GCS_MAVLink/GCS.h>
+#endif
 
 class ExpandingString;
 
@@ -56,7 +59,7 @@ public:
     enum safety_state safety_switch_state(void) override;
 
     // get system ID as a string
-    bool get_system_id(char buf[40]) override;
+    bool get_system_id(char buf[50]) override;
     bool get_system_id_unformatted(uint8_t buf[], uint8_t &len) override;
 
     bool toneAlarm_init(uint8_t types) override;
@@ -146,10 +149,13 @@ private:
     // log info on stack usage
     void log_stack_info(void) override;
 
-#if !defined(HAL_BOOTLOADER_BUILD)
+#if AP_CRASHDUMP_ENABLED
     // get last crash dump
     size_t last_crash_dump_size() const override;
     void* last_crash_dump_ptr() const override;
 #endif
 
+#if HAL_ENABLE_DFU_BOOT
+    void boot_to_dfu() override;
+#endif
 };

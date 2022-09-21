@@ -199,6 +199,7 @@ public:
         k_param_pos_control,
         k_param_circle_nav,
         k_param_loiter_nav,     // 105
+        k_param_custom_control,
 
         // 110: Telemetry control
         //
@@ -666,6 +667,12 @@ public:
     AP_Int8                 surftrak_mode;
     AP_Int8                 failsafe_dr_enable;
     AP_Int16                failsafe_dr_timeout;
+
+    // ramp time of throttle during take-off
+    AP_Float takeoff_throttle_slew_time;
+#if HAL_WITH_ESC_TELEM && FRAME_CONFIG != HELI_FRAME
+    AP_Int16 takeoff_rpm_min;
+#endif
 };
 
 extern const AP_Param::Info        var_info[];

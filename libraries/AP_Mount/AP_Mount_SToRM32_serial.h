@@ -24,7 +24,7 @@ class AP_Mount_SToRM32_serial : public AP_Mount_Backend
 
 public:
     // Constructor
-    AP_Mount_SToRM32_serial(AP_Mount &frontend, AP_Mount::mount_state &state, uint8_t instance);
+    AP_Mount_SToRM32_serial(AP_Mount &frontend, AP_Mount_Params &params, uint8_t instance);
 
     // init - performs any required initialisation for this instance
     void init() override;
@@ -33,13 +33,12 @@ public:
     void update() override;
 
     // has_pan_control - returns true if this mount can control it's pan (required for multicopters)
-    bool has_pan_control() const override;
+    bool has_pan_control() const override { return yaw_range_valid(); };
 
-    // set_mode - sets mount's mode
-    void set_mode(enum MAV_MOUNT_MODE mode) override;
+protected:
 
-    // send_mount_status - called to allow mounts to send their status to GCS using the MOUNT_STATUS message
-    void send_mount_status(mavlink_channel_t chan) override;
+    // get attitude as a quaternion.  returns true on success
+    bool get_attitude_quaternion(Quaternion& att_quat) override;
 
 private:
 

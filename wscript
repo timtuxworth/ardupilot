@@ -175,6 +175,16 @@ def options(opt):
         default=False,
         help='Configure for building a bootloader.')
 
+    g.add_option('--signed-fw',
+        action='store_true',
+        default=False,
+        help='Configure for signed firmware support.')
+
+    g.add_option('--private-key',
+                 action='store',
+                 default=None,
+            help='path to private key for signing firmware.')
+    
     g.add_option('--no-autoconfig',
         dest='autoconfig',
         action='store_false',
@@ -224,6 +234,18 @@ submodules at specific revisions.
     g.add_option('--scripting-docs', action='store_true',
                  default=False,
                  help="enable generation of scripting documentation")
+
+    g.add_option('--enable-opendroneid', action='store_true',
+                 default=False,
+                 help="Enables OpenDroneID")
+
+    g.add_option('--enable-check-firmware', action='store_true',
+                 default=False,
+                 help="Enables firmware ID checking on boot")
+
+    g.add_option('--enable-custom-controller', action='store_true',
+                 default=False,
+                 help="Enables custom controller")
 
     g = opt.ap_groups['linux']
 
@@ -383,6 +405,10 @@ def configure(cfg):
 
     _set_build_context_variant(cfg.env.BOARD)
     cfg.setenv(cfg.env.BOARD)
+
+    if cfg.options.signed_fw:
+        cfg.env.AP_SIGNED_FIRMWARE = True
+        cfg.options.enable_check_firmware = True
 
     cfg.env.BOARD = cfg.options.board
     cfg.env.DEBUG = cfg.options.debug

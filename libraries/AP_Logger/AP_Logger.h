@@ -3,7 +3,7 @@
 /* ************************************************************ */
 #pragma once
 
-#include <AP_Filesystem/AP_Filesystem_Available.h>
+#include <AP_Filesystem/AP_Filesystem_config.h>
 
 #ifndef HAL_LOGGING_ENABLED
 #define HAL_LOGGING_ENABLED 1
@@ -60,6 +60,13 @@
 #include <AP_Mission/AP_Mission.h>
 #include <AP_Logger/LogStructure.h>
 #include <AP_Vehicle/ModeReason.h>
+
+#include <AC_Fence/AC_Fence_config.h>
+#define HAL_LOGGER_FENCE_ENABLED (AP_FENCE_ENABLED && !defined(HAL_BUILD_AP_PERIPH))
+
+#if HAL_LOGGER_FENCE_ENABLED
+    #include <AC_Fence/AC_Fence.h>
+#endif
 
 #include <stdint.h>
 
@@ -294,6 +301,9 @@ public:
     void Write_RCOUT(void);
     void Write_RSSI();
     void Write_Rally();
+#if HAL_LOGGER_FENCE_ENABLED
+    void Write_Fence();
+#endif
     void Write_Power(void);
     void Write_Radio(const mavlink_radio_t &packet);
     void Write_Message(const char *message);

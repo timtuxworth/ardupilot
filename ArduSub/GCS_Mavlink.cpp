@@ -202,7 +202,7 @@ void GCS_MAVLINK_Sub::send_pid_tuning()
         const AP_PIDInfo &pid_info = sub.pos_control.get_accel_z_pid().get_pid_info();
         mavlink_msg_pid_tuning_send(chan, PID_TUNING_ACCZ,
                                     pid_info.target*0.01f,
-                                    -(ahrs.get_accel_ef_blended().z + GRAVITY_MSS),
+                                    -(ahrs.get_accel_ef().z + GRAVITY_MSS),
                                     pid_info.FF*0.01f,
                                     pid_info.P*0.01f,
                                     pid_info.I*0.01f,
@@ -311,7 +311,7 @@ const AP_Param::GroupInfo GCS_MAVLINK_Parameters::var_info[] = {
 
     // @Param: EXTRA3
     // @DisplayName: Extra data type 3 stream rate to ground station
-    // @Description: Stream rate of AHRS, HWSTATUS, and SYSTEM_TIME to ground station
+    // @Description: Stream rate of AHRS and SYSTEM_TIME to ground station
     // @Units: Hz
     // @Range: 0 50
     // @Increment: 1
@@ -373,7 +373,6 @@ static const ap_message STREAM_EXTRA2_msgs[] = {
 };
 static const ap_message STREAM_EXTRA3_msgs[] = {
     MSG_AHRS,
-    MSG_HWSTATUS,
     MSG_SYSTEM_TIME,
     MSG_RANGEFINDER,
     MSG_DISTANCE_SENSOR,
@@ -382,13 +381,13 @@ static const ap_message STREAM_EXTRA3_msgs[] = {
 #endif
     MSG_BATTERY2,
     MSG_BATTERY_STATUS,
-    MSG_MOUNT_STATUS,
+    MSG_GIMBAL_DEVICE_ATTITUDE_STATUS,
     MSG_OPTICAL_FLOW,
     MSG_MAG_CAL_REPORT,
     MSG_MAG_CAL_PROGRESS,
     MSG_EKF_STATUS_REPORT,
     MSG_VIBRATION,
-#if RPM_ENABLED == ENABLED
+#if AP_RPM_ENABLED
     MSG_RPM,
 #endif
     MSG_ESC_TELEMETRY,

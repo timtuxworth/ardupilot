@@ -21,6 +21,7 @@
 #include "AP_EFI_Serial_Lutan.h"
 #include "AP_EFI_NWPMU.h"
 #include "AP_EFI_DroneCAN.h"
+#include "AP_EFI_Currawong_ECU.h"
 #include <AP_Logger/AP_Logger.h>
 
 #if HAL_MAX_CAN_PROTOCOL_DRIVERS
@@ -34,7 +35,7 @@ const AP_Param::GroupInfo AP_EFI::var_info[] = {
     // @Param: _TYPE
     // @DisplayName: EFI communication type
     // @Description: What method of communication is used for EFI #1
-    // @Values: 0:None,1:Serial-MS,2:NWPMU,3:Serial-Lutan,5:DroneCAN
+    // @Values: 0:None,1:Serial-MS,2:NWPMU,3:Serial-Lutan,5:DroneCAN,6:Currawong-ECU
     // @User: Advanced
     // @RebootRequired: True
     AP_GROUPINFO_FLAGS("_TYPE", 1, AP_EFI, type, 0, AP_PARAM_FLAG_ENABLE),
@@ -52,6 +53,14 @@ const AP_Param::GroupInfo AP_EFI::var_info[] = {
     // @Range: 0 10
     // @User: Advanced
     AP_GROUPINFO("_COEF2", 3, AP_EFI, coef2, 0),
+
+    // @Param: _FUEL_DENS
+    // @DisplayName: ECU Fuel Density
+    // @Description: Used to calculate fuel consumption
+    // @Units: kg/m/m/m
+    // @Range: 0 10000
+    // @User: Advanced
+    AP_GROUPINFO("_FUEL_DENS", 4, AP_EFI, ecu_fuel_density, 0),
 
     AP_GROUPEND
 };
@@ -89,6 +98,11 @@ void AP_EFI::init(void)
     case Type::DroneCAN:
 #if HAL_EFI_DRONECAN_ENABLED
         backend = new AP_EFI_DroneCAN(*this);
+#endif
+        break;
+    case Type::CurrawongECU:
+#if HAL_EFI_CURRAWONG_ECU_ENABLED
+        backend = new AP_EFI_Currawong_ECU(*this);
 #endif
         break;
     default:

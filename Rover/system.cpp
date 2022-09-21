@@ -35,8 +35,10 @@ void Rover::init_ardupilot()
 
     battery.init();
 
+#if AP_RPM_ENABLED
     // Initialise RPM sensor
     rpm_sensor.init();
+#endif
 
     rssi.init();
 
@@ -103,6 +105,11 @@ void Rover::init_ardupilot()
 #if HAL_MOUNT_ENABLED
     // initialise camera mount
     camera_mount.init();
+#endif
+
+#if PRECISION_LANDING == ENABLED
+    // initialise precision landing
+    init_precland();
 #endif
 
     /*
@@ -227,7 +234,7 @@ bool Rover::set_mode(Mode &new_mode, ModeReason reason)
     fence.manual_recovery_start();
 #endif
 
-#if CAMERA == ENABLED
+#if AP_CAMERA_ENABLED
     camera.set_is_auto_mode(control_mode->mode_number() == Mode::Number::AUTO);
 #endif
 

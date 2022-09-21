@@ -1239,6 +1239,12 @@ void NavEKF3::getAccelBias(int8_t instance, Vector3f &accelBias) const
     }
 }
 
+// returns active source set used by EKF3
+uint8_t NavEKF3::get_active_source_set() const
+{
+    return sources.get_active_source_set();
+}
+
 // reset body axis gyro bias estimates
 void NavEKF3::resetGyroBias(void)
 {
@@ -1776,10 +1782,10 @@ void NavEKF3::getFilterStatus(nav_filter_status &status) const
 }
 
 // send an EKF_STATUS_REPORT message to GCS
-void NavEKF3::send_status_report(mavlink_channel_t chan) const
+void NavEKF3::send_status_report(GCS_MAVLINK &link) const
 {
     if (core) {
-        core[primary].send_status_report(chan);
+        core[primary].send_status_report(link);
     }
 }
 

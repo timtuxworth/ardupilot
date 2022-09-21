@@ -47,7 +47,7 @@ public:
     void process() override;
 
 private:
-    enum Stage {
+    enum class Stage {
         WRITE_NEW_MISSION_MESSAGE = 0,
         WRITE_MISSION_ITEMS,
         DONE
@@ -64,7 +64,7 @@ public:
     void process() override;
 
 private:
-    enum Stage {
+    enum class Stage {
         WRITE_NEW_RALLY_MESSAGE = 0,
         WRITE_ALL_RALLY_POINTS,
         DONE
@@ -74,15 +74,37 @@ private:
     Stage stage = Stage::WRITE_NEW_RALLY_MESSAGE;
 };
 
+#if HAL_LOGGER_FENCE_ENABLED
+class LoggerMessageWriter_Write_Polyfence : public LoggerMessageWriter {
+public:
+
+    void reset() override;
+    void process() override;
+
+private:
+    enum class Stage {
+        WRITE_NEW_FENCE_MESSAGE = 0,
+        WRITE_FENCE_ITEMS,
+        DONE
+    };
+
+    uint16_t _fence_number_to_send;
+    Stage stage;
+};
+#endif // HAL_LOGGER_FENCE_ENABLED
+
 class LoggerMessageWriter_DFLogStart : public LoggerMessageWriter {
 public:
     LoggerMessageWriter_DFLogStart() :
         _writesysinfo()
-#if HAL_MISSION_ENABLED
+#if AP_MISSION_ENABLED
         , _writeentiremission()
 #endif
 #if HAL_RALLY_ENABLED
         , _writeallrallypoints()
+#endif
+#if HAL_LOGGER_FENCE_ENABLED
+        , _writeallpolyfence()
 #endif
         {
         }
@@ -90,11 +112,14 @@ public:
     virtual void set_logger_backend(class AP_Logger_Backend *backend) override {
         LoggerMessageWriter::set_logger_backend(backend);
         _writesysinfo.set_logger_backend(backend);
-#if HAL_MISSION_ENABLED
+#if AP_MISSION_ENABLED
         _writeentiremission.set_logger_backend(backend);
 #endif
 #if HAL_RALLY_ENABLED
         _writeallrallypoints.set_logger_backend(backend);
+#endif
+#if HAL_LOGGER_FENCE_ENABLED
+        _writeallpolyfence.set_logger_backend(backend);
 #endif
     }
 
@@ -107,16 +132,19 @@ public:
 
     // reset some writers so we push stuff out to logs again.  Will
     // only work if we are in state DONE!
-#if HAL_MISSION_ENABLED
+#if AP_MISSION_ENABLED
     bool writeentiremission();
 #endif
 #if HAL_RALLY_ENABLED
     bool writeallrallypoints();
 #endif
+#if HAL_LOGGER_FENCE_ENABLED
+    bool writeallfence();
+#endif
 
 private:
 
-    enum Stage {
+    enum class Stage {
         FORMATS = 0,
         UNITS,
         MULTIPLIERS,
@@ -145,10 +173,13 @@ private:
 
 
     LoggerMessageWriter_WriteSysInfo _writesysinfo;
-#if HAL_MISSION_ENABLED
+#if AP_MISSION_ENABLED
     LoggerMessageWriter_WriteEntireMission _writeentiremission;
 #endif
 #if HAL_RALLY_ENABLED
     LoggerMessageWriter_WriteAllRallyPoints _writeallrallypoints;
+#endif
+#if HAL_LOGGER_FENCE_ENABLED
+    LoggerMessageWriter_Write_Polyfence _writeallpolyfence;
 #endif
 };

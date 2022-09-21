@@ -19,6 +19,7 @@
 
 #include <cmath>
 #include <stdarg.h>
+#include <stdint.h>
 
 // Libraries
 #include <AP_Common/AP_Common.h>
@@ -37,18 +38,21 @@
 #include <AP_Logger/AP_Logger.h>
 #include <AP_OSD/AP_OSD.h>
 #include <AR_Motors/AP_MotorsUGV.h>
+#include <AP_Mission/AP_Mission.h>
+#include <AP_Mission/AP_Mission_ChangeDetector.h>
+#include <AR_WPNav/AR_WPNav_OA.h>
+
+// Configuration
+#include "defines.h"
+#include "config.h"
 
 #if AP_SCRIPTING_ENABLED
 #include <AP_Scripting/AP_Scripting.h>
 #endif
 
 // Local modules
-#include "mode.h"
 #include "AP_Arming.h"
 #include "sailboat.h"
-// Configuration
-#include "config.h"
-#include "defines.h"
 #if ADVANCED_FAILSAFE == ENABLED
 #include "afs_rover.h"
 #endif
@@ -57,6 +61,11 @@
 #include "GCS_Rover.h"
 #include "AP_Rally.h"
 #include "RC_Channel.h"                  // RC Channel Library
+#if PRECISION_LANDING == ENABLED
+#include <AC_PrecLand/AC_PrecLand.h>
+#endif
+
+#include "mode.h"
 
 class Rover : public AP_Vehicle {
 public:
@@ -81,6 +90,9 @@ public:
     friend class ModeSmartRTL;
     friend class ModeFollow;
     friend class ModeSimple;
+#if MODE_DOCK_ENABLED == ENABLED
+    friend class ModeDock;
+#endif
 
     friend class RC_Channel_Rover;
     friend class RC_Channels_Rover;
@@ -117,20 +129,24 @@ private:
     AP_Int8 *modes;
     const uint8_t num_modes = 6;
 
+#if AP_RPM_ENABLED
     // AP_RPM Module
     AP_RPM rpm_sensor;
+#endif
 
     // Arming/Disarming management class
     AP_Arming_Rover arming;
 
 #if AP_OPTICALFLOW_ENABLED
-    OpticalFlow optflow;
+    AP_OpticalFlow optflow;
 #endif
 
 #if OSD_ENABLED || OSD_PARAM_ENABLED
     AP_OSD osd;
 #endif
-
+#if PRECISION_LANDING == ENABLED
+    AC_PrecLand precland;
+#endif
     // GCS handling
     GCS_Rover _gcs;  // avoid using this; use gcs()
     GCS_Rover &gcs() { return _gcs; }
@@ -142,7 +158,7 @@ private:
     struct Location current_loc;
 
     // Camera
-#if CAMERA == ENABLED
+#if AP_CAMERA_ENABLED
     AP_Camera camera{MASK_LOG_CAMERA};
 #endif
 
@@ -219,6 +235,9 @@ private:
     ModeSmartRTL mode_smartrtl;
     ModeFollow mode_follow;
     ModeSimple mode_simple;
+#if MODE_DOCK_ENABLED == ENABLED
+    ModeDock mode_dock;
+#endif
 
     // cruise throttle and speed learning
     typedef struct {
@@ -308,6 +327,10 @@ private:
 
     // Parameters.cpp
     void load_parameters(void) override;
+
+    // precision_landing.cpp
+    void init_precland();
+    void update_precland();
 
     // radio.cpp
     void set_control_channels(void) override;

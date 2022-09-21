@@ -78,6 +78,11 @@ bool AP_Arming_Plane::pre_arm_checks(bool display_failure)
         ret = false;
     }
 
+    if (plane.aparm.airspeed_min < MIN_AIRSPEED_MIN) {
+        check_failed(display_failure, "ARSPD_FBW_MIN too low (%i < %i)", plane.aparm.airspeed_min.get(), MIN_AIRSPEED_MIN);
+        ret = false;
+    }
+
     if (plane.channel_throttle->get_reverse() && 
         Plane::ThrFailsafe(plane.g.throttle_fs_enabled.get()) != Plane::ThrFailsafe::Disabled &&
         plane.g.throttle_fs_value < 
@@ -142,8 +147,9 @@ bool AP_Arming_Plane::quadplane_checks(bool display_failure)
         ret = false;
     }
 
-    if (!plane.quadplane.motors->initialised_ok()) {
-        check_failed(display_failure, "Quadplane: check motor setup");
+    char failure_msg[50] {};
+    if (!plane.quadplane.motors->arming_checks(ARRAY_SIZE(failure_msg), failure_msg)) {
+        check_failed(display_failure, "Motors: %s", failure_msg);
         ret = false;
     }
 
@@ -171,17 +177,12 @@ bool AP_Arming_Plane::quadplane_checks(bool display_failure)
     }
 
     // ensure controllers are OK with us arming:
-    char failure_msg[50] = {};
     if (!plane.quadplane.pos_control->pre_arm_checks("PSC", failure_msg, ARRAY_SIZE(failure_msg))) {
         check_failed(ARMING_CHECK_PARAMETERS, display_failure, "Bad parameter: %s", failure_msg);
         ret = false;
     }
     if (!plane.quadplane.attitude_control->pre_arm_checks("ATC", failure_msg, ARRAY_SIZE(failure_msg))) {
         check_failed(ARMING_CHECK_PARAMETERS, display_failure, "Bad parameter: %s", failure_msg);
-        ret = false;
-    }
-    if (!plane.quadplane.motors->check_mot_pwm_params()) {
-        check_failed(ARMING_CHECK_PARAMETERS, display_failure, "Check Q_M_PWM_MIN/MAX");
         ret = false;
     }
 

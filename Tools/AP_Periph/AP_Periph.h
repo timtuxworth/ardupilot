@@ -15,6 +15,7 @@
 #include <AP_MSP/AP_MSP.h>
 #include <AP_MSP/msp.h>
 #include "../AP_Bootloader/app_comms.h"
+#include <AP_CheckFirmware/AP_CheckFirmware.h>
 #include "hwing_esc.h"
 #include <AP_CANManager/AP_CANManager.h>
 #include <AP_Scripting/AP_Scripting.h>
@@ -51,9 +52,9 @@ void stm32_watchdog_init();
 void stm32_watchdog_pat();
 #endif
 /*
-  app descriptor compatible with MissionPlanner
+  app descriptor for firmware checking
  */
-extern const struct app_descriptor app_descriptor;
+extern const app_descriptor_t app_descriptor;
 
 extern "C" {
 void can_printf(const char *fmt, ...) FMT_PRINTF(1,2);
@@ -210,6 +211,7 @@ public:
     AP_ESC_Telem esc_telem;
     uint32_t last_esc_telem_update_ms;
     void esc_telem_update();
+    uint32_t esc_telem_update_period_ms;
 #endif
 
     SRV_Channels servo_channels;
@@ -218,7 +220,8 @@ public:
     void rcout_init();
     void rcout_init_1Hz();
     void rcout_esc(int16_t *rc, uint8_t num_channels);
-    void rcout_srv(const uint8_t actuator_id, const float command_value);
+    void rcout_srv_unitless(const uint8_t actuator_id, const float command_value);
+    void rcout_srv_PWM(const uint8_t actuator_id, const float command_value);
     void rcout_update();
     void rcout_handle_safety_state(uint8_t safety_state);
 #endif

@@ -445,8 +445,7 @@ const AP_Param::Info Plane::var_info[] = {
     // @Param: FLTMODE_CH
     // @DisplayName: Flightmode channel
     // @Description: RC Channel to use for flight mode control
-    // @Range: 1 16
-    // @Increment: 1
+    // @Values: 0:Disabled,1:Channel 1,2:Channel 2,3:Channel 3,4:Channel 4,5:Channel 5,6:Channel 6,7:Channel 7,8:Channel 8,9:Channel 9,10:Channel 10,11:Channel 11,12:Channel 12,13:Channel 13,14:Channel 14,15:Channel 15,16:Channel 16
     // @User: Advanced
     GSCALAR(flight_mode_channel,    "FLTMODE_CH",     FLIGHT_MODE_CHANNEL),
 
@@ -747,7 +746,7 @@ const AP_Param::Info Plane::var_info[] = {
     // @Path: ../libraries/AP_GPS/AP_GPS.cpp
     GOBJECT(gps, "GPS", AP_GPS),
 
-#if CAMERA == ENABLED
+#if AP_CAMERA_ENABLED
     // @Group: CAM_
     // @Path: ../libraries/AP_Camera/AP_Camera.cpp
     GOBJECT(camera,                  "CAM_", AP_Camera),
@@ -939,7 +938,7 @@ const AP_Param::Info Plane::var_info[] = {
 #if AP_OPTICALFLOW_ENABLED
     // @Group: FLOW
     // @Path: ../libraries/AP_OpticalFlow/AP_OpticalFlow.cpp
-    GOBJECT(optflow,   "FLOW", OpticalFlow),
+    GOBJECT(optflow,   "FLOW", AP_OpticalFlow),
 #endif
 
     // @Group: MIS_
@@ -962,10 +961,12 @@ const AP_Param::Info Plane::var_info[] = {
     GOBJECTN(ahrs.EKF3, NavEKF3, "EK3_", NavEKF3),
 #endif
 
+#if AP_RPM_ENABLED
     // @Group: RPM
     // @Path: ../libraries/AP_RPM/AP_RPM.cpp
     GOBJECT(rpm_sensor, "RPM", AP_RPM),
-    
+#endif
+
     // @Group: RSSI_
     // @Path: ../libraries/AP_RSSI/AP_RSSI.cpp
     GOBJECT(rssi, "RSSI_",  AP_RSSI),

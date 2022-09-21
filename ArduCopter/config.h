@@ -194,12 +194,6 @@
 #endif
 
 //////////////////////////////////////////////////////////////////////////////
-// rotations per minute sensor support
-#ifndef RPM_ENABLED
- # define RPM_ENABLED !HAL_MINIMIZE_FEATURES
-#endif
-
-//////////////////////////////////////////////////////////////////////////////
 // Parachute release
 #ifndef PARACHUTE
  # define PARACHUTE HAL_PARACHUTE_ENABLED
@@ -320,6 +314,12 @@
 #endif
 
 //////////////////////////////////////////////////////////////////////////////
+// Flowhold - use optical flow to hover in place
+#ifndef MODE_FLOWHOLD_ENABLED
+# define MODE_FLOWHOLD_ENABLED !HAL_MINIMIZE_FEATURES && AP_OPTICALFLOW_ENABLED
+#endif
+
+//////////////////////////////////////////////////////////////////////////////
 
 //////////////////////////////////////////////////////////////////////////////
 // Autorotate - autonomous auto-rotation - helicopters only
@@ -428,13 +428,6 @@
 #endif
 #ifndef LAND_DETECTOR_ACCEL_MAX
 # define LAND_DETECTOR_ACCEL_MAX            1.0f    // vehicle acceleration must be under 1m/s/s
-#endif
-
-//////////////////////////////////////////////////////////////////////////////
-// CAMERA TRIGGER AND CONTROL
-//
-#ifndef CAMERA
- # define CAMERA        ENABLED
 #endif
 
 //////////////////////////////////////////////////////////////////////////////
@@ -704,4 +697,8 @@
 
 #ifndef HAL_FRAME_TYPE_DEFAULT
 #define HAL_FRAME_TYPE_DEFAULT AP_Motors::MOTOR_FRAME_TYPE_X
+#endif
+
+#ifndef AC_CUSTOMCONTROL_MULTI_ENABLED
+#define AC_CUSTOMCONTROL_MULTI_ENABLED FRAME_CONFIG == MULTICOPTER_FRAME && AP_CUSTOMCONTROL_ENABLED
 #endif

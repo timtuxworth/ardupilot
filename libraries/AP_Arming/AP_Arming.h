@@ -221,8 +221,6 @@ protected:
 
     // returns true if a particular check is enabled
     bool check_enabled(const enum AP_Arming::ArmingChecks check) const;
-    // returns a mavlink severity which should be used if a specific check fails
-    MAV_SEVERITY check_severity(const enum AP_Arming::ArmingChecks check) const;
     // handle the case where a check fails
     void check_failed(const enum AP_Arming::ArmingChecks check, bool report, const char *fmt, ...) const FMT_PRINTF(4, 5);
     void check_failed(bool report, const char *fmt, ...) const FMT_PRINTF(3, 4);
@@ -247,6 +245,7 @@ private:
         MIS_ITEM_CHECK_TAKEOFF       = (1 << 3),
         MIS_ITEM_CHECK_VTOL_TAKEOFF  = (1 << 4),
         MIS_ITEM_CHECK_RALLY         = (1 << 5),
+        MIS_ITEM_CHECK_RETURN_TO_LAUNCH = (1 << 6),
         MIS_ITEM_CHECK_MAX
     };
 

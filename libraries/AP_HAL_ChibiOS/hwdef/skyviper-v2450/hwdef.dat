@@ -27,6 +27,9 @@ undef SDIO
 undef HAL_BOARD_LOG_DIRECTORY
 undef HAL_BOARD_TERRAIN_DIRECTORY
 
+# short board name override (13 chars) to match original max length; can't change because name is used for transmitter bind CRC
+define CHIBIOS_SHORT_BOARD_NAME "skyviper-v245"
+
 SERIAL_ORDER OTG1 USART2 EMPTY UART4
 
 # enable AP_Radio support
@@ -74,7 +77,6 @@ define GRIPPER_ENABLED 0
 define HAL_ADSB_SAGETECH_ENABLED 0
 define HAL_ADSB_UAVIONIX_MAVLINK_ENABLED 0
 define AP_AIS_ENABLED 0
-define AP_BATTMON_FUEL_ENABLE 0
 define HAL_BATTMON_INA2XX_ENABLED 0
 define AP_BATTMON_SMBUS_ENABLE 0
 define HAL_CRSF_TELEM_ENABLED 0
@@ -95,6 +97,7 @@ define HAL_WITH_ESC_TELEM 0
 define LANDING_GEAR_ENABLED 0
 define MODE_TURTLE_ENABLED 0
 define WINCH_ENABLED 0
+define AP_ICENGINE_ENABLED 0
 
 # serially-attached actuators aren't relevant on SkyViper:
 define AP_FETTEC_ONEWIRE_ENABLED 0

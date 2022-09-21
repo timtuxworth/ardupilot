@@ -203,7 +203,7 @@ protected:
     private:
         bool _running;
         float take_off_start_alt;
-        float take_off_complete_alt ;
+        float take_off_complete_alt;
     };
 
     static _TakeOff takeoff;
@@ -296,7 +296,6 @@ public:
     bool set_mode(Mode::Number mode, ModeReason reason);
     void set_land_complete(bool b);
     GCS_Copter &gcs();
-    void set_throttle_takeoff(void);
     uint16_t get_pilot_speed_dn(void);
     // end pass-through functions
 };
@@ -836,7 +835,7 @@ private:
 };
 
 
-#if !HAL_MINIMIZE_FEATURES && AP_OPTICALFLOW_ENABLED
+#if MODE_FLOWHOLD_ENABLED == ENABLED
 /*
   class to support FLOWHOLD mode, which is a position hold mode using
   optical flow directly, avoiding the need for a rangefinder
@@ -922,7 +921,7 @@ private:
     // last time there was significant stick input
     uint32_t last_stick_input_ms;
 };
-#endif // AP_OPTICALFLOW_ENABLED
+#endif // MODE_FLOWHOLD_ENABLED
 
 
 class ModeGuided : public Mode {

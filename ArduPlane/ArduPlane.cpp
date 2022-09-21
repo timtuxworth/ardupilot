@@ -82,21 +82,22 @@ const AP_Scheduler::Task Plane::scheduler_tasks[] = {
 #if AP_ICENGINE_ENABLED
     SCHED_TASK_CLASS(AP_ICEngine,      &plane.g2.ice_control, update,     10, 100,  81),
 #endif
-    SCHED_TASK_CLASS(Compass,          &plane.compass,        cal_update, 50,  50,  84),
 #if AP_OPTICALFLOW_ENABLED
-    SCHED_TASK_CLASS(OpticalFlow, &plane.optflow, update,    50,    50,  87),
+    SCHED_TASK_CLASS(AP_OpticalFlow, &plane.optflow, update,    50,    50,  87),
 #endif
     SCHED_TASK(one_second_loop,         1,    400,  90),
     SCHED_TASK(three_hz_loop,           3,     75,  93),
     SCHED_TASK(check_long_failsafe,     3,    400,  96),
+#if AP_RPM_ENABLED
     SCHED_TASK_CLASS(AP_RPM,           &plane.rpm_sensor,     update,     10, 100,  99),
+#endif
 #if AP_AIRSPEED_AUTOCAL_ENABLE
     SCHED_TASK(airspeed_ratio_update,   1,    100,  102),
 #endif // AP_AIRSPEED_AUTOCAL_ENABLE
 #if HAL_MOUNT_ENABLED
     SCHED_TASK_CLASS(AP_Mount, &plane.camera_mount, update, 50, 100, 105),
 #endif // HAL_MOUNT_ENABLED
-#if CAMERA == ENABLED
+#if AP_CAMERA_ENABLED
     SCHED_TASK_CLASS(AP_Camera, &plane.camera, update,      50, 100, 108),
 #endif // CAMERA == ENABLED
     SCHED_TASK_CLASS(AP_Scheduler, &plane.scheduler, update_logging,         0.2,    100, 111),

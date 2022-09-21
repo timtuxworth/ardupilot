@@ -32,7 +32,8 @@ BUILD_OPTIONS = [
     Feature('AHRS', 'EKF2', 'HAL_NAVEKF2_AVAILABLE', 'Enable EKF2', 0, None),
     Feature('AHRS', 'AHRS_EXT', 'HAL_EXTERNAL_AHRS_ENABLED', 'Enable External AHRS', 0, None),
     Feature('AHRS', 'TEMPCAL', 'HAL_INS_TEMPERATURE_CAL_ENABLE', 'Enable IMU Temperature Calibration', 0, None),
-    Feature('AHRS', 'VISUALODOM', 'HAL_VISUALODOM_ENABLED', 'Enable Visual Odometry', 0, None),
+    Feature('AHRS', 'VISUALODOM', 'HAL_VISUALODOM_ENABLED', 'Enable Visual Odometry', 0, 'EKF3_EXTNAV'),
+    Feature('AHRS', 'EKF3_EXTNAV', 'EK3_FEATURE_EXTERNAL_NAV', 'Enable External Navigation for EKF3', 0, None),
 
     Feature('Safety', 'PARACHUTE', 'HAL_PARACHUTE_ENABLED', 'Enable Parachute', 0, None),
     Feature('Safety', 'FENCE', 'AP_FENCE_ENABLED', 'Enable Geofence', 2, None),
@@ -40,14 +41,17 @@ BUILD_OPTIONS = [
     Feature('Safety', 'AC_AVOID', 'AC_AVOID_ENABLED', 'Enable Avoidance', 0, 'FENCE'),
     Feature('Safety', 'AC_OAPATHPLANNER', 'AC_OAPATHPLANNER_ENABLED', 'Enable Object Avoidance Path Planner', 0, 'FENCE'),
 
-    Feature('Battery', 'BATTMON_FUEL', 'AP_BATTMON_FUEL_ENABLE', 'Enable Fuel BatteryMonitor', 0, None),
+    Feature('Battery', 'BATTMON_FUELFLOW', 'AP_BATTMON_FUELFLOW_ENABLE', 'Enable Fuel Flow BatteryMonitor', 0, None),
+    Feature('Battery', 'BATTMON_FUELLEVEL_PWM', 'AP_BATTMON_FUELLEVEL_PWM_ENABLE', 'Enable Flow Level PWM BattryMonitor', 0, None),  # noqa: E501
+    Feature('Battery', 'BATTMON_FUELLEVEL_ANALOG', 'AP_BATTMON_FUELLEVEL_ANALOG_ENABLE', 'Enable Flow Level Analog BattryMonitor', 0, None),  # noqa: E501
     Feature('Battery', 'BATTMON_SMBUS', 'AP_BATTMON_SMBUS_ENABLE', 'Enable SMBUS BatteryMonitor', 0, None),
     Feature('Battery', 'BATTMON_INA2XX', 'HAL_BATTMON_INA2XX_ENABLED', 'Enable INA2XX BatteryMonitor', 0, None),
 
     Feature('Ident', 'ADSB', 'HAL_ADSB_ENABLED', 'Enable ADSB', 0, None),
     Feature('Ident', 'ADSB_SAGETECH', 'HAL_ADSB_SAGETECH_ENABLED', 'Enable SageTech ADSB', 0, 'ADSB'),
     Feature('Ident', 'ADSB_SAGETECH_MXS', 'HAL_ADSB_SAGETECH_MXS_ENABLED', 'Enable SageTech MXS ADSB', 0, 'ADSB'),
-    Feature('Ident', 'ADSB_UAVIONIX', 'HAL_ADSB_UAVIONIX_MAVLINK_ENABLED', 'Enable Uavionix ADSB', 0, 'ADSB'),
+    Feature('Ident', 'ADSB_UAVIONIX', 'HAL_ADSB_UAVIONIX_MAVLINK_ENABLED', 'Enable UAvionix ADSB', 0, 'ADSB'),
+    Feature('Ident', 'ADSB_UAVIONX_UCP', 'HAL_ADSB_UCP_ENABLED', 'Enable uAvionix UCP ADSB', 0 , 'ADSB'),
     Feature('Ident', 'AIS', 'AP_AIS_ENABLED', 'Enable AIS', 0, None),
 
     Feature('Telemetry', 'CRSF', 'HAL_CRSF_TELEM_ENABLED', 'Enable CRSF Telemetry', 0, None),
@@ -61,11 +65,11 @@ BUILD_OPTIONS = [
     Feature('MSP', 'MSP_SENSORS', 'HAL_MSP_SENSORS_ENABLED', 'Enable MSP Sensors', 0, 'MSP_GPS,MSP_BARO,MSP_COMPASS,MSP_AIRSPEED,MSP,MSP_OPTICALFLOW,MSP_RANGEFINDER,OSD'),   # NOQA: E501
     Feature('MSP', 'MSP_GPS', 'HAL_MSP_GPS_ENABLED', 'Enable MSP GPS', 0, 'MSP,OSD'),
     Feature('MSP', 'MSP_COMPASS', 'HAL_MSP_COMPASS_ENABLED', 'Enable MSP Compass', 0, 'MSP,OSD'),
-    Feature('MSP', 'MSP_OPTICALFLOW', 'HAL_MSP_OPTICALFLOW_ENABLED', 'Enable MSP OpticalFlow', 0, 'MSP,OSD'), # also OPTFLOW dep   # NOQA: E501
-    Feature('MSP', 'MSP_RANGEFINDER', 'HAL_MSP_RANGEFINDER_ENABLED', 'Enable MSP Rangefinder', 0, 'MSP,OSD,RANGEFINDERS'),
+    Feature('MSP', 'MSP_OPTICALFLOW', 'HAL_MSP_OPTICALFLOW_ENABLED', 'Enable MSP OpticalFlow', 0, 'MSP,OSD,OPTICALFLOW'), # also OPTFLOW dep   # NOQA: E501
+    Feature('MSP', 'MSP_RANGEFINDER', 'HAL_MSP_RANGEFINDER_ENABLED', 'Enable MSP Rangefinder', 0, 'MSP,OSD,RANGEFINDER'),
     Feature('MSP', 'MSP_DISPLAYPORT', 'HAL_WITH_MSP_DISPLAYPORT', 'Enable MSP DisplayPort OSD (aka CANVAS MODE)', 0, 'MSP,OSD'),   # NOQA: E501
 
-    Feature('ICE', 'ICE Engine', 'AP_ICENGINE_ENABLED', 'Enable Internal Combustion Engine support', 0, None),
+    Feature('ICE', 'ICE Engine', 'AP_ICENGINE_ENABLED', 'Enable Internal Combustion Engine support', 0, 'RPM'),
     Feature('ICE', 'EFI', 'HAL_EFI_ENABLED', 'Enable EFI Monitoring', 0, None),
     Feature('ICE', 'EFI_NMPWU', 'HAL_EFI_NWPWU_ENABLED', 'Enable EFI NMPMU', 0, None),
     Feature('ICE', 'GENERATOR', 'HAL_GENERATOR_ENABLED', 'Enable Generator', 0, None),
@@ -83,12 +87,14 @@ BUILD_OPTIONS = [
 
     Feature('Camera', 'RUNCAM', 'HAL_RUNCAM_ENABLED', 'Enable RunCam Control', 0, None),
 
-    Feature('Mode', 'MODE_ZIGZAG', 'MODE_ZIGZAG_ENABLED', 'Enable Mode ZigZag', 0, None),
-    Feature('Mode', 'MODE_SYSTEMID', 'MODE_SYSTEMID_ENABLED', 'Enable Mode SystemID', 0, None),
-    Feature('Mode', 'MODE_SPORT', 'MODE_SPORT_ENABLED', 'Enable Mode Sport', 0, None),
-    Feature('Mode', 'MODE_FOLLOW', 'MODE_FOLLOW_ENABLED', 'Enable Mode Follow', 0, None),
-    Feature('Mode', 'MODE_TURTLE', 'MODE_TURTLE_ENABLED', 'Enable Mode Turtle', 0, None),
-    Feature('Mode', 'MODE_GUIDED_NOGPS', 'MODE_GUIDED_NOGPS_ENABLED', 'Enable Mode Guided NoGPS', 0, None),
+    Feature('Copter', 'MODE_ZIGZAG', 'MODE_ZIGZAG_ENABLED', 'Enable Mode ZigZag', 0, None),
+    Feature('Copter', 'MODE_SYSTEMID', 'MODE_SYSTEMID_ENABLED', 'Enable Mode SystemID', 0, None),
+    Feature('Copter', 'MODE_SPORT', 'MODE_SPORT_ENABLED', 'Enable Mode Sport', 0, None),
+    Feature('Copter', 'MODE_FOLLOW', 'MODE_FOLLOW_ENABLED', 'Enable Mode Follow', 0, 'AC_AVOID'),
+    Feature('Copter', 'MODE_TURTLE', 'MODE_TURTLE_ENABLED', 'Enable Mode Turtle', 0, None),
+    Feature('Copter', 'MODE_GUIDED_NOGPS', 'MODE_GUIDED_NOGPS_ENABLED', 'Enable Mode Guided NoGPS', 0, None),
+    Feature('Copter', 'MODE_FLOWHOLD', 'MODE_FLOWHOLD_ENABLED', 'Enable Mode Flowhold', 0, "OPTICALFLOW"),
+    Feature('Copter', 'MODE_FLIP', 'MODE_FLIP_ENABLED', 'Enable Mode Flip', 0, None),
 
     Feature('Gimbal', 'MOUNT', 'HAL_MOUNT_ENABLED', 'Enable Mount', 0, None),
     Feature('Gimbal', 'ALEXMOS', 'HAL_MOUNT_ALEXMOS_ENABLED', 'Enable Alexmos Gimbal', 0, "MOUNT"),
@@ -174,11 +180,16 @@ BUILD_OPTIONS = [
     Feature('Sensors', 'ICP101XX', 'AP_BARO_ICP101XX_ENABLED', 'Enable ICP101XX Barometric Sensor', 0, None),
     Feature('Sensors', 'ICP201XX', 'AP_BARO_ICP201XX_ENABLED', 'Enable ICP201XX Barometric Sensor', 0, None),
 
-    Feature('Sensors', 'RPM', 'RPM_ENABLED', 'Enable RPM sensors', 0, None),
+    Feature('Sensors', 'RPM', 'AP_RPM_ENABLED', 'Enable RPM sensors', 0, None),
+    Feature('Sensors', 'RPM_EFI', 'AP_RPM_EFI_ENABLED', 'Enable RPM EFI sensors', 0, 'RPM,EFI'),
+    Feature('Sensors', 'RPM_ESC_TELEM', 'AP_RPM_ESC_TELEM_ENABLED', 'Enable RPM ESC Telemetry sensors', 0, 'RPM'),
+    Feature('Sensors', 'RPM_HARMONIC_NOTCH', 'AP_RPM_HARMONICNOTCH_ENABLED', 'Enable RPM Harmonic Notch sensors', 0, 'RPM'),  # noqa
+    Feature('Sensors', 'RPM_PIN', 'AP_RPM_PIN_ENABLED', 'Enable RPM Pin-based sensors', 0, 'RPM'),
+    Feature('Sensors', 'RPM_GENERATOR', 'AP_RPM_GENERATOR_ENABLED', 'Enable RPM Pin-based sensors', 0, 'RPM,GENERATOR'),
+
     Feature('Sensors', 'AIRSPEED', 'AP_AIRSPEED_ENABLED', 'Enable Airspeed Sensors', 1, None),    # Default to enabled to not annoy Plane users   # NOQA: E501
     Feature('Sensors', 'BEACON', 'BEACON_ENABLED', 'Enable Beacon', 0, None),
     Feature('Sensors', 'GPS_MOVING_BASELINE', 'GPS_MOVING_BASELINE', 'Enable GPS Moving Baseline', 0, None),
-
 
     Feature('Other', 'DSP', 'HAL_WITH_DSP', 'Enable DSP for In-Flight FFT', 0, None),
     Feature('Other', 'DISPLAY', 'HAL_DISPLAY_ENABLED', 'Enable I2C Displays', 0, None),
@@ -201,7 +212,7 @@ BUILD_OPTIONS = [
     Feature('Airspeed Drivers', 'DLVR', 'AP_AIRSPEED_DLVR_ENABLED', 'ENABLE DLVR AIRSPEED', 0, 'AIRSPEED'),
     Feature('Airspeed Drivers', 'MS4525', 'AP_AIRSPEED_MS4525_ENABLED', 'ENABLE MS4525 AIRSPEED', 0, 'AIRSPEED'),
     Feature('Airspeed Drivers', 'MS5525', 'AP_AIRSPEED_MS5525_ENABLED', 'ENABLE MS5525 AIRSPEED', 0, 'AIRSPEED'),
-    Feature('Airspeed Drivers', 'MSP_ARSPD', 'AP_AIRSPEED_MSP_ENABLED', 'ENABLE MSP AIRSPEED', 0, 'AIRSPEED,MSP,OSD'),
+    Feature('Airspeed Drivers', 'MSP_AIRSPEED', 'AP_AIRSPEED_MSP_ENABLED', 'ENABLE MSP AIRSPEED', 0, 'AIRSPEED,MSP,OSD'),
     Feature('Airspeed Drivers', 'NMEA', 'AP_AIRSPEED_NMEA_ENABLED', 'ENABLE NMEA AIRSPEED', 0, 'AIRSPEED'),
     Feature('Airspeed Drivers', 'SDP3X', 'AP_AIRSPEED_SDP3X_ENABLED', 'ENABLE SDP3X AIRSPEED', 0, 'AIRSPEED'),
     Feature('Airspeed Drivers', 'UAVCAN_ASPD', 'AP_AIRSPEED_UAVCAN_ENABLED', 'ENABLE UAVCAN AIRSPEED', 0, 'AIRSPEED'),   # NOQA: E501
@@ -209,6 +220,8 @@ BUILD_OPTIONS = [
     Feature('Actuators', 'Volz', 'AP_VOLZ_ENABLED', 'Enable Volz Protocol', 0, None),
     Feature('Actuators', 'RobotisServo', 'AP_ROBOTISSERVO_ENABLED', 'Enable RobotisServo Protocol', 0, None),
     Feature('Actuators', 'FETTecOneWire', 'AP_FETTEC_ONEWIRE_ENABLED', 'Enable FETTec OneWire ESCs', 0, None),
+
+    Feature('Payload', 'Camera', 'AP_CAMERA_ENABLED', 'Enable Camera Trigger support', 0, None),
 ]
 
 BUILD_OPTIONS.sort(key=lambda x: x.category)

@@ -5,6 +5,7 @@
 #include <AP_Terrain/AP_Terrain.h>
 #include <GCS_MAVLink/GCS.h>
 #include <AP_AHRS/AP_AHRS.h>
+#include <AP_Camera/AP_Camera.h>
 
 const AP_Param::GroupInfo AP_Mission::var_info[] = {
 
@@ -358,8 +359,10 @@ bool AP_Mission::start_command(const Mission_Command& cmd)
     case MAV_CMD_DO_CONTROL_VIDEO:
     case MAV_CMD_DO_DIGICAM_CONFIGURE:
     case MAV_CMD_DO_DIGICAM_CONTROL:
+#if AP_CAMERA_ENABLED
     case MAV_CMD_DO_SET_CAM_TRIGG_DIST:
         return start_command_camera(cmd);
+#endif
     case MAV_CMD_DO_PARACHUTE:
         return start_command_parachute(cmd);
     case MAV_CMD_DO_SEND_SCRIPT_MESSAGE:
@@ -1142,6 +1145,7 @@ MAV_MISSION_RESULT AP_Mission::mavlink_int_to_mission_cmd(const mavlink_mission_
         break;
 
     case MAV_CMD_NAV_VTOL_LAND:
+        cmd.p1 = (NAV_VTOL_LAND_OPTIONS)packet.param1;
         break;
 
     case MAV_CMD_DO_VTOL_TRANSITION:
@@ -1392,16 +1396,14 @@ MAV_MISSION_RESULT AP_Mission::mavlink_cmd_long_to_mission_cmd(const mavlink_com
 //  return true on success, false on failure
 bool AP_Mission::mission_cmd_to_mavlink_int(const AP_Mission::Mission_Command& cmd, mavlink_mission_item_int_t& packet)
 {
+    // zero result:
+    packet = {};
+
     // command's position in mission list and mavlink id
     packet.seq = cmd.index;
     packet.command = cmd.id;
 
     // set defaults
-    packet.current = 0;     // 1 if we are passing back the mission command that is currently being executed
-    packet.param1 = 0;
-    packet.param2 = 0;
-    packet.param3 = 0;
-    packet.param4 = 0;
     packet.autocontinue = 1;
 
     // command specific conversions from mission command to mavlink packet
@@ -1637,6 +1639,7 @@ bool AP_Mission::mission_cmd_to_mavlink_int(const AP_Mission::Mission_Command& c
         break;
 
     case MAV_CMD_NAV_VTOL_LAND:
+        packet.param1 = cmd.p1;
         break;
 
     case MAV_CMD_DO_VTOL_TRANSITION:

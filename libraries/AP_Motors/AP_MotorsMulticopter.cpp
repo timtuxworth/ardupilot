@@ -19,6 +19,13 @@
 #include <SRV_Channel/SRV_Channel.h>
 #include <AP_Logger/AP_Logger.h>
 
+#include <AP_Vehicle/AP_Vehicle_Type.h>
+#if APM_BUILD_TYPE(APM_BUILD_ArduPlane)
+    #define AP_MOTORS_PARAM_PREFIX "Q_M_"
+#else
+    #define AP_MOTORS_PARAM_PREFIX "MOT_"
+#endif
+
 extern const AP_HAL::HAL& hal;
 
 // parameters for the motor class
@@ -104,7 +111,7 @@ const AP_Param::GroupInfo AP_MotorsMulticopter::var_info[] = {
     // @Param: SPIN_MIN
     // @DisplayName: Motor Spin minimum
     // @Description: Point at which the thrust starts expressed as a number from 0 to 1 in the entire output range.  Should be higher than MOT_SPIN_ARM.
-    // @Values: 0.0:Low, 0.15:Default, 0.3:High
+    // @Values: 0.0:Low, 0.15:Default, 0.25:High
     // @User: Advanced
     AP_GROUPINFO("SPIN_MIN", 18, AP_MotorsMulticopter, _spin_min, AP_MOTORS_SPIN_MIN_DEFAULT),
 
@@ -612,7 +619,10 @@ void AP_MotorsMulticopter::output_logic()
             // constrain ramp value and update mode
             if (_spin_up_ratio >= 1.0f) {
                 _spin_up_ratio = 1.0f;
-                _spool_state = SpoolState::SPOOLING_UP;
+                if (!get_spoolup_block()) {
+                    // Only advance from ground idle if spoolup checks have passed
+                    _spool_state = SpoolState::SPOOLING_UP;
+                }
             }
             break;
 
@@ -798,4 +808,41 @@ void AP_MotorsMulticopter::convert_pwm_min_max_param(int16_t radio_min, int16_t 
     }
     _pwm_min.set_and_save(radio_min);
     _pwm_max.set_and_save(radio_max);
+}
+
+bool AP_MotorsMulticopter::arming_checks(size_t buflen, char *buffer) const
+{
+    // run base class checks
+    if (!AP_Motors::arming_checks(buflen, buffer)) {
+        return false;
+    }
+
+    // Check output function is setup for each motor
+    for (uint8_t i = 0; i < AP_MOTORS_MAX_NUM_MOTORS; i++) {
+        if (!motor_enabled[i]) {
+            continue;
+        }
+        uint8_t chan;
+        SRV_Channel::Aux_servo_function_t function = SRV_Channels::get_motor_function(i);
+        if (!SRV_Channels::find_channel(function, chan)) {
+            hal.util->snprintf(buffer, buflen, "no SERVOx_FUNCTION set to Motor%u", i + 1);
+            return false;
+        }
+    }
+
+    // Check param config
+    if (_spin_min > 0.3) {
+        hal.util->snprintf(buffer, buflen, "%sSPIN_MIN too high %.2f > 0.3", AP_MOTORS_PARAM_PREFIX, _spin_min.get());
+        return false;
+    }
+    if (_spin_arm > _spin_min) {
+        hal.util->snprintf(buffer, buflen, "%sSPIN_ARM > %sSPIN_MIN", AP_MOTORS_PARAM_PREFIX, AP_MOTORS_PARAM_PREFIX);
+        return false;
+    }
+    if (!check_mot_pwm_params()) {
+        hal.util->snprintf(buffer, buflen, "Check %sPWM_MIN and %sPWM_MAX", AP_MOTORS_PARAM_PREFIX, AP_MOTORS_PARAM_PREFIX);
+        return false;
+    }
+
+    return true;
 }

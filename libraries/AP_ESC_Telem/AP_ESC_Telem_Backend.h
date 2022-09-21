@@ -5,7 +5,7 @@
 #if defined(NUM_SERVO_CHANNELS) && NUM_SERVO_CHANNELS == 0
 #define HAL_WITH_ESC_TELEM 0
 #elif !defined(HAL_WITH_ESC_TELEM)
-#define HAL_WITH_ESC_TELEM HAL_SUPPORT_RCOUT_SERIAL || HAL_MAX_CAN_PROTOCOL_DRIVERS
+#define HAL_WITH_ESC_TELEM (HAL_SUPPORT_RCOUT_SERIAL || HAL_MAX_CAN_PROTOCOL_DRIVERS) && !defined(HAL_BUILD_AP_PERIPH)
 #endif
 
 #if HAL_WITH_ESC_TELEM
@@ -53,7 +53,7 @@ public:
 
 protected:
     // callback to update the rpm in the frontend, should be called by the driver when new data is available
-    void update_rpm(const uint8_t esc_index, const uint16_t new_rpm, const float error_rate = 0.0f);
+    void update_rpm(const uint8_t esc_index, const float new_rpm, const float error_rate = 0.0f);
 
     // callback to update the data in the frontend, should be called by the driver when new data is available
     void update_telem_data(const uint8_t esc_index, const TelemetryData& new_data, const uint16_t data_present_mask);

@@ -24,6 +24,10 @@
 #define HAL_MSP_OPTICALFLOW_ENABLED (AP_OPTICALFLOW_ENABLED && (HAL_MSP_ENABLED && !HAL_MINIMIZE_FEATURES))
 #endif
 
+#ifndef AP_OPTICALFLOW_SITL_ENABLED
+#define AP_OPTICALFLOW_SITL_ENABLED AP_SIM_ENABLED
+#endif
+
 #if AP_OPTICALFLOW_ENABLED
 
 /*
@@ -37,23 +41,21 @@
 
 class OpticalFlow_backend;
 
-class OpticalFlow
+class AP_OpticalFlow
 {
     friend class OpticalFlow_backend;
 
 public:
-    OpticalFlow();
+    AP_OpticalFlow();
 
-    /* Do not allow copies */
-    OpticalFlow(const OpticalFlow &other) = delete;
-    OpticalFlow &operator=(const OpticalFlow&) = delete;
+    CLASS_NO_COPY(AP_OpticalFlow);
 
     // get singleton instance
-    static OpticalFlow *get_singleton() {
+    static AP_OpticalFlow *get_singleton() {
         return _singleton;
     }
 
-    enum class OpticalFlowType {
+    enum class Type {
         NONE = 0,
         PX4FLOW = 1,
         PIXART = 2,
@@ -70,7 +72,7 @@ public:
     void init(uint32_t log_bit);
 
     // enabled - returns true if optical flow is enabled
-    bool enabled() const { return _type != (int8_t)OpticalFlowType::NONE; }
+    bool enabled() const { return _type != Type::NONE; }
 
     // healthy - return true if the sensor is healthy
     bool healthy() const { return backend != nullptr && _flags.healthy; }
@@ -118,7 +120,7 @@ public:
 
 private:
 
-    static OpticalFlow *_singleton;
+    static AP_OpticalFlow *_singleton;
 
     OpticalFlow_backend *backend;
 
@@ -127,7 +129,7 @@ private:
     } _flags;
 
     // parameters
-    AP_Int8  _type;                 // user configurable sensor type
+    AP_Enum<Type>  _type;           // user configurable sensor type
     AP_Int16 _flowScalerX;          // X axis flow scale factor correction - parts per thousand
     AP_Int16 _flowScalerY;          // Y axis flow scale factor correction - parts per thousand
     AP_Int16 _yawAngle_cd;          // yaw angle of sensor X axis with respect to vehicle X axis - centi degrees
@@ -151,7 +153,7 @@ private:
 };
 
 namespace AP {
-    OpticalFlow *opticalflow();
+    AP_OpticalFlow *opticalflow();
 }
 
 #include "AP_OpticalFlow_Backend.h"

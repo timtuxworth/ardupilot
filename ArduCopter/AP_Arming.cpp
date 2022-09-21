@@ -16,10 +16,11 @@ bool AP_Arming_Copter::run_pre_arm_checks(bool display_failure)
         return true;
     }
 
-    // check if motor interlock and Emergency Stop aux switches are used
+    // check if motor interlock and either Emergency Stop aux switches are used
     // at the same time.  This cannot be allowed.
     if (rc().find_channel_for_option(RC_Channel::AUX_FUNC::MOTOR_INTERLOCK) &&
-        rc().find_channel_for_option(RC_Channel::AUX_FUNC::MOTOR_ESTOP)){
+        (rc().find_channel_for_option(RC_Channel::AUX_FUNC::MOTOR_ESTOP) || 
+        rc().find_channel_for_option(RC_Channel::AUX_FUNC::ARM_EMERGENCY_STOP))){
         check_failed(display_failure, "Interlock/E-Stop Conflict");
         return false;
     }
@@ -43,7 +44,9 @@ bool AP_Arming_Copter::run_pre_arm_checks(bool display_failure)
     }
 
     // always check motors
-    if (!motor_checks(display_failure)) {
+    char failure_msg[50] {};
+    if (!copter.motors->arming_checks(ARRAY_SIZE(failure_msg), failure_msg)) {
+        check_failed(display_failure, "Motors: %s", failure_msg);
         return false;
     }
 
@@ -89,9 +92,14 @@ bool AP_Arming_Copter::rc_throttle_failsafe_checks(bool display_failure) const
     const char *rc_item = "Throttle";
 #endif
 
+    if (!rc().has_had_rc_receiver()) {
+        check_failed(ARMING_CHECK_RC, display_failure, "RC not found");
+        return false;
+    }
+
     // check throttle is not too low - must be above failsafe throttle
     if (copter.channel_throttle->get_radio_in() < copter.g.failsafe_throttle_value) {
-        check_failed(ARMING_CHECK_RC, true, "%s below failsafe", rc_item);
+        check_failed(ARMING_CHECK_RC, display_failure, "%s below failsafe", rc_item);
         return false;
     }
 
@@ -244,12 +252,6 @@ bool AP_Arming_Copter::parameter_checks(bool display_failure)
             check_failed(ARMING_CHECK_PARAMETERS, display_failure, "Invalid MultiCopter FRAME_CLASS");
             return false;
         }
-
-        // checks MOT_PWM_MIN/MAX for acceptable values
-        if (!copter.motors->check_mot_pwm_params()) {
-            check_failed(ARMING_CHECK_PARAMETERS, display_failure, "Check MOT_PWM_MIN/MAX");
-            return false;
-        }
         #endif // HELI_FRAME
 
         // checks when using range finder for RTL
@@ -299,26 +301,6 @@ bool AP_Arming_Copter::parameter_checks(bool display_failure)
             return false;
         }
     }
-
-    return true;
-}
-
-// check motor setup was successful
-bool AP_Arming_Copter::motor_checks(bool display_failure)
-{
-    // check motors initialised  correctly
-    if (!copter.motors->initialised_ok()) {
-        check_failed(display_failure, "Check firmware or FRAME_CLASS");
-        return false;
-    }
-
-	// servo_test check
-#if FRAME_CONFIG == HELI_FRAME
-    if (copter.motors->servo_test_running()) {
-        check_failed(display_failure, "Servo Test is still running");
-        return false;
-    }
-#endif
 
     return true;
 }
@@ -497,7 +479,7 @@ bool AP_Arming_Copter::mandatory_gps_checks(bool display_failure)
         }
     }
 
-    // check EKF's compass, position and velocity variances are below failsafe threshold
+    // check EKF's compass, position, height and velocity variances are below failsafe threshold
     if (copter.g.fs_ekf_thresh > 0.0f) {
         float vel_variance, pos_variance, hgt_variance, tas_variance;
         Vector3f mag_variance;
@@ -512,6 +494,10 @@ bool AP_Arming_Copter::mandatory_gps_checks(bool display_failure)
         }
         if (vel_variance >= copter.g.fs_ekf_thresh) {
             check_failed(display_failure, "EKF velocity variance");
+            return false;
+        }
+        if (hgt_variance >= copter.g.fs_ekf_thresh) {
+            check_failed(display_failure, "EKF height variance");
             return false;
         }
     }
@@ -603,7 +589,7 @@ bool AP_Arming_Copter::arm_checks(AP_Arming::Method method)
 
     // always check if the current mode allows arming
     if (!copter.flightmode->allows_arming(method)) {
-        check_failed(true, "Mode not armable");
+        check_failed(true, "%s mode not armable", copter.flightmode->name());
         return false;
     }
 

@@ -124,8 +124,12 @@ if maybe_prompt_user "Install python using pyenv [N/y]?" ; then
         source ~/$SHELL_LOGIN
     }
     echo "pyenv installed"
-    env PYTHON_CONFIGURE_OPTS="--enable-framework" pyenv install 3.9.4
-    pyenv global 3.9.4
+    {
+        $(pyenv global 3.9.4)
+    } || {
+        env PYTHON_CONFIGURE_OPTS="--enable-framework" pyenv install 3.9.4
+        pyenv global 3.9.4
+    }
 fi
 
 
@@ -148,7 +152,7 @@ if [[ $DO_AP_STM_ENV -eq 1 ]]; then
     install_arm_none_eabi_toolchain
 fi
 
-PYTHON_PKGS="future lxml pymavlink MAVProxy pexpect geocoder flake8 empy"
+PYTHON_PKGS="future lxml pymavlink MAVProxy pexpect geocoder flake8 empy dronecan"
 # add some Python packages required for commonly-used MAVProxy modules and hex file generation:
 if [[ $SKIP_AP_EXT_ENV -ne 1 ]]; then
     PYTHON_PKGS="$PYTHON_PKGS intelhex gnureadline"

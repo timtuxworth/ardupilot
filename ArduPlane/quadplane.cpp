@@ -257,8 +257,8 @@ const AP_Param::GroupInfo QuadPlane::var_info[] = {
 
     // @Param: OPTIONS
     // @DisplayName: quadplane options
-    // @Description: Level Transition:Keep wings within LEVEL_ROLL_LIMIT and only use forward motor(s) for climb during transition, Allow FW Takeoff: If bit is not set then NAV_TAKEOFF command on quadplanes will instead perform a NAV_VTOL takeoff, Allow FW Land:If bit is not set then NAV_LAND command on quadplanes will instead perform a NAV_VTOL_LAND, Vtol Takeoff Frame: command NAV_VTOL_TAKEOFF altitude is as set by the command's reference frame rather than a delta above current location, Use FW Approach:Use a fixed wing approach for VTOL landings, USE QRTL:instead of QLAND for rc failsafe when in VTOL modes, Use Governor:Use ICE Idle Governor in MANUAL for forward motor, Force Qassist: on always,Mtrs_Only_Qassist: in tailsitters only, uses VTOL motors and not flying surfaces for QASSIST, Airmode_On_Arm:Airmode enabled when arming by aux switch, Disarmed Yaw Tilt:Enable motor tilt for yaw when disarmed, Delay Spoolup:Delay VTOL spoolup for 2 seconds after arming, ThrLandControl: enable throttle stick control of landing rate, DisableApproach: Disable use of approach and airbrake stages in VTOL landing, EnableLandResposition: enable pilot controlled repositioning in AUTO land. Descent will pause while repositioning. ARMVTOL: Arm only in VTOL or AUTO modes. CompleteTransition: to fixed wing if Q_TRANS_FAIL timer times out instead of QLAND. Force RTL mode: forces RTL mode on rc failsafe in VTOL modes overriding bit 5(USE_QRTL).
-    // @Bitmask: 0:Level Transition,1:Allow FW Takeoff,2:Allow FW Land,3:Vtol Takeoff Frame,4:Use FW Approach,5:Use QRTL,6:Use Governor,7:Force Qassist,8:Mtrs_Only_Qassist,10:Disarmed Yaw Tilt,11:Delay Spoolup,12:disable Qassist based on synthetic airspeed,13:Disable Ground Effect Compensation,14:Ignore forward flight angle limits in Qmodes,15:ThrLandControl,16:DisableApproach,17:EnableLandReposition,18:ARMVtol, 19: CompleteTransition if Q_TRANS_FAIL, 20: Force RTL mode on VTOL failsafes overriding bit 5(USE QRTL)
+    // @Description: Level Transition:Keep wings within LEVEL_ROLL_LIMIT and only use forward motor(s) for climb during transition, Allow FW Takeoff: If bit is not set then NAV_TAKEOFF command on quadplanes will instead perform a NAV_VTOL takeoff, Allow FW Land:If bit is not set then NAV_LAND command on quadplanes will instead perform a NAV_VTOL_LAND, Vtol Takeoff Frame: command NAV_VTOL_TAKEOFF altitude is as set by the command's reference frame rather than a delta above current location, Always use FW spiral approach:Always use Use a fixed wing spiral approach for VTOL landings, USE QRTL:instead of QLAND for rc failsafe when in VTOL modes, Use Governor:Use ICE Idle Governor in MANUAL for forward motor, Force Qassist: on always,Mtrs_Only_Qassist: in tailsitters only, uses VTOL motors and not flying surfaces for QASSIST, Airmode_On_Arm:Airmode enabled when arming by aux switch, Disarmed Yaw Tilt:Enable motor tilt for yaw when disarmed, Delay Spoolup:Delay VTOL spoolup for 2 seconds after arming, ThrLandControl: enable throttle stick control of landing rate, DisableApproach: Disable use of approach and airbrake stages in VTOL landing, EnableLandResposition: enable pilot controlled repositioning in AUTO land. Descent will pause while repositioning. ARMVTOL: Arm only in VTOL or AUTO modes. CompleteTransition: to fixed wing if Q_TRANS_FAIL timer times out instead of QLAND. Force RTL mode: forces RTL mode on rc failsafe in VTOL modes overriding bit 5(USE_QRTL).
+    // @Bitmask: 0:Level Transition,1:Allow FW Takeoff,2:Allow FW Land,3:Vtol Takeoff Frame,4:Always use FW spiral approach,5:Use QRTL,6:Use Governor,7:Force Qassist,8:Mtrs_Only_Qassist,10:Disarmed Yaw Tilt,11:Delay Spoolup,12:disable Qassist based on synthetic airspeed,13:Disable Ground Effect Compensation,14:Ignore forward flight angle limits in Qmodes,15:ThrLandControl,16:DisableApproach,17:EnableLandReposition,18:ARMVtol, 19: CompleteTransition if Q_TRANS_FAIL, 20: Force RTL mode on VTOL failsafes overriding bit 5(USE QRTL)
     AP_GROUPINFO("OPTIONS", 58, QuadPlane, options, 0),
 
     AP_SUBGROUPEXTENSION("",59, QuadPlane, var_info2),
@@ -2577,9 +2577,6 @@ void QuadPlane::vtol_position_controller(void)
                 const float gnd_speed = plane.ahrs.groundspeed();
                 Vector2f target_speed_xy = landing_velocity + diff_wp_norm * gnd_speed - wind;
                 target_yaw_deg = degrees(target_speed_xy.angle());
-
-                // now limit speed to scaled wp speed, so we don't fly rapidly backwards
-                target_speed_xy.limit_length(scaled_wp_speed*100);
             }
         }
         const float target_speed_ms = target_speed_xy_cms.length() * 0.01;
@@ -3704,7 +3701,7 @@ bool QuadPlane::is_vtol_takeoff(uint16_t id) const
 bool QuadPlane::is_vtol_land(uint16_t id) const
 {
     if (id == MAV_CMD_NAV_VTOL_LAND) {
-        if (option_is_set(QuadPlane::OPTION::MISSION_LAND_FW_APPROACH)) {
+        if (landing_with_fixed_wing_spiral_approach()) {
             return plane.vtol_approach_s.approach_stage == Plane::Landing_ApproachStage::VTOL_LANDING;
         } else {
             return true;
@@ -3769,7 +3766,7 @@ float QuadPlane::transition_threshold(void)
 void QuadPlane::update_throttle_mix(void)
 {
     // update filtered acceleration
-    Vector3f accel_ef = ahrs.get_accel_ef_blended();
+    Vector3f accel_ef = ahrs.get_accel_ef();
     accel_ef.z += GRAVITY_MSS;
     throttle_mix_accel_ef_filter.apply(accel_ef, plane.scheduler.get_loop_period_s());
 
@@ -4297,6 +4294,15 @@ bool QuadPlane::allow_servo_auto_trim()
     }
     // In forward flight with active VTOL motors
     return false;
+}
+
+bool QuadPlane::landing_with_fixed_wing_spiral_approach(void) const
+{
+    const AP_Mission::Mission_Command cmd = plane.mission.get_current_nav_cmd();
+
+    return ((cmd.id == MAV_CMD_NAV_VTOL_LAND) &&
+            (option_is_set(QuadPlane::OPTION::MISSION_LAND_FW_APPROACH) ||
+             cmd.p1 == NAV_VTOL_LAND_OPTIONS_FW_SPIRAL_APPROACH));
 }
 
 #endif  // HAL_QUADPLANE_ENABLED

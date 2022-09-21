@@ -579,7 +579,6 @@ static const ap_message STREAM_EXTRA2_msgs[] = {
 };
 static const ap_message STREAM_EXTRA3_msgs[] = {
     MSG_AHRS,
-    MSG_HWSTATUS,
     MSG_WIND,
     MSG_RANGEFINDER,
     MSG_DISTANCE_SENSOR,
@@ -589,7 +588,7 @@ static const ap_message STREAM_EXTRA3_msgs[] = {
 #endif
     MSG_BATTERY2,
     MSG_BATTERY_STATUS,
-    MSG_MOUNT_STATUS,
+    MSG_GIMBAL_DEVICE_ATTITUDE_STATUS,
     MSG_OPTICAL_FLOW,
     MSG_MAG_CAL_REPORT,
     MSG_MAG_CAL_PROGRESS,
@@ -878,9 +877,6 @@ MAV_RESULT GCS_MAVLINK_Plane::handle_command_int_guided_slew_commands(const mavl
 
 MAV_RESULT GCS_MAVLINK_Plane::handle_command_int_packet(const mavlink_command_int_t &packet)
 {
-
-    plane.Log_Write_MavCmdI(packet);
-
     switch(packet.command) {
 
     case MAV_CMD_DO_REPOSITION:
@@ -982,7 +978,7 @@ MAV_RESULT GCS_MAVLINK_Plane::handle_command_long_packet(const mavlink_command_l
                 const bool attempt_go_around =
                     (!plane.quadplane.available()) ||
                     ((!plane.quadplane.in_vtol_auto()) &&
-                     !plane.quadplane.option_is_set(QuadPlane::OPTION::MISSION_LAND_FW_APPROACH));
+                     (!plane.quadplane.landing_with_fixed_wing_spiral_approach()));
 #else
                 const bool attempt_go_around = true;
 #endif

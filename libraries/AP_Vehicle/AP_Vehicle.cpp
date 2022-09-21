@@ -10,6 +10,7 @@
 #include <AP_RPM/AP_RPM.h>
 #include <SRV_Channel/SRV_Channel.h>
 #include <AP_Motors/AP_Motors.h>
+#include <AP_CheckFirmware/AP_CheckFirmware.h>
 #if CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS
 #include <AP_HAL_ChibiOS/sdcard.h>
 #endif
@@ -129,6 +130,10 @@ void AP_Vehicle::setup()
                         "\n\nFree RAM: %u\n",
                         AP::fwversion().fw_string,
                         (unsigned)hal.util->available_memory());
+
+#if AP_CHECK_FIRMWARE_ENABLED
+    check_firmware_print();
+#endif
 
     load_parameters();
 
@@ -319,6 +324,9 @@ const AP_Scheduler::Task AP_Vehicle::scheduler_tasks[] = {
 #if AP_AIRSPEED_ENABLED
     SCHED_TASK_CLASS(AP_Airspeed,  &vehicle.airspeed,       update,                   10, 100, 41),    // NOTE: the priority number here should be right before Plane's calc_airspeed_errors
 #endif
+#if COMPASS_CAL_ENABLED
+    SCHED_TASK_CLASS(Compass,      &vehicle.compass,        cal_update,     100, 200, 75),
+#endif
 #if HAL_RUNCAM_ENABLED
     SCHED_TASK_CLASS(AP_RunCam,    &vehicle.runcam,         update,                   50, 50, 200),
 #endif
@@ -345,7 +353,7 @@ const AP_Scheduler::Task AP_Vehicle::scheduler_tasks[] = {
     SCHED_TASK(publish_osd_info, 1, 10, 240),
 #endif
 #if HAL_INS_ACCELCAL_ENABLED
-    SCHED_TASK(accel_cal_update,      10,    100, 245),
+    SCHED_TASK(accel_cal_update,                                                      10, 100, 245),
 #endif
 #if AP_FENCE_ENABLED
     SCHED_TASK_CLASS(AC_Fence,     &vehicle.fence,          update,                   10, 100, 248),
@@ -451,11 +459,6 @@ void AP_Vehicle::update_throttle_notch(AP_InertialSensor::HarmonicNotch &notch)
     const float min_ratio = notch.params.freq_min_ratio();
 
     const AP_Motors* motors = AP::motors();
-    if (motors->get_spool_state() == AP_Motors::SpoolState::SHUT_DOWN) {
-        notch.set_inactive(true);
-    } else {
-        notch.set_inactive(false);
-    }
     const float motors_throttle = motors != nullptr ? MAX(0,motors->get_throttle_out()) : 0;
     float throttle_freq = ref_freq * MAX(min_ratio, sqrtf(motors_throttle / ref));
 
@@ -477,12 +480,20 @@ void AP_Vehicle::update_dynamic_notch(AP_InertialSensor::HarmonicNotch &notch)
         return;
     }
 
+    const AP_Motors* motors = AP::motors();
+    if (motors->get_spool_state() == AP_Motors::SpoolState::SHUT_DOWN) {
+        notch.set_inactive(true);
+    } else {
+        notch.set_inactive(false);
+    }
+
     switch (notch.params.tracking_mode()) {
         case HarmonicNotchDynamicMode::UpdateThrottle: // throttle based tracking
             // set the harmonic notch filter frequency approximately scaled on motor rpm implied by throttle
             update_throttle_notch(notch);
             break;
 
+#if AP_RPM_ENABLED
         case HarmonicNotchDynamicMode::UpdateRPM: // rpm sensor based tracking
         case HarmonicNotchDynamicMode::UpdateRPM2: {
             const auto *rpm_sensor = AP::rpm();
@@ -496,6 +507,7 @@ void AP_Vehicle::update_dynamic_notch(AP_InertialSensor::HarmonicNotch &notch)
             }
             break;
         }
+#endif  // AP_RPM_ENABLED
 #if HAL_WITH_ESC_TELEM
         case HarmonicNotchDynamicMode::UpdateBLHeli: // BLHeli based tracking
             // set the harmonic notch filter frequency scaled on measured frequency
@@ -503,13 +515,13 @@ void AP_Vehicle::update_dynamic_notch(AP_InertialSensor::HarmonicNotch &notch)
                 float notches[INS_MAX_NOTCHES];
                 const uint8_t num_notches = AP::esc_telem().get_motor_frequencies_hz(notch.num_dynamic_notches, notches);
                 // ESC telemetry will return 0 for missing data, but only after 1s
-                for (uint8_t i = 0; i < notch.num_dynamic_notches; i++) {
+                for (uint8_t i = 0; i < num_notches; i++) {
                     if (!is_zero(notches[i])) {
                         notches[i] =  MAX(ref_freq, notches[i]);
                     }
                 }
                 if (num_notches > 0) {
-                    notch.update_frequencies_hz(notch.num_dynamic_notches, notches);
+                    notch.update_frequencies_hz(num_notches, notches);
                 } else {    // throttle fallback
                     update_throttle_notch(notch);
                 }

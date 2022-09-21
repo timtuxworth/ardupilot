@@ -438,11 +438,7 @@ void AP_AHRS::copy_estimates_from_backend_estimates(const AP_AHRS_Backend::Estim
     _gyro_estimate = results.gyro_estimate;
     _gyro_drift = results.gyro_drift;
 
-    // copy earth-frame accelerometer estimates:
-    for (uint8_t i=0; i<INS_MAX_INSTANCES; i++) {
-        _accel_ef_ekf[i] = results.accel_ef[i];
-    }
-    _accel_ef_ekf_blended = results.accel_ef_blended;
+    _accel_ef = results.accel_ef;
     _accel_bias = results.accel_bias;
 
     update_cd_values();
@@ -507,9 +503,10 @@ void AP_AHRS::update_EKF2(void)
             update_trig();
 
             // Use the primary EKF to select the primary gyro
-            const int8_t primary_imu = EKF2.getPrimaryCoreIMUIndex();
-
             const AP_InertialSensor &_ins = AP::ins();
+            const int8_t primary_imu = EKF2.getPrimaryCoreIMUIndex();
+            const uint8_t primary_gyro = primary_imu>=0?primary_imu:_ins.get_primary_gyro();
+            const uint8_t primary_accel = primary_imu>=0?primary_imu:_ins.get_primary_accel();
 
             // get gyro bias for primary EKF and change sign to give gyro drift
             // Note sign convention used by EKF is bias = measurement - truth
@@ -517,30 +514,18 @@ void AP_AHRS::update_EKF2(void)
             EKF2.getGyroBias(_gyro_drift);
             _gyro_drift = -_gyro_drift;
 
-            // calculate corrected gyro estimate for get_gyro()
-            if (primary_imu == -1 || !_ins.get_gyro_health(primary_imu)) {
-                // the primary IMU is undefined so use an uncorrected default value from the INS library
-                _gyro_estimate = _ins.get_gyro();
-            } else {
-                // use the same IMU as the primary EKF and correct for gyro drift
-                _gyro_estimate = _ins.get_gyro(primary_imu) + _gyro_drift;
-            }
+            // use the same IMU as the primary EKF and correct for gyro drift
+            _gyro_estimate = _ins.get_gyro(primary_gyro) + _gyro_drift;
 
             // get z accel bias estimate from active EKF (this is usually for the primary IMU)
             float &abias = _accel_bias.z;
             EKF2.getAccelZBias(abias);
 
             // This EKF is currently using primary_imu, and abias applies to only that IMU
-            for (uint8_t i=0; i<_ins.get_accel_count(); i++) {
-                Vector3f accel = _ins.get_accel(i);
-                if (i == primary_imu) {
-                    accel.z -= abias;
-                }
-                if (_ins.get_accel_health(i)) {
-                    _accel_ef_ekf[i] = _dcm_matrix * get_rotation_autopilot_body_to_vehicle_body() * accel;
-                }
-            }
-            _accel_ef_ekf_blended = _accel_ef_ekf[primary_imu>=0?primary_imu:_ins.get_primary_accel()];
+            Vector3f accel = _ins.get_accel(primary_accel);
+            accel.z -= abias;
+            _accel_ef = _dcm_matrix * get_rotation_autopilot_body_to_vehicle_body() * accel;
+
             nav_filter_status filt_state;
             EKF2.getFilterStatus(filt_state);
             update_notify_from_filter_status(filt_state);
@@ -587,6 +572,8 @@ void AP_AHRS::update_EKF3(void)
 
             // Use the primary EKF to select the primary gyro
             const int8_t primary_imu = EKF3.getPrimaryCoreIMUIndex();
+            const uint8_t primary_gyro = primary_imu>=0?primary_imu:_ins.get_primary_gyro();
+            const uint8_t primary_accel = primary_imu>=0?primary_imu:_ins.get_primary_accel();
 
             // get gyro bias for primary EKF and change sign to give gyro drift
             // Note sign convention used by EKF is bias = measurement - truth
@@ -594,32 +581,18 @@ void AP_AHRS::update_EKF3(void)
             EKF3.getGyroBias(-1,_gyro_drift);
             _gyro_drift = -_gyro_drift;
 
-            // calculate corrected gyro estimate for get_gyro()
-            if (primary_imu == -1 || !_ins.get_gyro_health(primary_imu)) {
-                // the primary IMU is undefined so use an uncorrected default value from the INS library
-                _gyro_estimate = _ins.get_gyro();
-            } else {
-                // use the same IMU as the primary EKF and correct for gyro drift
-                _gyro_estimate = _ins.get_gyro(primary_imu) + _gyro_drift;
-            }
+            // use the same IMU as the primary EKF and correct for gyro drift
+            _gyro_estimate = _ins.get_gyro(primary_gyro) + _gyro_drift;
 
             // get 3-axis accel bias festimates for active EKF (this is usually for the primary IMU)
             Vector3f &abias = _accel_bias;
             EKF3.getAccelBias(-1,abias);
 
-            // This EKF uses the primary IMU
-            // Eventually we will run a separate instance of the EKF for each IMU and do the selection and blending of EKF outputs upstream
-            // update _accel_ef_ekf
-            for (uint8_t i=0; i<_ins.get_accel_count(); i++) {
-                Vector3f accel = _ins.get_accel(i);
-                if (i == primary_imu) {
-                    accel -= abias;
-                }
-                if (_ins.get_accel_health(i)) {
-                    _accel_ef_ekf[i] = _dcm_matrix * accel;
-                }
-            }
-            _accel_ef_ekf_blended = _accel_ef_ekf[primary_imu>=0?primary_imu:_ins.get_primary_accel()];
+            // use the primary IMU for accel earth frame
+            Vector3f accel = _ins.get_accel(primary_accel);
+            accel -= abias;
+            _accel_ef = _dcm_matrix * accel;
+
             nav_filter_status filt_state;
             EKF3.getFilterStatus(filt_state);
             update_notify_from_filter_status(filt_state);
@@ -654,12 +627,8 @@ void AP_AHRS::update_SITL(void)
 
         _gyro_estimate = _ins.get_gyro();
 
-        for (uint8_t i=0; i<INS_MAX_INSTANCES; i++) {
-            const Vector3f &accel = _ins.get_accel(i);
-            _accel_ef_ekf[i] = _dcm_matrix * get_rotation_autopilot_body_to_vehicle_body() * accel;
-        }
-        _accel_ef_ekf_blended = _accel_ef_ekf[0];
-
+        const Vector3f &accel = _ins.get_accel();
+        _accel_ef = _dcm_matrix * get_rotation_autopilot_body_to_vehicle_body() * accel;
     }
 
 #if HAL_NAVEKF3_AVAILABLE
@@ -709,26 +678,11 @@ void AP_AHRS::update_external(void)
 
         _gyro_estimate = AP::externalAHRS().get_gyro();
 
-        for (uint8_t i=0; i<INS_MAX_INSTANCES; i++) {
-            Vector3f accel = AP::externalAHRS().get_accel();
-            _accel_ef_ekf[i] = _dcm_matrix * get_rotation_autopilot_body_to_vehicle_body() * accel;
-        }
-        _accel_ef_ekf_blended = _accel_ef_ekf[0];
+        Vector3f accel = AP::externalAHRS().get_accel();
+        _accel_ef = _dcm_matrix * get_rotation_autopilot_body_to_vehicle_body() * accel;
     }
 }
 #endif // HAL_EXTERNAL_AHRS_ENABLED
-
-// accelerometer values in the earth frame in m/s/s
-const Vector3f &AP_AHRS::get_accel_ef(uint8_t i) const
-{
-    return _accel_ef_ekf[i];
-}
-
-// blended accelerometer values in the earth frame in m/s/s
-const Vector3f &AP_AHRS::get_accel_ef_blended(void) const
-{
-    return _accel_ef_ekf_blended;
-}
 
 void AP_AHRS::reset()
 {
@@ -2663,12 +2617,12 @@ bool AP_AHRS::resetHeightDatum(void)
 }
 
 // send a EKF_STATUS_REPORT for current EKF
-void AP_AHRS::send_ekf_status_report(mavlink_channel_t chan) const
+void AP_AHRS::send_ekf_status_report(GCS_MAVLINK &link) const
 {
     switch (ekf_type()) {
     case EKFType::NONE:
         // send zero status report
-        dcm.send_ekf_status_report(chan);
+        dcm.send_ekf_status_report(link);
         break;
 
 #if AP_AHRS_SIM_ENABLED
@@ -2686,26 +2640,26 @@ void AP_AHRS::send_ekf_status_report(mavlink_channel_t chan) const
         //EKF_CONST_POS_MODE | /* EKF is in constant position mode and does not know it's absolute or relative position. | */
         EKF_PRED_POS_HORIZ_REL | /* Set if EKF's predicted horizontal position (relative) estimate is good. | */
         EKF_PRED_POS_HORIZ_ABS; /* Set if EKF's predicted horizontal position (absolute) estimate is good. | */
-        mavlink_msg_ekf_status_report_send(chan, flags, 0, 0, 0, 0, 0, 0);
+        mavlink_msg_ekf_status_report_send(link.get_chan(), flags, 0, 0, 0, 0, 0, 0);
         }
         break;
 #endif
 
 #if HAL_EXTERNAL_AHRS_ENABLED
     case EKFType::EXTERNAL: {
-        AP::externalAHRS().send_status_report(chan);
+        AP::externalAHRS().send_status_report(link);
         break;
     }
 #endif
 
 #if HAL_NAVEKF2_AVAILABLE
     case EKFType::TWO:
-        return EKF2.send_status_report(chan);
+        return EKF2.send_status_report(link);
 #endif
 
 #if HAL_NAVEKF3_AVAILABLE
     case EKFType::THREE:
-        return EKF3.send_status_report(chan);
+        return EKF3.send_status_report(link);
 #endif
 
     }
@@ -2994,8 +2948,9 @@ uint8_t AP_AHRS::get_active_airspeed_index() const
 uint8_t AP_AHRS::get_primary_IMU_index() const
 {
     int8_t imu = -1;
-    switch (ekf_type()) {
+    switch (active_EKF_type()) {
     case EKFType::NONE:
+        imu = AP::ins().get_primary_gyro();
         break;
 #if HAL_NAVEKF2_AVAILABLE
     case EKFType::TWO:
@@ -3022,12 +2977,6 @@ uint8_t AP_AHRS::get_primary_IMU_index() const
         imu = AP::ins().get_primary_accel();
     }
     return imu;
-}
-
-// get earth-frame accel vector for primary IMU
-const Vector3f &AP_AHRS::get_accel_ef() const
-{
-    return get_accel_ef(get_primary_accel_index());
 }
 
 // return the index of the primary core or -1 if no primary core selected
@@ -3146,6 +3095,16 @@ void AP_AHRS::set_posvelyaw_source_set(uint8_t source_set_idx)
 #if HAL_NAVEKF3_AVAILABLE
     EKF3.setPosVelYawSourceSet(source_set_idx);
 #endif
+}
+
+//returns active source set used, 0=primary, 1=secondary, 2=tertiary
+uint8_t AP_AHRS::get_posvelyaw_source_set() const
+{
+#if HAL_NAVEKF3_AVAILABLE
+    return EKF3.get_active_source_set();
+#else
+    return 0;
+#endif   
 }
 
 void AP_AHRS::Log_Write()

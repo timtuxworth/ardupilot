@@ -81,6 +81,7 @@ public:
         int8_t scheduler_task;
         bool armed; // true if vehicle was armed
         enum safety_state safety_state;
+        bool boot_to_dfu; // true if we should reboot to DFU on boot
     };
     struct PersistentData persistent_data;
     // last_persistent_data is only filled in if we've suffered a watchdog reset
@@ -106,6 +107,7 @@ public:
         NO_CHANGE=1,
         FAIL=2,
         NOT_AVAILABLE=3,
+        NOT_SIGNED=4,
     };
 
     // overwrite bootloader (probably with one from ROMFS)
@@ -118,7 +120,7 @@ public:
       Buf should be filled with a printable string and must be null
       terminated
      */
-    virtual bool get_system_id(char buf[40]) { return false; }
+    virtual bool get_system_id(char buf[50]) { return false; }
     virtual bool get_system_id_unformatted(uint8_t buf[], uint8_t &len) { return false; }
 
     /**
@@ -196,8 +198,14 @@ public:
     // log info on stack usage
     virtual void log_stack_info(void) {}
 
+#if AP_CRASHDUMP_ENABLED
     virtual size_t last_crash_dump_size() const { return 0; }
     virtual void* last_crash_dump_ptr() const { return nullptr; }
+#endif
+
+#if HAL_ENABLE_DFU_BOOT
+    virtual void boot_to_dfu(void) {}
+#endif
 protected:
     // we start soft_armed false, so that actuators don't send any
     // values until the vehicle code has fully started

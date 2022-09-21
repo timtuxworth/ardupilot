@@ -55,6 +55,8 @@ public:
         k_param_battery_volt_pin,
         k_param_battery_curr_pin,
 
+        k_param_precland = 24,
+
         // braking
         k_param_braking_percent_old = 30,   // unused
         k_param_braking_speederr_old,       // unused
@@ -337,6 +339,11 @@ public:
 #if HAL_PROXIMITY_ENABLED
     // proximity library
     AP_Proximity proximity;
+#endif
+
+#if MODE_DOCK_ENABLED == ENABLED
+    // we need a pointer to the mode for the G2 table
+    class ModeDock *mode_dock_ptr;
 #endif
 
     // avoidance library

@@ -139,7 +139,7 @@ Mode *Copter::mode_from_mode_num(const Mode::Number mode)
             break;
 #endif
 
-#if AP_OPTICALFLOW_ENABLED
+#if MODE_FLOWHOLD_ENABLED == ENABLED
         case Mode::Number::FLOWHOLD:
             ret = (Mode *)g2.mode_flowhold_ptr;
             break;
@@ -319,7 +319,7 @@ bool Copter::set_mode(Mode::Number mode, ModeReason reason)
     fence.manual_recovery_start();
 #endif
 
-#if CAMERA == ENABLED
+#if AP_CAMERA_ENABLED
     camera.set_is_auto_mode(flightmode->mode_number() == Mode::Number::AUTO);
 #endif
 
@@ -1010,14 +1010,6 @@ void Mode::set_land_complete(bool b)
 GCS_Copter &Mode::gcs()
 {
     return copter.gcs();
-}
-
-// set_throttle_takeoff - allows modes to tell throttle controller we
-// are taking off so I terms can be cleared
-void Mode::set_throttle_takeoff()
-{
-    // initialise the vertical position controller
-    pos_control->init_z_controller();
 }
 
 uint16_t Mode::get_pilot_speed_dn()

@@ -300,10 +300,16 @@ const AP_Param::Info Rover::var_info[] = {
     // @Path: ../libraries/AP_AHRS/AP_AHRS.cpp
     GOBJECT(ahrs,                   "AHRS_",    AP_AHRS),
 
-#if CAMERA == ENABLED
+#if AP_CAMERA_ENABLED
     // @Group: CAM_
     // @Path: ../libraries/AP_Camera/AP_Camera.cpp
     GOBJECT(camera,                  "CAM_", AP_Camera),
+#endif
+
+#if PRECISION_LANDING == ENABLED
+    // @Group: PLND_
+    // @Path: ../libraries/AC_PrecLand/AC_PrecLand.cpp
+    GOBJECT(precland,                "PLND_", AC_PrecLand),
 #endif
 
 #if HAL_MOUNT_ENABLED
@@ -351,9 +357,11 @@ const AP_Param::Info Rover::var_info[] = {
     GOBJECTN(ahrs.EKF3, NavEKF3, "EK3_", NavEKF3),
 #endif
 
+#if AP_RPM_ENABLED
     // @Group: RPM
     // @Path: ../libraries/AP_RPM/AP_RPM.cpp
     GOBJECT(rpm_sensor, "RPM", AP_RPM),
+#endif
 
     // @Group: MIS_
     // @Path: ../libraries/AP_Mission/AP_Mission.cpp
@@ -664,6 +672,12 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("MANUAL_OPTIONS", 53, ParametersG2, manual_options, 0),
 
+#if MODE_DOCK_ENABLED == ENABLED
+    // @Group: DOCK
+    // @Path: mode_dock.cpp
+    AP_SUBGROUPPTR(mode_dock_ptr, "DOCK", 54, ParametersG2, ModeDock),
+#endif
+
     AP_GROUPEND
 };
 
@@ -707,6 +721,9 @@ ParametersG2::ParametersG2(void)
     wheel_rate_control(wheel_encoder),
     attitude_control(),
     smart_rtl(),
+#if MODE_DOCK_ENABLED == ENABLED
+    mode_dock_ptr(&rover.mode_dock),
+#endif
 #if HAL_PROXIMITY_ENABLED
     proximity(),
 #endif
@@ -758,7 +775,21 @@ const AP_Param::ConversionInfo conversion_table[] = {
     { Parameters::k_param_g2,                36,      AP_PARAM_FLOAT,  "SAIL_NO_GO_ANGLE" },
     { Parameters::k_param_arming,             2,     AP_PARAM_INT16,  "ARMING_CHECK" },
     { Parameters::k_param_turn_max_g_old,     0,     AP_PARAM_FLOAT,  "ATC_TURN_MAX_G" },
+    { Parameters::k_param_g2,                82,     AP_PARAM_INT8 , "PRX1_TYPE" },
+    { Parameters::k_param_g2,               146,     AP_PARAM_INT8 , "PRX1_ORIENT" },
+    { Parameters::k_param_g2,               210,     AP_PARAM_INT16, "PRX1_YAW_CORR" },
+    { Parameters::k_param_g2,               274,     AP_PARAM_INT16, "PRX1_IGN_ANG1" },
+    { Parameters::k_param_g2,               338,     AP_PARAM_INT8,  "PRX1_IGN_WID1" },
+    { Parameters::k_param_g2,               402,     AP_PARAM_INT16, "PRX1_IGN_ANG2" },
+    { Parameters::k_param_g2,               466,     AP_PARAM_INT8,  "PRX1_IGN_WID2" },
+    { Parameters::k_param_g2,               530,     AP_PARAM_INT16, "PRX1_IGN_ANG3" },
+    { Parameters::k_param_g2,               594,     AP_PARAM_INT8,  "PRX1_IGN_WID3" },
+    { Parameters::k_param_g2,               658,     AP_PARAM_INT16, "PRX1_IGN_ANG4" },
+    { Parameters::k_param_g2,               722,     AP_PARAM_INT8,  "PRX1_IGN_WID4" },
+    { Parameters::k_param_g2,               1234,    AP_PARAM_FLOAT, "PRX1_MIN" },
+    { Parameters::k_param_g2,               1298,    AP_PARAM_FLOAT, "PRX1_MAX" },
 };
+
 
 void Rover::load_parameters(void)
 {

@@ -98,7 +98,7 @@ bool Plane::start_command(const AP_Mission::Mission_Command& cmd)
         return quadplane.do_vtol_takeoff(cmd);
 
     case MAV_CMD_NAV_VTOL_LAND:
-        if (quadplane.option_is_set(QuadPlane::OPTION::MISSION_LAND_FW_APPROACH)) {
+        if (quadplane.landing_with_fixed_wing_spiral_approach()) {
             // the user wants to approach the landing in a fixed wing flight mode
             // the waypoint will be used as a loiter_to_alt
             // after which point the plane will compute the optimal into the wind direction
@@ -286,7 +286,7 @@ bool Plane::verify_command(const AP_Mission::Mission_Command& cmd)        // Ret
     case MAV_CMD_NAV_VTOL_TAKEOFF:
         return quadplane.verify_vtol_takeoff(cmd);
     case MAV_CMD_NAV_VTOL_LAND:
-        if (quadplane.option_is_set(QuadPlane::OPTION::MISSION_LAND_FW_APPROACH) && !verify_landing_vtol_approach(cmd)) {
+        if (quadplane.landing_with_fixed_wing_spiral_approach() && !verify_landing_vtol_approach(cmd)) {
             // verify_landing_vtol_approach will return true once we have completed the approach,
             // in which case we fall over to normal vtol landing code
             return false;
@@ -1159,10 +1159,12 @@ void Plane::do_nav_script_time(const AP_Mission::Mission_Command& cmd)
     nav_scripting.done = false;
     nav_scripting.id++;
     nav_scripting.start_ms = AP_HAL::millis();
+    nav_scripting.current_ms = 0;
 
     // start with current roll rate, pitch rate and throttle
     nav_scripting.roll_rate_dps = plane.rollController.get_pid_info().target;
     nav_scripting.pitch_rate_dps = plane.pitchController.get_pid_info().target;
+    nav_scripting.yaw_rate_dps = degrees(ahrs.get_gyro().z);
     nav_scripting.throttle_pct = SRV_Channels::get_output_scaled(SRV_Channel::k_throttle);
 }
 

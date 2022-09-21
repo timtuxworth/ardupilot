@@ -32,7 +32,6 @@
 #include <AP_NavEKF/AP_NavEKF_Source.h>
 #include <AP_NavEKF/EKF_Buffer.h>
 #include <AP_InertialSensor/AP_InertialSensor.h>
-#include <GCS_MAVLink/GCS_MAVLink.h>
 #include <AP_DAL/AP_DAL.h>
 
 #include "AP_NavEKF/EKFGSF_yaw.h"
@@ -352,7 +351,7 @@ public:
     void getFilterStatus(nav_filter_status &status) const;
 
     // send an EKF_STATUS_REPORT message to GCS
-    void send_status_report(mavlink_channel_t chan) const;
+    void send_status_report(class GCS_MAVLINK &link) const;
 
     // provides the height limit to be observed by the control loops
     // returns false if no height limiting is required
@@ -1048,6 +1047,7 @@ private:
     uint32_t lastSynthYawTime_ms;   // time stamp when yaw observation was last fused (msec)
     uint32_t ekfStartTime_ms;       // time the EKF was started (msec)
     Vector2F lastKnownPositionNE;   // last known position
+    float lastKnownPositionD;       // last known height
     uint32_t lastLaunchAccelTime_ms;
     ftype velTestRatio;             // sum of squares of GPS velocity innovation divided by fail threshold
     ftype posTestRatio;             // sum of squares of GPS position innovation divided by fail threshold

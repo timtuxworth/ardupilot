@@ -321,8 +321,8 @@ const AP_Param::Info Copter::var_info[] = {
 
     // @Param: LOG_BITMASK
     // @DisplayName: Log bitmask
-    // @Description: 4 byte bitmap of log types to enable
-    // @Bitmask: 0:ATTITUDE_FAST,1:ATTITUDE_MED,2:GPS,3:PM,4:CTUN,5:NTUN,6:RCIN,7:IMU,8:CMD,9:CURRENT,10:RCOUT,11:OPTFLOW,12:PID,13:COMPASS,14:INAV,15:CAMERA,17:MOTBATT,18:IMU_FAST,19:IMU_RAW,20:VideoStabilization,21:Fast harmonic notch updates
+    // @Description: Bitmap of what on-board log types to enable. This value is made up of the sum of each of the log types you want to be saved. It is usually best just to enable all basiclog types by setting this to 65535. 
+    // @Bitmask: 0:Fast Attitude,1:Medium Attitude,2:GPS,3:System Performance,4:Control Tuning,5:Navigation Tuning,6:RC input,7:IMU,8:Mission Commands,9:Battery Monitor,10:RC output,11:Optical Flow,12:PID,13:Compass,15:Camera,17:Motors,18:Fast IMU,19:Raw IMU,20:Video Stabilization,21:Fast harmonic notch logging
     // @User: Standard
     GSCALAR(log_bitmask,    "LOG_BITMASK",          DEFAULT_LOG_BITMASK),
 
@@ -354,7 +354,7 @@ const AP_Param::Info Copter::var_info[] = {
 
     // @Param: DISARM_DELAY
     // @DisplayName: Disarm delay
-    // @Description: Delay before automatic disarm in seconds. A value of zero disables auto disarm.
+    // @Description: Delay before automatic disarm in seconds after landing touchdown detection. A value of zero disables auto disarm. If Emergency Motor stop active, delay time is half this value.
     // @Units: s
     // @Range: 0 127
     // @User: Advanced
@@ -404,7 +404,7 @@ const AP_Param::Info Copter::var_info[] = {
 
     // @Param: FS_EKF_THRESH
     // @DisplayName: EKF failsafe variance threshold
-    // @Description: Allows setting the maximum acceptable compass and velocity variance
+    // @Description: Allows setting the maximum acceptable compass, velocity, position and height variances. Used in arming check and EKF failsafe.
     // @Values: 0.6:Strict, 0.8:Default, 1.0:Relaxed
     // @User: Advanced
     GSCALAR(fs_ekf_thresh, "FS_EKF_THRESH",    FS_EKF_THRESHOLD_DEFAULT),
@@ -456,7 +456,7 @@ const AP_Param::Info Copter::var_info[] = {
 
     // variables not in the g class which contain EEPROM saved variables
 
-#if CAMERA == ENABLED
+#if AP_CAMERA_ENABLED
     // @Group: CAM_
     // @Path: ../libraries/AP_Camera/AP_Camera.cpp
     GOBJECT(camera,           "CAM_", AP_Camera),
@@ -674,7 +674,7 @@ const AP_Param::Info Copter::var_info[] = {
 #if AP_OPTICALFLOW_ENABLED
     // @Group: FLOW
     // @Path: ../libraries/AP_OpticalFlow/AP_OpticalFlow.cpp
-    GOBJECT(optflow,   "FLOW", OpticalFlow),
+    GOBJECT(optflow,   "FLOW", AP_OpticalFlow),
 #endif
 
 #if PRECISION_LANDING == ENABLED
@@ -683,7 +683,7 @@ const AP_Param::Info Copter::var_info[] = {
     GOBJECT(precland, "PLND_", AC_PrecLand),
 #endif
 
-#if RPM_ENABLED == ENABLED
+#if AP_RPM_ENABLED
     // @Group: RPM
     // @Path: ../libraries/AP_RPM/AP_RPM.cpp
     GOBJECT(rpm_sensor, "RPM", AP_RPM),
@@ -716,6 +716,12 @@ const AP_Param::Info Copter::var_info[] = {
     // @Group: OSD
     // @Path: ../libraries/AP_OSD/AP_OSD.cpp
     GOBJECT(osd, "OSD", AP_OSD),
+#endif
+
+#if AC_CUSTOMCONTROL_MULTI_ENABLED == ENABLED
+    // @Group: CC
+    // @Path: ../libraries/AC_CustomControl/AC_CustomControl.cpp
+    GOBJECT(custom_control, "CC", AC_CustomControl),
 #endif
 
     // @Group:
@@ -885,7 +891,7 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("LAND_ALT_LOW", 25, ParametersG2, land_alt_low, 1000),
 
-#if !HAL_MINIMIZE_FEATURES && AP_OPTICALFLOW_ENABLED
+#if MODE_FLOWHOLD_ENABLED == ENABLED
     // @Group: FHLD
     // @Path: mode_flowhold.cpp
     AP_SUBGROUPPTR(mode_flowhold_ptr, "FHLD", 26, ParametersG2, ModeFlowHold),
@@ -1137,6 +1143,23 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
     // @User: Standard
     AP_SUBGROUPINFO(command_model_pilot, "PILOT_Y_", 56, ParametersG2, AC_CommandModel),
 
+    // @Param: TKOFF_SLEW_TIME
+    // @DisplayName: Slew time of throttle during take-off
+    // @Description: Time to slew the throttle from minimum to maximum while checking for a succsessful takeoff.
+    // @Units: s
+    // @Range: 0.25 5.0
+    // @User: Standard
+    AP_GROUPINFO("TKOFF_SLEW_TIME", 57, ParametersG2, takeoff_throttle_slew_time, 2.0),
+
+#if HAL_WITH_ESC_TELEM && FRAME_CONFIG != HELI_FRAME
+    // @Param: TKOFF_RPM_MIN
+    // @DisplayName: Takeoff Check RPM minimum
+    // @Description: Takeoff is not permitted until motors report at least this RPM.  Set to zero to disable check
+    // @Range: 0 10000
+    // @User: Standard
+    AP_GROUPINFO("TKOFF_RPM_MIN", 58, ParametersG2, takeoff_rpm_min, 0),
+#endif
+
     // ID 62 is reserved for the SHOW_... parameters from the Skybrush fork at
     // https://github.com/skybrush-io/ardupilot
 
@@ -1160,7 +1183,7 @@ ParametersG2::ParametersG2(void)
 #if MODE_SMARTRTL_ENABLED == ENABLED
     ,smart_rtl()
 #endif
-#if !HAL_MINIMIZE_FEATURES && AP_OPTICALFLOW_ENABLED
+#if MODE_FLOWHOLD_ENABLED == ENABLED
     ,mode_flowhold_ptr(&copter.mode_flowhold)
 #endif
 #if MODE_FOLLOW_ENABLED == ENABLED
@@ -1513,6 +1536,32 @@ void Copter::convert_pid_parameters(void)
     // make any SRV_Channel upgrades needed
     SRV_Channels::upgrade_parameters();
 }
+
+#if HAL_PROXIMITY_ENABLED
+void Copter::convert_prx_parameters()
+{
+    // convert PRX to PRX1_ parameters for Copter-4.3
+    // PARAMETER_CONVERSION - Added: Aug-2022
+    const AP_Param::ConversionInfo prx_conversion_info[] = {
+        { Parameters::k_param_g2, 72, AP_PARAM_INT8, "PRX1_TYPE" },
+        { Parameters::k_param_g2, 136, AP_PARAM_INT8, "PRX1_ORIENT" },
+        { Parameters::k_param_g2, 200, AP_PARAM_INT16, "PRX1_YAW_CORR" },
+        { Parameters::k_param_g2, 264, AP_PARAM_INT16, "PRX1_IGN_ANG1" },
+        { Parameters::k_param_g2, 328, AP_PARAM_INT8, "PRX1_IGN_WID1" },
+        { Parameters::k_param_g2, 392, AP_PARAM_INT16, "PRX1_IGN_ANG2" },
+        { Parameters::k_param_g2, 456, AP_PARAM_INT8, "PRX1_IGN_WID2" },
+        { Parameters::k_param_g2, 520, AP_PARAM_INT16, "PRX1_IGN_ANG3" },
+        { Parameters::k_param_g2, 584, AP_PARAM_INT8, "PRX1_IGN_WID3" },
+        { Parameters::k_param_g2, 648, AP_PARAM_INT16, "PRX1_IGN_ANG4" },
+        { Parameters::k_param_g2, 712, AP_PARAM_INT8, "PRX1_IGN_WID4" },
+        { Parameters::k_param_g2, 1224, AP_PARAM_FLOAT, "PRX1_MIN" },
+        { Parameters::k_param_g2, 1288, AP_PARAM_FLOAT, "PRX1_MAX" },
+    };
+    for (const auto &info : prx_conversion_info) {
+        AP_Param::convert_old_parameter(&info, 1.0);
+    }
+}
+#endif
 
 #if LANDING_GEAR_ENABLED == ENABLED
 /*

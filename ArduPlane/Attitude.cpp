@@ -12,20 +12,21 @@ float Plane::calc_speed_scaler(void)
         if (aspeed > auto_state.highest_airspeed && hal.util->get_soft_armed()) {
             auto_state.highest_airspeed = aspeed;
         }
+        // ensure we have scaling over the full configured airspeed
+        const float airspeed_min = MAX(aparm.airspeed_min, MIN_AIRSPEED_MIN);
+        const float scale_min = MIN(0.5, g.scaling_speed / (2.0 * aparm.airspeed_max));
+        const float scale_max = MAX(2.0, g.scaling_speed / (0.7 * airspeed_min));
         if (aspeed > 0.0001f) {
             speed_scaler = g.scaling_speed / aspeed;
         } else {
-            speed_scaler = 2.0;
+            speed_scaler = scale_max;
         }
-        // ensure we have scaling over the full configured airspeed
-        float scale_min = MIN(0.5, (0.5 * aparm.airspeed_min) / g.scaling_speed);
-        float scale_max = MAX(2.0, (1.5 * aparm.airspeed_max) / g.scaling_speed);
         speed_scaler = constrain_float(speed_scaler, scale_min, scale_max);
 
 #if HAL_QUADPLANE_ENABLED
         if (quadplane.in_vtol_mode() && hal.util->get_soft_armed()) {
             // when in VTOL modes limit surface movement at low speed to prevent instability
-            float threshold = aparm.airspeed_min * 0.5;
+            float threshold = airspeed_min * 0.5;
             if (aspeed < threshold) {
                 float new_scaler = linear_interpolate(0.001, g.scaling_speed / threshold, aspeed, 0, threshold);
                 speed_scaler = MIN(speed_scaler, new_scaler);
@@ -351,6 +352,10 @@ void Plane::stabilize_yaw(float speed_scaler)
       now calculate steering_control.rudder for the rudder
      */
     calc_nav_yaw_coordinated(speed_scaler);
+    /*
+      When not running the yaw rate controller, we need to reset the rate
+    */
+    yawController.reset_rate_PID();
 }
 
 

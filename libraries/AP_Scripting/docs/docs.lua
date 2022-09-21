@@ -296,7 +296,8 @@ function mavlink_mission_item_int_t_ud:param1(value) end
 local Parameter_ud = {}
 
 ---@return Parameter_ud
-function Parameter() end
+---@param name? string
+function Parameter(name) end
 
 -- desc
 ---@param value number
@@ -461,6 +462,11 @@ function Vector3f_ud:normalize() end
 ---@return number
 function Vector3f_ud:length() end
 
+-- Computes angle between this vector and vector v2
+---@param v2 Vector3f_ud 
+---@return number
+function Vector3f_ud:angle(v2) end
+
 -- desc
 ---@param param1 number -- XY rotation in radians
 function Vector3f_ud:rotate_xy(param1) end
@@ -469,6 +475,91 @@ function Vector3f_ud:rotate_xy(param1) end
 ---@return Vector2f_ud
 function Vector3f_ud:xy() end
 
+-- desc
+---@class Quaternion_ud
+local Quaternion_ud = {}
+
+---@return Quaternion_ud
+function Quaternion() end
+
+-- get field
+---@return number
+function Quaternion_ud:q4() end
+
+-- set field
+---@param value number
+function Quaternion_ud:q4(value) end
+
+-- get field
+---@return number
+function Quaternion_ud:q3() end
+
+-- set field
+---@param value number
+function Quaternion_ud:q3(value) end
+
+-- get field
+---@return number
+function Quaternion_ud:q2() end
+
+-- set field
+---@param value number
+function Quaternion_ud:q2(value) end
+
+-- get field
+---@return number
+function Quaternion_ud:q1() end
+
+-- set field
+---@param value number
+function Quaternion_ud:q1(value) end
+
+-- Applies rotation to vector argument
+---@param vec Vector3f_ud
+function Quaternion_ud:earth_to_body(vec) end
+
+-- Returns inverse of quaternion
+---@return Quaternion_ud
+function Quaternion_ud:inverse() end
+
+-- Integrates angular velocity over small time delta
+---@param angular_velocity Vector3f_ud
+---@param time_delta number
+function Quaternion_ud:from_angular_velocity(angular_velocity, time_delta) end
+
+-- Constructs Quaternion from axis and angle
+---@param axis Vector3f_ud
+---@param angle number
+function Quaternion_ud:from_axis_angle(axis, angle) end
+
+-- Converts Quaternion to axis-angle representation
+---@param axis_angle Vector3f_ud
+function Quaternion_ud:to_axis_angle(axis_angle) end
+
+-- Construct quaternion from Euler angles
+---@param roll number
+---@param pitch number
+---@param yaw number
+function Quaternion_ud:from_euler(roll, pitch, yaw) end
+
+-- Returns yaw component of quaternion
+---@return number
+function Quaternion_ud:get_euler_yaw() end
+
+-- Returns pitch component of quaternion
+---@return number
+function Quaternion_ud:get_euler_pitch() end
+
+-- Returns roll component of quaternion
+---@return number
+function Quaternion_ud:get_euler_roll() end
+
+-- Mutates quaternion have length 1
+function Quaternion_ud:normalize() end
+
+-- Returns length or norm of quaternion
+---@return number
+function Quaternion_ud:length() end
 
 -- desc
 ---@class Location_ud
@@ -626,10 +717,12 @@ local AP_HAL__I2CDevice_ud = {}
 ---@param address integer
 function AP_HAL__I2CDevice_ud:set_address(address) end
 
--- desc
+-- If no read length is provided a single register will be read and returned.
+-- If read length is provided a table of register values are returned.
 ---@param register_num integer
----@return integer|nil
-function AP_HAL__I2CDevice_ud:read_registers(register_num) end
+---@param read_length? integer
+---@return integer|table|nil
+function AP_HAL__I2CDevice_ud:read_registers(register_num, read_length) end
 
 -- desc
 ---@param register_num integer
@@ -1119,6 +1212,10 @@ function esc_telem:get_rpm(instance) end
 ---@param param3 number -- error rate
 function esc_telem:update_rpm(esc_index, rpm, error_rate) end
 
+-- set scale factor for RPM on a motor
+---@param param1 motor index (0 is first motor)
+---@param param2 scale factor
+function esc_telem:set_rpm_scale(esc_index, scale_factor) end
 
 -- desc
 ---@class optical_flow

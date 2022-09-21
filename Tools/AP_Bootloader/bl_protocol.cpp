@@ -53,6 +53,8 @@
 #if EXT_FLASH_SIZE_MB
 #include <AP_FlashIface/AP_FlashIface_JEDEC.h>
 #endif
+#include <AP_CheckFirmware/AP_CheckFirmware.h>
+
 // #pragma GCC optimize("O0")
 
 
@@ -139,7 +141,7 @@ static virtual_timer_t systick_vt;
 #define TIMER_BL_WAIT	0
 #define TIMER_LED	    1
 
-static enum led_state {LED_BLINK, LED_ON, LED_OFF} led_state;
+static enum led_state led_state;
 
 volatile unsigned timer[NTIMERS];
 
@@ -174,6 +176,11 @@ static void sys_tick_handler(void *ctx)
         led_toggle(LED_BOOTLOADER);
         timer[TIMER_LED] = 50;
     }
+
+    if ((led_state == LED_BAD_FW) && (timer[TIMER_LED] == 0)) {
+        led_toggle(LED_BOOTLOADER);
+        timer[TIMER_LED] = 1000;
+    }
 }
 
 static void delay(unsigned msec)
@@ -181,7 +188,7 @@ static void delay(unsigned msec)
     chThdSleep(chTimeMS2I(msec));
 }
 
-static void
+void
 led_set(enum led_state state)
 {
     led_state = state;
@@ -197,6 +204,10 @@ led_set(enum led_state state)
 
     case LED_BLINK:
         /* restart the blink state machine ASAP */
+        timer[TIMER_LED] = 0;
+        break;
+
+    case LED_BAD_FW:
         timer[TIMER_LED] = 0;
         break;
     }
@@ -232,6 +243,15 @@ jump_to_app()
 {
     const uint32_t *app_base = (const uint32_t *)(APP_START_ADDRESS);
 
+#if AP_CHECK_FIRMWARE_ENABLED
+    const auto ok = check_good_firmware();
+    if (ok != check_fw_result_t::CHECK_FW_OK) {
+        // bad firmware, don't try and boot
+        led_set(LED_BAD_FW);
+        return;
+    }
+#endif
+    
     // If we have QSPI chip start it
 #if EXT_FLASH_SIZE_MB
     uint8_t* ext_flash_start_addr;
@@ -457,7 +477,10 @@ bootloader(unsigned timeout)
     }
 
     /* make the LED blink while we are idle */
-    led_set(LED_BLINK);
+    // ensure we don't override BAD FW LED
+    if (led_state != LED_BAD_FW) {
+        led_set(LED_BLINK);
+    }
 
     while (true) {
         volatile int c;

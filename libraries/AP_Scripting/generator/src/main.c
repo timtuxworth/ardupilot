@@ -608,6 +608,19 @@ int parse_type(struct type *type, const uint32_t restrictions, enum range_check_
     sanatize_name(&(type->data.ud.sanatized_name), type->data.ud.name);
   }
 
+  // only allow no range check on float, int32 and uint32
+  if (type->flags & TYPE_FLAGS_NO_RANGE_CHECK) {
+    switch (type->type) {
+      case TYPE_FLOAT:
+      case TYPE_INT32_T:
+      case TYPE_UINT32_T:
+        break;
+      default:
+        error(ERROR_USERDATA, "%s types cannot skip range check", data_type);
+        break;
+    }
+  }
+
   // sanity check that only supported types are nullable
   if (type->flags & (TYPE_FLAGS_NULLABLE | TYPE_FLAGS_REFERNCE)) {
     // a switch is a very verbose way to do this, but forces users to consider new types added
@@ -1111,8 +1124,11 @@ void handle_ap_object(void) {
       }
       string_copy(&(node->dependency), depends);
 
+  } else if (strcmp(type, keyword_manual) == 0) {
+    handle_manual(node, ALIAS_TYPE_MANUAL);
+
   } else {
-    error(ERROR_SINGLETON, "AP_Objects only support renames, methods or semaphore keyowrds (got %s)", type);
+    error(ERROR_SINGLETON, "AP_Objects only support renames, methods, semaphore or manual keywords (got %s)", type);
   }
 
   // check that we didn't just add 2 singleton flags
@@ -2339,7 +2355,7 @@ void emit_sandbox(void) {
 void emit_argcheck_helper(void) {
   // tagging this with NOINLINE can save a large amount of flash
   // but until we need it we will allow the compilier to choose to inline this for us
-  fprintf(source, "static int binding_argcheck(lua_State *L, int expected_arg_count) {\n");
+  fprintf(source, "int binding_argcheck(lua_State *L, int expected_arg_count) {\n");
   fprintf(source, "    const int args = lua_gettop(L);\n");
   fprintf(source, "    if (args > expected_arg_count) {\n");
   fprintf(source, "        return luaL_argerror(L, args, \"too many arguments\");\n");
@@ -2754,6 +2770,7 @@ int main(int argc, char **argv) {
 
   fprintf(header, "void load_generated_bindings(lua_State *L);\n");
   fprintf(header, "void load_generated_sandbox(lua_State *L);\n");
+  fprintf(header, "int binding_argcheck(lua_State *L, int expected_arg_count);\n");
 
   fclose(header);
   header = NULL;

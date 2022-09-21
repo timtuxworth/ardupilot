@@ -70,23 +70,33 @@ class TestBuildOptions(object):
         ret = {
             feature.define: 0,
         }
-        if feature.dependency is None:
-            return ret
-        for depname in feature.dependency.split(','):
-            dep = None
-            for f in options:
-                if f.label == depname:
-                    dep = f
-            if dep is None:
-                raise ValueError("Invalid dep (%s)" % dep)
-            ret.update(self.get_defines(dep, options))
+        added_one = True
+        while added_one:
+            added_one = False
+            for option in options:
+                if option.define in ret:
+                    continue
+                if option.dependency is None:
+                    continue
+                for dep in option.dependency.split(','):
+                    f = self.get_option_by_label(dep, options)
+                    if f.define not in ret:
+                        continue
+
+                    print("%s requires %s" % (option.define, f.define))
+                    added_one = True
+                    ret[option.define] = 0
+                    break
         return ret
 
     def test_feature(self, feature, options):
-        # defines = self.get_defines(feature, options)
-        defines = {
-            feature.define: 0,
-        }
+        defines = self.get_defines(feature, options)
+
+        if len(defines.keys()) > 1:
+            self.progress("Disabling %s disables (%s)" % (
+                feature.define,
+                ",".join(defines.keys())))
+
         self.test_compile_with_defines(defines)
 
     def board(self):
@@ -150,6 +160,12 @@ class TestBuildOptions(object):
             count += 1
             self.disable_in_turn_check_sizes(feature, self.sizes_nothing_disabled)
 
+    def get_option_by_label(self, label, options):
+        for x in options:
+            if x.label == label:
+                return x
+        raise ValueError("No such option (%s)" % label)
+
     def run_disable_all(self):
         options = self.get_build_options_from_ardupilot_tree()
         defines = {}
@@ -171,7 +187,14 @@ class TestBuildOptions(object):
             defines[feature.define] = feature.default
         self.test_compile_with_defines(defines)
 
+    def check_deps_consistency(self):
+        # self.progress("Checking deps consistency")
+        options = self.get_build_options_from_ardupilot_tree()
+        for feature in options:
+            self.get_defines(feature, options)
+
     def run(self):
+        self.check_deps_consistency()
         if self.do_step_run_with_defaults:
             self.progress("Running run-with-defaults step")
             self.run_with_defaults()

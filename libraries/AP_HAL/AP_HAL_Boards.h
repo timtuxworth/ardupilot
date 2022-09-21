@@ -221,7 +221,7 @@
 #endif
 
 #ifndef HAL_CANMANAGER_ENABLED
-#define HAL_CANMANAGER_ENABLED ((HAL_MAX_CAN_PROTOCOL_DRIVERS > 0) && !defined(HAL_BUILD_AP_PERIPH))
+#define HAL_CANMANAGER_ENABLED (HAL_MAX_CAN_PROTOCOL_DRIVERS > 0)
 #endif
 
 #ifndef HAL_ENABLE_LIBUAVCAN_DRIVERS
@@ -277,6 +277,18 @@
 #define HAL_WITH_MCU_MONITORING 0
 #endif
 
+#ifndef AP_CRASHDUMP_ENABLED
+#define AP_CRASHDUMP_ENABLED 0
+#endif
+
+#ifndef AP_SIGNED_FIRMWARE
+#define AP_SIGNED_FIRMWARE 0
+#endif
+
+#ifndef HAL_DSHOT_ALARM_ENABLED
+#define HAL_DSHOT_ALARM_ENABLED 0
+#endif
+
 #ifndef HAL_HNF_MAX_FILTERS
 // On an F7 The difference in CPU load between 1 notch and 24 notches is about 2%
 // The difference in CPU load between 1Khz backend and 2Khz backend is about 10%
@@ -308,4 +320,8 @@
 
 #ifndef __FASTRAMFUNC__
 #define __FASTRAMFUNC__
+#endif
+
+#ifndef HAL_ENABLE_DFU_BOOT
+#define HAL_ENABLE_DFU_BOOT 0
 #endif

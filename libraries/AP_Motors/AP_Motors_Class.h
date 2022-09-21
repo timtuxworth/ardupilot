@@ -109,6 +109,7 @@ public:
     static AP_Motors    *get_singleton(void) { return _singleton; }
 
     // check initialisation succeeded
+    virtual bool        arming_checks(size_t buflen, char *buffer) const;
     bool                initialised_ok() const { return _initialised_ok; }
     void                set_initialised_ok(bool val) { _initialised_ok = val; }
 
@@ -121,6 +122,10 @@ public:
 
     // get motor interlock status.  true means motors run, false motors don't run
     bool                get_interlock() const { return _interlock; }
+
+    // get/set spoolup block
+    bool                get_spoolup_block() const { return _spoolup_block; }
+    void                set_spoolup_block(bool set) { _spoolup_block = set; }
 
     // set_roll, set_pitch, set_yaw, set_throttle
     void                set_roll(float roll_in) { _roll_in = roll_in; };        // range -1 ~ +1
@@ -360,6 +365,7 @@ private:
     bool _armed;             // 0 if disarmed, 1 if armed
     bool _interlock;         // 1 if the motor interlock is enabled (i.e. motors run), 0 if disabled (motors don't run)
     bool _initialised_ok;    // 1 if initialisation was successful
+    bool _spoolup_block;     // true if spoolup is blocked
 
     static AP_Motors *_singleton;
 };

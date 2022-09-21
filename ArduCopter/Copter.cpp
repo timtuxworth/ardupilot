@@ -114,6 +114,9 @@ const AP_Scheduler::Task Copter::scheduler_tasks[] = {
     FAST_TASK_CLASS(AP_InertialSensor, &copter.ins, update),
     // run low level rate controllers that only require IMU data
     FAST_TASK(run_rate_controller),
+#if AC_CUSTOMCONTROL_MULTI_ENABLED == ENABLED
+    FAST_TASK(run_custom_controller),
+#endif
     // send outputs to the motors library immediately
     FAST_TASK(motors_output),
      // run EKF state estimator (expensive)
@@ -144,7 +147,7 @@ const AP_Scheduler::Task Copter::scheduler_tasks[] = {
     SCHED_TASK(throttle_loop,         50,     75,  6),
     SCHED_TASK_CLASS(AP_GPS,               &copter.gps,                 update,          50, 200,   9),
 #if AP_OPTICALFLOW_ENABLED
-    SCHED_TASK_CLASS(OpticalFlow,          &copter.optflow,             update,         200, 160,  12),
+    SCHED_TASK_CLASS(AP_OpticalFlow,          &copter.optflow,             update,         200, 160,  12),
 #endif
     SCHED_TASK(update_batt_compass,   10,    120, 15),
     SCHED_TASK_CLASS(RC_Channels, (RC_Channels*)&copter.g2.rc_channels, read_aux_all,    10,  50,  18),
@@ -189,6 +192,7 @@ const AP_Scheduler::Task Copter::scheduler_tasks[] = {
     SCHED_TASK(ekf_check,             10,     75,  84),
     SCHED_TASK(check_vibration,       10,     50,  87),
     SCHED_TASK(gpsglitch_check,       10,     50,  90),
+    SCHED_TASK(takeoff_check,         50,     50,  91),
 #if LANDING_GEAR_ENABLED == ENABLED
     SCHED_TASK(landinggear_update,    10,     75,  93),
 #endif
@@ -199,7 +203,7 @@ const AP_Scheduler::Task Copter::scheduler_tasks[] = {
 #if HAL_MOUNT_ENABLED
     SCHED_TASK_CLASS(AP_Mount,             &copter.camera_mount,        update,          50,  75, 108),
 #endif
-#if CAMERA == ENABLED
+#if AP_CAMERA_ENABLED
     SCHED_TASK_CLASS(AP_Camera,            &copter.camera,              update,          50,  75, 111),
 #endif
 #if LOGGING_ENABLED == ENABLED
@@ -210,10 +214,9 @@ const AP_Scheduler::Task Copter::scheduler_tasks[] = {
     SCHED_TASK_CLASS(AP_InertialSensor,    &copter.ins,                 periodic,       400,  50, 123),
 
     SCHED_TASK_CLASS(AP_Scheduler,         &copter.scheduler,           update_logging, 0.1,  75, 126),
-#if RPM_ENABLED == ENABLED
+#if AP_RPM_ENABLED
     SCHED_TASK_CLASS(AP_RPM,               &copter.rpm_sensor,          update,          40, 200, 129),
 #endif
-    SCHED_TASK_CLASS(Compass, &copter.compass, cal_update, 100, 100, 132),
     SCHED_TASK_CLASS(AP_TempCalibration,   &copter.g2.temp_calibration, update,          10, 100, 135),
 #if HAL_ADSB_ENABLED
     SCHED_TASK(avoidance_adsb_update, 10,    100, 138),
@@ -490,9 +493,13 @@ void Copter::loop_rate_logging()
 {
     if (should_log(MASK_LOG_ATTITUDE_FAST) && !copter.flightmode->logs_attitude()) {
         Log_Write_Attitude();
+        Log_Write_PIDS(); // only logs if PIDS bitmask is set
     }
     if (should_log(MASK_LOG_FTN_FAST)) {
         AP::ins().write_notch_log_messages();
+    }
+    if (should_log(MASK_LOG_IMU_FAST)) {
+        AP::ins().Write_IMU();
     }
 }
 
@@ -504,8 +511,12 @@ void Copter::ten_hz_logging_loop()
     if (should_log(MASK_LOG_ATTITUDE_MED) && !should_log(MASK_LOG_ATTITUDE_FAST) && !copter.flightmode->logs_attitude()) {
         Log_Write_Attitude();
     }
-    // log EKF attitude data
-    if (should_log(MASK_LOG_ATTITUDE_MED) || should_log(MASK_LOG_ATTITUDE_FAST)) {
+    if (!should_log(MASK_LOG_ATTITUDE_FAST)) {
+    // log at 10Hz if PIDS bitmask is selected, even if no ATT bitmask is selected; logs at looprate if ATT_FAST and PIDS bitmask set
+        Log_Write_PIDS();
+    }
+    // log EKF attitude data always at 10Hz unless ATTITUDE_FAST, then do it in the 25Hz loop
+    if (!should_log(MASK_LOG_ATTITUDE_FAST)) {
         Log_Write_EKF_POS();
     }
     if (should_log(MASK_LOG_MOTBATT)) {
@@ -552,7 +563,7 @@ void Copter::twentyfive_hz_logging()
         Log_Write_EKF_POS();
     }
 
-    if (should_log(MASK_LOG_IMU)) {
+    if (should_log(MASK_LOG_IMU) && !(should_log(MASK_LOG_IMU_FAST))) {
         AP::ins().Write_IMU();
     }
 

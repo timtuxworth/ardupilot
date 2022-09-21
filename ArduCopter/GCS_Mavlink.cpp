@@ -446,7 +446,7 @@ const AP_Param::GroupInfo GCS_MAVLINK_Parameters::var_info[] = {
 
     // @Param: EXTRA3
     // @DisplayName: Extra data type 3 stream rate to ground station
-    // @Description: Stream rate of AHRS, HWSTATUS, SYSTEM_TIME, RANGEFINDER, DISTANCE_SENSOR, TERRAIN_REQUEST, BATTERY2, MOUNT_STATUS, OPTICAL_FLOW, MAG_CAL_REPORT, MAG_CAL_PROGRESS, EKF_STATUS_REPORT, VIBRATION and RPM to ground station
+    // @Description: Stream rate of AHRS, SYSTEM_TIME, RANGEFINDER, DISTANCE_SENSOR, TERRAIN_REQUEST, BATTERY2, GIMBAL_DEVICE_ATTITUDE_STATUS, OPTICAL_FLOW, MAG_CAL_REPORT, MAG_CAL_PROGRESS, EKF_STATUS_REPORT, VIBRATION and RPM to ground station
     // @Units: Hz
     // @Range: 0 50
     // @Increment: 1
@@ -518,7 +518,6 @@ static const ap_message STREAM_EXTRA2_msgs[] = {
 };
 static const ap_message STREAM_EXTRA3_msgs[] = {
     MSG_AHRS,
-    MSG_HWSTATUS,
     MSG_SYSTEM_TIME,
     MSG_WIND,
     MSG_RANGEFINDER,
@@ -528,7 +527,7 @@ static const ap_message STREAM_EXTRA3_msgs[] = {
 #endif
     MSG_BATTERY2,
     MSG_BATTERY_STATUS,
-    MSG_MOUNT_STATUS,
+    MSG_GIMBAL_DEVICE_ATTITUDE_STATUS,
     MSG_OPTICAL_FLOW,
     MSG_MAG_CAL_REPORT,
     MSG_MAG_CAL_PROGRESS,
@@ -645,7 +644,7 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_do_set_roi(const Location &roi_loc
     return MAV_RESULT_ACCEPTED;
 }
 
-MAV_RESULT GCS_MAVLINK_Copter::handle_preflight_reboot(const mavlink_command_long_t &packet)
+MAV_RESULT GCS_MAVLINK_Copter::handle_preflight_reboot(const mavlink_command_long_t &packet, const mavlink_message_t &msg)
 {
     // reject reboot if user has also specified they want the "Auto" ESC calibration on next reboot
     if (copter.g.esc_calibrate == (uint8_t)Copter::ESCCalibrationModes::ESCCAL_AUTO) {
@@ -654,7 +653,7 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_preflight_reboot(const mavlink_command_lon
     }
 
     // call parent
-    return GCS_MAVLINK::handle_preflight_reboot(packet);
+    return GCS_MAVLINK::handle_preflight_reboot(packet, msg);
 }
 
 bool GCS_MAVLINK_Copter::set_home_to_current_location(bool _lock) {
@@ -737,9 +736,7 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_mount(const mavlink_command_long_t
         // if vehicle has a camera mount but it doesn't do pan control then yaw the entire vehicle instead
         if ((copter.camera_mount.get_mount_type() != copter.camera_mount.MountType::Mount_Type_None) &&
             !copter.camera_mount.has_pan_control()) {
-            copter.flightmode->auto_yaw.set_yaw_angle_rate(
-                (float)packet.param3 * 0.01f,
-                0.0f);
+            copter.flightmode->auto_yaw.set_yaw_angle_rate((float)packet.param3, 0.0f);
         }
         break;
     default:
