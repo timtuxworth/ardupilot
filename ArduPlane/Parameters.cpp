@@ -837,6 +837,12 @@ const AP_Param::Info Plane::var_info[] = {
     // @Path: ../libraries/AP_Scheduler/AP_Scheduler.cpp
     GOBJECT(scheduler, "SCHED_", AP_Scheduler),
 
+    // @Group: AVOID_
+    // @Path: ../libraries/AC_Avoidance/AC_Avoid.cpp
+#if AC_AVOID_ENABLED == ENABLED
+    GOBJECT(avoid,      "AVOID_",   AC_Avoid),
+#endif
+
     // @Group: RCMAP_
     // @Path: ../libraries/AP_RCMapper/AP_RCMapper.cpp
     GOBJECT(rcmap,                "RCMAP_",         RCMapper),
@@ -1231,6 +1237,12 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
     // @Group: FOLL
     // @Path: ../libraries/AP_Follow/AP_Follow.cpp
     AP_SUBGROUPINFO(follow, "FOLL", 33, ParametersG2, AP_Follow),
+#endif
+
+ #if AC_OAPATHPLANNER_ENABLED == ENABLED
+    // @Group: OA_
+    // @Path: ../libraries/AC_Avoidance/AP_OAPathPlanner.cpp
+    AP_SUBGROUPINFO(oa, "OA_", 34, ParametersG2, AP_OAPathPlanner),
 #endif
     
     AP_GROUPEND

@@ -49,7 +49,7 @@ const AP_Param::GroupInfo AC_Avoid::var_info[] = {
     // @User: Standard
     AP_GROUPINFO_FRAME("ANGLE_MAX", 2,  AC_Avoid, _angle_max, 1000, AP_PARAM_FRAME_COPTER | AP_PARAM_FRAME_HELI | AP_PARAM_FRAME_TRICOPTER),
 
-    // @Param{Copter}: DIST_MAX
+    // @Param{Copter, Plane}: DIST_MAX
     // @DisplayName: Avoidance distance maximum in non-GPS flight modes
     // @Description: Distance from object at which obstacle avoidance will begin in non-GPS modes
     // @Units: m
@@ -65,7 +65,7 @@ const AP_Param::GroupInfo AC_Avoid::var_info[] = {
     // @User: Standard
     AP_GROUPINFO("MARGIN", 4, AC_Avoid, _margin, 2.0f),
 
-    // @Param{Copter, Rover}: BEHAVE
+    // @Param{Copter, Rover, Plane}: BEHAVE
     // @DisplayName: Avoidance behaviour
     // @Description: Avoidance behaviour (slide or stop)
     // @Values: 0:Slide,1:Stop
@@ -111,7 +111,7 @@ const AP_Param::GroupInfo AC_Avoid::var_info[] = {
 AC_Avoid::AC_Avoid()
 {
     _singleton = this;
-
+fprintf(stderr, "AC_Avoid -constructor\n");
     AP_Param::setup_object_defaults(this, var_info);
 }
 

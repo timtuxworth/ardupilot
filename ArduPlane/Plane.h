@@ -105,13 +105,6 @@
 #include <AP_Scripting/AP_Scripting.h>
 #endif
 
-#include "RC_Channel.h"     // RC Channel Library
-#include "Parameters.h"
-#if HAL_ADSB_ENABLED
-#include "avoidance_adsb.h"
-#endif
-#include "AP_Arming.h"
-
 #if AC_AVOID_ENABLED == ENABLED
  #include <AC_Avoidance/AC_Avoid.h>
 #endif
@@ -119,6 +112,13 @@
  #include <AC_WPNav/AC_WPNav_OA.h>
  #include <AC_Avoidance/AP_OAPathPlanner.h>
 #endif
+
+#include "RC_Channel.h"     // RC Channel Library
+#include "Parameters.h"
+#if HAL_ADSB_ENABLED
+#include "avoidance_adsb.h"
+#endif
+#include "AP_Arming.h"
 
 /*
   main APM:Plane class
@@ -251,6 +251,10 @@ private:
 #if AP_OPTICALFLOW_ENABLED
     // Optical flow sensor
     AP_OpticalFlow optflow;
+#endif
+
+#if AC_AVOID_ENABLED == ENABLED
+    AC_Avoid avoid;
 #endif
 
     // Rally Ponints

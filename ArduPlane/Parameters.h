@@ -352,6 +352,10 @@ public:
         k_param_gcs6,          // stream rates
         k_param_fence,         // vehicle fence - unused
         k_param_acro_yaw_rate,
+
+        // 270: Object Avoidance and Path Planning
+        k_param_avoid = 270,
+
     };
 
     AP_Int16 format_version;
@@ -526,6 +530,11 @@ public:
 
     AP_Int8 takeoff_throttle_accel_count;
     AP_Int8 takeoff_timeout;
+
+#if AC_OAPATHPLANNER_ENABLED == ENABLED
+    // object avoidance path planning
+    AP_OAPathPlanner oa;
+#endif
 
 #if LANDING_GEAR_ENABLED == ENABLED
     AP_LandingGear landing_gear;
