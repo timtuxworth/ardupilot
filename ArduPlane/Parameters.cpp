@@ -1363,7 +1363,7 @@ void Plane::load_parameters(void)
         hal.console->printf("done.\n");
     }
     g.format_version.set_default(Parameters::k_format_version);
-
+fprintf(stderr,"TIM:loading params\n");
     uint32_t before = micros();
     // Load all auto-loaded EEPROM variables
     AP_Param::load_all();

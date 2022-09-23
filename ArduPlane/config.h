@@ -1,5 +1,7 @@
 #pragma once
 
+#include <AC_Avoidance/AC_Avoidance_Config.h>
+
 #include "defines.h"
 
 // Just so that it's completely clear...
@@ -211,14 +213,6 @@
 
 #if AP_TERRAIN_AVAILABLE && !AC_RALLY
  #error Terrain relies on Rally which is disabled
-#endif
-
-#ifndef AC_AVOID_ENABLED
- #define AC_AVOID_ENABLED   ENABLED
-#endif
-
-#ifndef AC_OAPATHPLANNER_ENABLED
- #define AC_OAPATHPLANNER_ENABLED   !HAL_MINIMIZE_FEATURES
 #endif
 
 //////////////////////////////////////////////////////////////////////////////
