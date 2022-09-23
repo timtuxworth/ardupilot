@@ -19,8 +19,12 @@
 #include <AP_AHRS/AP_AHRS.h>
 #include <AP_Logger/AP_Logger.h>
 
-// parameter defaults
+// parameter defaults - define different values for plane 
+#ifdef APM_BUILD_TYPE(APM_BUILD_ArduPlane)
+const float OA_BENDYRULER_LOOKAHEAD_DEFAULT = 100.0f;
+#else
 const float OA_BENDYRULER_LOOKAHEAD_DEFAULT = 15.0f;
+#endif
 const float OA_BENDYRULER_RATIO_DEFAULT = 1.5f;
 const int16_t OA_BENDYRULER_ANGLE_DEFAULT = 75;
 const int16_t OA_BENDYRULER_TYPE_DEFAULT = 1;

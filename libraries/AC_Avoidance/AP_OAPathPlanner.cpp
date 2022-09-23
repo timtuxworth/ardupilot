@@ -23,9 +23,15 @@
 
 extern const AP_HAL::HAL &hal;
 
-// parameter defaults
+// parameter defaults - need different defaults for plane - 50 meters for MARGIN_MAX and Log for OPTIONS (but this might change)
+
+#if APM_BUILD_TYPE(APM_BUILD_ArduPlane)
+const float OA_MARGIN_MAX_DEFAULT = 50;
+const int16_t OA_OPTIONS_DEFAULT = 1;
+#else
 const float OA_MARGIN_MAX_DEFAULT = 5;
 const int16_t OA_OPTIONS_DEFAULT = 1;
+#endif
 
 const int16_t OA_UPDATE_MS = 1000;      // path planning updates run at 1hz
 const int16_t OA_TIMEOUT_MS = 3000;     // results over 3 seconds old are ignored

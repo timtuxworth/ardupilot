@@ -27,6 +27,13 @@
  # define AP_AVOID_BEHAVE_DEFAULT AC_Avoid::BehaviourType::BEHAVIOR_SLIDE
 #endif
 
+// Need a large avoidance margin for Plane - guessing 10 for now subject to testing
+#if APM_BUILD_TYPE(APM_BUILD_ArduPlane)
+ # define AP_AVOID_MARGIN_DEFAULT 10
+#else
+ # define AP_AVOID_MARGIN_DEFAULT 4
+#endif
+
 #if APM_BUILD_COPTER_OR_HELI
     # define AP_AVOID_ENABLE_Z          1
 #endif
@@ -63,14 +70,14 @@ const AP_Param::GroupInfo AC_Avoid::var_info[] = {
     // @Units: m
     // @Range: 1 10
     // @User: Standard
-    AP_GROUPINFO("MARGIN", 4, AC_Avoid, _margin, 2.0f),
-
+    AP_GROUPINFO("MARGIN", AP_AVOID_MARGIN_DEFAULT, AC_Avoid, _margin, 2.0f),
+    
     // @Param{Copter, Rover, Plane}: BEHAVE
     // @DisplayName: Avoidance behaviour
     // @Description: Avoidance behaviour (slide or stop)
     // @Values: 0:Slide,1:Stop
     // @User: Standard
-    AP_GROUPINFO_FRAME("BEHAVE", 5, AC_Avoid, _behavior, AP_AVOID_BEHAVE_DEFAULT, AP_PARAM_FRAME_COPTER | AP_PARAM_FRAME_HELI | AP_PARAM_FRAME_TRICOPTER | AP_PARAM_FRAME_ROVER),
+    AP_GROUPINFO_FRAME("BEHAVE", 5, AC_Avoid, _behavior, AP_AVOID_BEHAVE_DEFAULT, AP_PARAM_FRAME_COPTER | AP_PARAM_FRAME_HELI | AP_PARAM_FRAME_TRICOPTER | AP_PARAM_FRAME_ROVER | AP_PARAM_FRAME_PLANE),
 
     // @Param: BACKUP_SPD
     // @DisplayName: Avoidance maximum backup speed
@@ -111,7 +118,6 @@ const AP_Param::GroupInfo AC_Avoid::var_info[] = {
 AC_Avoid::AC_Avoid()
 {
     _singleton = this;
-fprintf(stderr, "AC_Avoid -constructor\n");
     AP_Param::setup_object_defaults(this, var_info);
 }
 
