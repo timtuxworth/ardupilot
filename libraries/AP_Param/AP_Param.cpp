@@ -46,7 +46,7 @@ uint16_t AP_Param::sentinal_offset;
 // singleton instance
 AP_Param *AP_Param::_singleton;
 
-#define ENABLE_DEBUG 0
+#define ENABLE_DEBUG 1
 
 #if ENABLE_DEBUG
  # define Debug(fmt, args ...)  do {::printf("%s:%d: " fmt "\n", __FUNCTION__, __LINE__, ## args); } while(0)
@@ -221,6 +221,7 @@ bool AP_Param::check_group_info(const struct AP_Param::GroupInfo *  group_info,
         uint8_t idx = group_info[i].idx;
         if (idx >= (1<<_group_level_shift)) {
             Debug("idx too large (%u) in %s", idx, group_info[i].name);
+            Debug("idx too large (%u) in %s", idx, group_info[i].name);
             return false;
         }
         if (group_shift != 0 && idx == 0) {
@@ -308,6 +309,7 @@ bool AP_Param::check_var_info(void)
         if (type == AP_PARAM_GROUP) {
             if (i == 0) {
                 // first element can't be a group, for first() call
+                fprintf(stderr, "first element can't be a group, for first() call\n");
                 return false;
             }
             const struct GroupInfo *group_info = get_group_info(info);
@@ -315,6 +317,7 @@ bool AP_Param::check_var_info(void)
                 continue;
             }
             if (!check_group_info(group_info, &total_size, 0, strlen(info.name))) {
+                fprintf(stderr, "group info fail\n");
                 return false;
             }
         } else {
@@ -322,15 +325,18 @@ bool AP_Param::check_var_info(void)
             if (size == 0) {
                 // not a valid type - the top level list can't contain
                 // AP_PARAM_NONE
+                fprintf(stderr, "not a valid type - the top level list can't contain\n");
                 return false;
             }
             total_size += size + sizeof(struct Param_header);
         }
         if (duplicate_key(i, key)) {
+            fprintf(stderr, "duplicate key\n");
             return false;
         }
         if (type != AP_PARAM_GROUP && (info.flags & AP_PARAM_FLAG_POINTER)) {
             // only groups can be pointers
+            fprintf(stderr, "only groups can be pointers\n");
             return false;
         }
     }

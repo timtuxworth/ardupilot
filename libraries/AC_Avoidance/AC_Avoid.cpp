@@ -29,9 +29,11 @@
 
 // Need a large avoidance margin for Plane - guessing 10 for now subject to testing
 #if APM_BUILD_TYPE(APM_BUILD_ArduPlane)
- # define AP_AVOID_MARGIN_DEFAULT 10
+ #define AP_AVOID_MARGIN_DEFAULT 10
+ #define AP_AVOID_DIST_MAX_DEFAULT 99
 #else
  # define AP_AVOID_MARGIN_DEFAULT 4
+ #define AP_AVOID_DIST_MAX_DEFAULT 3
 #endif
 
 #if APM_BUILD_COPTER_OR_HELI
@@ -62,7 +64,8 @@ const AP_Param::GroupInfo AC_Avoid::var_info[] = {
     // @Units: m
     // @Range: 1 30
     // @User: Standard
-    AP_GROUPINFO_FRAME("DIST_MAX", 3,  AC_Avoid, _dist_max, AC_AVOID_NONGPS_DIST_MAX_DEFAULT, AP_PARAM_FRAME_COPTER | AP_PARAM_FRAME_HELI | AP_PARAM_FRAME_TRICOPTER),
+// TIM    AP_GROUPINFO_FRAME("DIST_MAX", AP_AVOID_DIST_MAX_DEFAULT,  AC_Avoid, _dist_max, AC_AVOID_NONGPS_DIST_MAX_DEFAULT, AP_PARAM_FRAME_COPTER | AP_PARAM_FRAME_HELI | AP_PARAM_FRAME_TRICOPTER | AP_PARAM_FRAME_PLANE),
+    AP_GROUPINFO_FRAME("DIST_MAX", 3,  AC_Avoid, _dist_max, AP_AVOID_DIST_MAX_DEFAULT, AP_PARAM_FRAME_COPTER | AP_PARAM_FRAME_HELI | AP_PARAM_FRAME_TRICOPTER | AP_PARAM_FRAME_PLANE),
 
     // @Param: MARGIN
     // @DisplayName: Avoidance distance margin in GPS modes
@@ -70,7 +73,8 @@ const AP_Param::GroupInfo AC_Avoid::var_info[] = {
     // @Units: m
     // @Range: 1 10
     // @User: Standard
-    AP_GROUPINFO("MARGIN", AP_AVOID_MARGIN_DEFAULT, AC_Avoid, _margin, 2.0f),
+//TIM    AP_GROUPINFO("MARGIN", AP_AVOID_MARGIN_DEFAULT, AC_Avoid, _margin, 2.0f),
+    AP_GROUPINFO("MARGIN", 4, AC_Avoid, _margin, AP_AVOID_MARGIN_DEFAULT),
     
     // @Param{Copter, Rover, Plane}: BEHAVE
     // @DisplayName: Avoidance behaviour
@@ -85,7 +89,7 @@ const AP_Param::GroupInfo AC_Avoid::var_info[] = {
     // @Units: m/s
     // @Range: 0 2
     // @User: Standard
-    AP_GROUPINFO("BACKUP_SPD", 6, AC_Avoid, _backup_speed_max, 0.75f),
+    AP_GROUPINFO("BACKUP_SPD", 6, AC_Avoid, _backup_speed_max, 0.75f), 
 
     // @Param{Copter}: ALT_MIN
     // @DisplayName: Avoidance minimum altitude

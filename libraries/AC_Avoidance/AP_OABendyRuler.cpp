@@ -86,6 +86,10 @@ AP_OABendyRuler::AP_OABendyRuler()
 // bendy_type is set to the type of BendyRuler used
 bool AP_OABendyRuler::update(const Location& current_loc, const Location& destination, const Vector2f &ground_speed_vec, Location &origin_new, Location &destination_new, OABendyType &bendy_type, bool proximity_only)
 {
+    // If this gets called before the plane has a location we should just "pass"
+    if(!current_loc.initialised())
+        return false;
+
     // bendy ruler always sets origin to current_loc
     origin_new = current_loc;
 

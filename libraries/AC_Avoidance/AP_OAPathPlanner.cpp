@@ -28,13 +28,15 @@ extern const AP_HAL::HAL &hal;
 #if APM_BUILD_TYPE(APM_BUILD_ArduPlane)
 const float OA_MARGIN_MAX_DEFAULT = 50;
 const int16_t OA_OPTIONS_DEFAULT = 1;
+const int16_t OA_UPDATE_MS = 1000;      // path planning updates run at 1hz
+const int16_t OA_TIMEOUT_MS = 30000;     // results over 3 seconds old are ignored
 #else
 const float OA_MARGIN_MAX_DEFAULT = 5;
 const int16_t OA_OPTIONS_DEFAULT = 1;
-#endif
-
 const int16_t OA_UPDATE_MS = 1000;      // path planning updates run at 1hz
 const int16_t OA_TIMEOUT_MS = 3000;     // results over 3 seconds old are ignored
+#endif
+
 
 const AP_Param::GroupInfo AP_OAPathPlanner::var_info[] = {
 
@@ -87,6 +89,7 @@ AP_OAPathPlanner::AP_OAPathPlanner()
 // perform any required initialisation
 void AP_OAPathPlanner::init()
 {
+    fprintf(stderr, "TIM: AOPathPlanne::init()\n");
     // run background task looking for best alternative destination
     switch (_type) {
     case OA_PATHPLAN_DISABLED:
@@ -125,6 +128,7 @@ void AP_OAPathPlanner::init()
 // pre-arm checks that algorithms have been initialised successfully
 bool AP_OAPathPlanner::pre_arm_check(char *failure_msg, uint8_t failure_msg_len) const
 {
+    fprintf(stderr, "TIM: Path Planner pre-arm __type: %d\n", (int)_type);
     // check if initialisation has succeeded
     switch (_type) {
     case OA_PATHPLAN_DISABLED:
@@ -156,6 +160,7 @@ bool AP_OAPathPlanner::start_thread()
 {
     WITH_SEMAPHORE(_rsem);
 
+    fprintf(stderr, "TIM: Path Planner thread starting __type: %d\n", (int)_type);
     if (_thread_created) {
         return true;
     }
@@ -172,6 +177,7 @@ bool AP_OAPathPlanner::start_thread()
         return false;
     }
     _thread_created = true;
+    fprintf(stderr, "TIM: Path Planner thread starting _thread_created: %d\n", (int)_thread_created);
     return true;
 }
 
@@ -263,6 +269,7 @@ void AP_OAPathPlanner::avoidance_thread()
         }
 
         const uint32_t now = AP_HAL::millis();
+        //fprintf(stderr, "TIM: 2. Avoidance Thread _type:%d now %d latest %d difference %d\n", (int)_type, now, avoidance_latest_ms,  now - avoidance_latest_ms);
         if (now - avoidance_latest_ms < OA_UPDATE_MS) {
             continue;
         }
@@ -286,8 +293,8 @@ void AP_OAPathPlanner::avoidance_thread()
             origin_new = avoidance_request.origin;
             destination_new = avoidance_request.destination;
         }
-
         // run background task looking for best alternative destination
+        fprintf(stderr, "TIM: 3. Avoidance Thread _type:%d\n", (int)_type);
         OA_RetState res = OA_NOT_REQUIRED;
         OAPathPlannerUsed path_planner_used = OAPathPlannerUsed::None;
         switch (_type) {
@@ -331,6 +338,8 @@ void AP_OAPathPlanner::avoidance_thread()
         }
 
         case OA_PATHPLAN_DJIKSTRA_BENDYRULER: {
+           fprintf(stderr, "TIM: Avoidance Thread DIJKSTRA/Bendy _type:%d\n", (int)_type);
+
             if ((_oabendyruler == nullptr) || _oadijkstra == nullptr) {
                 continue;
             } 
@@ -353,6 +362,8 @@ void AP_OAPathPlanner::avoidance_thread()
                 proximity_only = true;
             }
 #if AP_FENCE_ENABLED
+
+           fprintf(stderr, "TIM: Avoidance Thread DIJKSTRA/Bendy fence code\n");
             _oadijkstra->set_fence_margin(_margin_max);
             const AP_OADijkstra::AP_OADijkstra_State dijkstra_state = _oadijkstra->update(avoidance_request2.current_loc, avoidance_request2.destination, origin_new, destination_new);
             switch (dijkstra_state) {
