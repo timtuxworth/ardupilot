@@ -269,7 +269,7 @@ void AP_OAPathPlanner::avoidance_thread()
         }
 
         const uint32_t now = AP_HAL::millis();
-        //fprintf(stderr, "TIM: 2. Avoidance Thread _type:%d now %d latest %d difference %d\n", (int)_type, now, avoidance_latest_ms,  now - avoidance_latest_ms);
+        fprintf(stderr, "TIM: 2. Avoidance Thread _type:%d now %d latest %d difference %d\n", (int)_type, now, avoidance_latest_ms,  now - avoidance_latest_ms);
         if (now - avoidance_latest_ms < OA_UPDATE_MS) {
             continue;
         }
@@ -280,6 +280,7 @@ void AP_OAPathPlanner::avoidance_thread()
         Location origin_new;
         Location destination_new;
         {
+        fprintf(stderr, "TIM: 2A. WITH SEMAPHORE Avoidance Thread _type:%d now %d latest %d difference %d\n", (int)_type, now, avoidance_latest_ms,  now - avoidance_latest_ms);
             WITH_SEMAPHORE(_rsem);
             if (now - avoidance_request.request_time_ms > OA_TIMEOUT_MS) {
                 // this is a very old request, don't process it
@@ -386,6 +387,7 @@ void AP_OAPathPlanner::avoidance_thread()
 
         {
             // give the main thread the avoidance result
+            fprintf(stderr, "TIM: Avoidance Thread DIJKSTRA/Bendy fence code RESULT\n");
             WITH_SEMAPHORE(_rsem);
             avoidance_result.destination = avoidance_request2.destination;
             avoidance_result.origin_new = (res == OA_SUCCESS) ? origin_new : avoidance_result.origin_new;

@@ -255,6 +255,7 @@ private:
 
 #if AC_AVOID_ENABLED == ENABLED
     AC_Avoid avoid;
+    AC_WPNav *wp_nav;
 #endif
 
     // Rally Ponints
@@ -713,19 +714,6 @@ private:
     uint32_t condition_start;
     // A value used in condition commands.  For example the rate at which to change altitude.
     int16_t condition_rate;
-
-    // 3D Location vectors
-    // Location structure defined in AP_Common
-    const struct Location &home = ahrs.get_home();
-
-    // The location of the previous waypoint.  Used for track following and altitude ramp calculations
-    Location prev_WP_loc {};
-
-    // The plane's current location
-    struct Location current_loc {};
-
-    // The location of the current/active waypoint.  Used for altitude ramp, track following and loiter calculations.
-    Location next_WP_loc {};
 
     // Altitude control
     struct {
@@ -1218,6 +1206,39 @@ private:
 
     // mode reason for entering previous mode
     ModeReason previous_mode_reason = ModeReason::UNKNOWN;
+
+protected:
+    // 3D Location vectors - these need to be protected so that they can be accessed by object avoidance code.
+    // Location structure defined in AP_Common
+    const struct Location &home = ahrs.get_home();
+
+    // The location of the previous waypoint.  Used for track following and altitude ramp calculations
+    Location prev_WP_loc {};
+
+    // The plane's current location
+    struct Location current_loc {};
+
+    // The location of the current/active waypoint.  Used for altitude ramp, track following and loiter calculations.
+    Location next_WP_loc {};
+    
+#if AC_OAPATHPLANNER_ENABLED == ENABLED
+    // TIM AC_OAWPNav needs pos_control and _altitude_control - we probably need it here too for path planning
+    /* But at least to start with we are avoiding this
+    AC_PosControl&          _pos_control;
+    const AC_AttitudeControl& _attitude_control;
+    */
+    // update_oanav takes the previous destination (A) and next destination (B) and attempts to make a path from A to B 
+    bool update_oanav(Location &destination_old, Location &destination_new);
+    // oa path planning variables
+    AP_OAPathPlanner::OA_RetState _oa_state;    // state of object avoidance, if OA_SUCCESS we use _oa_destination to avoid obstacles
+    Vector3f    _origin;                // The "origin" of the current path plan. A completely different thing from EKF or AHRS origin
+    Vector3f    _origin_oabak;          // backup of _origin so it can be restored when oa completes
+    Vector3f    _destination;           // The current destination - effectively a Vector3f version of next_WP_loc
+    Vector3f    _destination_oabak;     // backup of _destination so it can be restored when oa completes
+    bool        _terrain_alt;           // true if origin and destination z-axis are terrain altitudes
+    bool        _terrain_alt_oabak;     // true if backup origin and destination z-axis are terrain altitudes
+    Location    _oa_destination;        // intermediate destination during avoidance
+#endif
 
 public:
     void failsafe_check(void);
