@@ -58,6 +58,7 @@ AP_OADijkstra::AP_OADijkstra_State AP_OADijkstra::update(const Location &current
 
     // check for inclusion polygon updates
     if (check_inclusion_polygon_updated()) {
+            fprintf(stderr, "TIM: Dijkstra no inclusion updates\n");
         _inclusion_polygon_with_margin_ok = false;
         _polyfence_visgraph_ok = false;
         _shortest_path_ok = false;
@@ -80,6 +81,7 @@ AP_OADijkstra::AP_OADijkstra_State AP_OADijkstra::update(const Location &current
     // create inner polygon fence
     AP_OADijkstra_Error error_id;
     if (!_inclusion_polygon_with_margin_ok) {
+        fprintf(stderr, "TIM: Dijkstra !_inclusion_polygon_with_margin_ok\n");
         _inclusion_polygon_with_margin_ok = create_inclusion_polygon_with_margin(_polyfence_margin * 100.0f, error_id);
         if (!_inclusion_polygon_with_margin_ok) {
             report_error(error_id);
@@ -110,6 +112,7 @@ AP_OADijkstra::AP_OADijkstra_State AP_OADijkstra::update(const Location &current
 
     // create visgraph for all fence (with margin) points
     if (!_polyfence_visgraph_ok) {
+        fprintf(stderr, "TIM: Dijkstra !_polyfence_visgraph_ok\n");
         _polyfence_visgraph_ok = create_fence_visgraph(error_id);
         if (!_polyfence_visgraph_ok) {
             _shortest_path_ok = false;
@@ -121,6 +124,8 @@ AP_OADijkstra::AP_OADijkstra_State AP_OADijkstra::update(const Location &current
         _log_num_points = 0;
         _log_visgraph_version++;
     }
+
+    fprintf(stderr, "TIM: Dijkstra update: past all the returns visgrah ok? %d numpoints %d\n", _polyfence_visgraph_ok, total_numpoints());
 
     // Log one visgraph point per loop
     if (_polyfence_visgraph_ok && (_log_num_points < total_numpoints()) && (_options & AP_OAPathPlanner::OARecoveryOptions::OA_OPTION_LOG_DIJKSTRA_POINTS) ) {
@@ -140,6 +145,7 @@ AP_OADijkstra::AP_OADijkstra_State AP_OADijkstra::update(const Location &current
 
     // calculate shortest path from current_loc to destination
     if (!_shortest_path_ok) {
+        fprintf(stderr, "\nTIM: Dijkstra update: calc shortest path\n");
         _shortest_path_ok = calc_shortest_path(current_loc, destination, error_id);
         if (!_shortest_path_ok) {
             report_error(error_id);
@@ -153,6 +159,7 @@ AP_OADijkstra::AP_OADijkstra_State AP_OADijkstra::update(const Location &current
     // path has been created, return latest point
     Vector2f dest_pos;
     if (get_shortest_path_point(_path_idx_returned, dest_pos)) {
+        fprintf(stderr, "\nTIM: Avoidance Thread DIJKSTRA/Bendy got shortest path _path_idx_returned %d\n", _path_idx_returned);
 
         // for the first point return origin as current_loc
         Vector2f origin_pos;
@@ -178,6 +185,8 @@ AP_OADijkstra::AP_OADijkstra_State AP_OADijkstra::update(const Location &current
             _path_idx_returned++;
         }
         // log success
+        fprintf(stderr, "\nTIM: DIJKSTRA_STATE_SUCCESS, idx %d numpoints %d, destination lat %d, long %d NEW destination lat %d, long %d\n",
+                         _path_idx_returned, _path_numpoints, destination.lat, destination.lng, destination_new.lat, destination_new.lng);
         Write_OADijkstra(DIJKSTRA_STATE_SUCCESS, 0, _path_idx_returned, _path_numpoints, destination, destination_new);
         return DIJKSTRA_STATE_SUCCESS;
     }
@@ -260,6 +269,7 @@ bool AP_OADijkstra::check_inclusion_polygon_updated() const
     if (fence == nullptr) {
         return false;
     }
+    fprintf(stderr, "TIM: Dijkstra in check_inclusion_polygon_updated\n");
     return (_inclusion_polygon_update_ms != fence->polyfence().get_inclusion_polygon_update_ms());
 }
 
@@ -288,6 +298,8 @@ bool AP_OADijkstra::create_inclusion_polygon_with_margin(float margin_cm, AP_OAD
     const uint8_t num_inclusion_polygons = fence->polyfence().get_inclusion_polygon_count();
 
     // iterate through polygons and create inner points
+    fprintf(stderr, "TIM: Dijkstra create_inclusion_polygon_with_margin: num polygons %d\n", num_inclusion_polygons);
+
     for (uint8_t i = 0; i < num_inclusion_polygons; i++) {
         uint16_t num_points;
         const Vector2f* boundary = fence->polyfence().get_inclusion_polygon(i, num_points);
@@ -295,6 +307,7 @@ bool AP_OADijkstra::create_inclusion_polygon_with_margin(float margin_cm, AP_OAD
         // for each point in inclusion polygon
         // Note: boundary is "unclosed" meaning the last point is *not* the same as the first
         uint16_t new_points = 0;
+        fprintf(stderr, "TIM: Dijkstra create_inclusion_polygon_with_margin: num points %d\n", num_points);
         for (uint16_t j = 0; j < num_points; j++) {
 
             // find points before and after current point (relative to current point)
@@ -342,6 +355,8 @@ bool AP_OADijkstra::create_inclusion_polygon_with_margin(float margin_cm, AP_OAD
                 return false;
             }
             // add point
+            fprintf(stderr, "TIM: Dijkstra create_inclusion_polygon_with_margin: ADD POINT numpoints %d\n", new_points);
+
             _inclusion_polygon_pts[_inclusion_polygon_numpoints + new_points] = temp_point;
             new_points++;
         }

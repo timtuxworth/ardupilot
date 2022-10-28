@@ -57,6 +57,8 @@ void AP_OADijkstra::Write_Visgraph_point(const uint8_t version, const uint8_t po
         Lon         : Lon,
     };
     AP::logger().WriteBlock(&pkt, sizeof(pkt));
+    fprintf(stderr, "TIM: Dijkstra VisGraph: version %d #%d: lat: %d long: %d\n",
+            version, point_num, Lat, Lon);
 }
 
 

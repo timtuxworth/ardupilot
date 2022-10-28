@@ -269,7 +269,7 @@ void AP_OAPathPlanner::avoidance_thread()
         }
 
         const uint32_t now = AP_HAL::millis();
-        fprintf(stderr, "TIM: 2. Avoidance Thread _type:%d now %d latest %d difference %d\n", (int)_type, now, avoidance_latest_ms,  now - avoidance_latest_ms);
+        //fprintf(stderr, "TIM: 2. Avoidance Thread _type:%d now %d latest %d difference %d\n", (int)_type, now, avoidance_latest_ms,  now - avoidance_latest_ms);
         if (now - avoidance_latest_ms < OA_UPDATE_MS) {
             continue;
         }
@@ -280,7 +280,7 @@ void AP_OAPathPlanner::avoidance_thread()
         Location origin_new;
         Location destination_new;
         {
-        fprintf(stderr, "TIM: 2A. WITH SEMAPHORE Avoidance Thread _type:%d now %d latest %d difference %d\n", (int)_type, now, avoidance_latest_ms,  now - avoidance_latest_ms);
+        //fprintf(stderr, "TIM: 2A. WITH SEMAPHORE Avoidance Thread _type:%d now %d latest %d difference %d\n", (int)_type, now, avoidance_latest_ms,  now - avoidance_latest_ms);
             WITH_SEMAPHORE(_rsem);
             if (now - avoidance_request.request_time_ms > OA_TIMEOUT_MS) {
                 // this is a very old request, don't process it
@@ -295,7 +295,7 @@ void AP_OAPathPlanner::avoidance_thread()
             destination_new = avoidance_request.destination;
         }
         // run background task looking for best alternative destination
-        fprintf(stderr, "TIM: 3. Avoidance Thread _type:%d\n", (int)_type);
+        //fprintf(stderr, "TIM: 3. Avoidance Thread _type:%d\n", (int)_type);
         OA_RetState res = OA_NOT_REQUIRED;
         OAPathPlannerUsed path_planner_used = OAPathPlannerUsed::None;
         switch (_type) {
@@ -364,8 +364,8 @@ void AP_OAPathPlanner::avoidance_thread()
             }
 #if AP_FENCE_ENABLED
 
-           fprintf(stderr, "TIM: Avoidance Thread DIJKSTRA/Bendy fence code\n");
             _oadijkstra->set_fence_margin(_margin_max);
+            fprintf(stderr, "TIM: Avoidance Thread calling DIJKSTRA update() code margin_max: %f\n", (double)_margin_max);
             const AP_OADijkstra::AP_OADijkstra_State dijkstra_state = _oadijkstra->update(avoidance_request2.current_loc, avoidance_request2.destination, origin_new, destination_new);
             switch (dijkstra_state) {
             case AP_OADijkstra::DIJKSTRA_STATE_NOT_REQUIRED:
