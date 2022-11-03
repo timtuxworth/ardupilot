@@ -355,6 +355,12 @@ public:
 
         // 270: Object Avoidance and Path Planning
         k_param_avoid = 270,
+        k_param_wp_nav,
+        k_param_attitude_control,
+        k_param_pos_control,
+        k_param_circle_nav,
+        k_param_loiter_nav,     
+        k_param_custom_control,
 
     };
 

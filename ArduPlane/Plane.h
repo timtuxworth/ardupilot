@@ -1223,10 +1223,8 @@ protected:
     
 #if AC_OAPATHPLANNER_ENABLED == ENABLED
     // TIM AC_OAWPNav needs pos_control and _altitude_control - we probably need it here too for path planning
-    /* But at least to start with we are avoiding this
-    AC_PosControl&          _pos_control;
-    const AC_AttitudeControl& _attitude_control;
-    */
+    AC_PosControl       *pos_control;
+    AC_AttitudeControl  *attitude_control;
     // update_oanav takes the previous destination (A) and next destination (B) and attempts to make a path from A to B 
     bool update_oanav(Location &destination_old, Location &destination_new);
     // oa path planning variables
