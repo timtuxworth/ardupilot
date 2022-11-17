@@ -173,6 +173,8 @@ public:
 
 private:
 
+    AP_Param param_loader {var_info};
+
     // key aircraft parameters passed to multiple libraries
     AP_Vehicle::FixedWing aparm;
 
@@ -767,8 +769,6 @@ private:
 
     // Arming/Disarming mangement class
     AP_Arming_Plane arming;
-
-    AP_Param param_loader {var_info};
 
     static const AP_Scheduler::Task scheduler_tasks[];
     static const AP_Param::Info var_info[];

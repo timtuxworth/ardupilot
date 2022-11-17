@@ -113,6 +113,38 @@ void ModeAuto::update()
         plane.calc_nav_roll();
         plane.calc_nav_pitch();
         plane.calc_throttle();
+#if AC_OAPATHPLANNER_ENABLED == ENABLED
+        fprintf(stderr, "TIM: Auto navigate()\n");
+        // run wpnav controller to ensure that whatever was calculated above doesn't hit an obstacle
+        plane.wp_nav->update_wpnav();
+
+        // nav roll and pitch are controller by waypoint controller
+        plane.nav_roll_cd = plane.wp_nav->get_roll();
+        plane.nav_pitch_cd = plane.wp_nav->get_pitch();
+
+#if HAL_QUADPLANE_ENABLED
+        if (quadplane.enabled()) {
+            if(quadplane.transition->set_VTOL_roll_pitch_limit(plane.nav_roll_cd, plane.nav_pitch_cd)) {
+                pos_control->set_externally_limited_xy();
+            }
+            quadplane.disable_yaw_rate_time_constant();
+        }
+#endif
+
+        // call attitude controller
+        attitude_control->input_euler_angle_roll_pitch_yaw(plane.nav_roll_cd,
+                                                        plane.nav_pitch_cd,
+                                                        plane.wp_nav->get_yaw(),
+                                                        true);
+
+        // climb based on altitude error
+#if HAL_QUADPLANE_ENABLED
+        if (quadplane.enabled()) {
+            quadplane.set_climb_rate_cms(quadplane.assist_climb_rate_cms(), false);
+            quadplane.run_z_controller();
+        }
+#endif
+#endif
     }
 }
 

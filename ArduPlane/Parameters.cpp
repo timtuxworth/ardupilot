@@ -846,6 +846,7 @@ const AP_Param::Info Plane::var_info[] = {
 
     // @Group: WPNAV_
     // @Path: ../libraries/AC_WPNav/AC_WPNav.cpp
+    GOBJECTPTR(wp_nav, "WPNAV_",       AC_WPNav),
 
     // @Group: ATC_
     // @Path: ../libraries/AC_AttitudeControl/AC_AttitudeControl.cpp,../libraries/AC_AttitudeControl/AC_AttitudeControl_Multi.cpp,../libraries/AC_AttitudeControl/AC_AttitudeControl_Heli.cpp
@@ -854,8 +855,6 @@ const AP_Param::Info Plane::var_info[] = {
     // @Group: PSC
     // @Path: ../libraries/AC_AttitudeControl/AC_PosControl.cpp
     GOBJECTPTR(pos_control, "PSC", AC_PosControl),
-
-
 #endif
 
     // @Group: RCMAP_
