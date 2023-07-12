@@ -19,8 +19,13 @@ mcu = {
         (0x20000000, 128, 1), # main memory, DMA safe
         (0x10000000,  64, 2), # CCM memory, faster, but not DMA safe
     ],
+    # Alternate RAM map, compatible with CKS32F4 series special CCM register addresses
+    'ALT_RAM_MAP' : [
+        (0x20000000, 128, 1), # main memory - DMA safe
+        (0x10000000,  64, 2)  # CCM memory, faster but not DMA safe
+    ],
 
-	'EXPECTED_CLOCK' : 168000000,
+    'EXPECTED_CLOCK' : 168000000,
 
     'DEFINES' : {
         'STM32F4' : '1',
