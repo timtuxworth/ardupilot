@@ -4647,7 +4647,7 @@ MAV_RESULT GCS_MAVLINK::handle_command_do_jump_tag(const mavlink_command_int_t &
 #if AP_BATTERY_ENABLED
 MAV_RESULT GCS_MAVLINK::handle_command_battery_reset(const mavlink_command_int_t &packet)
 {
-    const uint16_t battery_mask = packet.param1;
+    const uint16_t battery_mask = (uint16_t)(packet.param1 < 0 ? 0: packet.param1);
     const float percentage = packet.param2;
     if (AP::battery().reset_remaining_mask(battery_mask, percentage)) {
         return MAV_RESULT_ACCEPTED;
