@@ -963,6 +963,13 @@ bool Plane::flight_option_enabled(FlightOptions flight_option) const
     return g2.flight_options & flight_option;
 }
 
+// Implements the virtual function from AP_Vehicle. Should probabl be set_desired_airspeed()
+bool Plane::set_desired_airspeed(float airspeed_new)
+{
+    plane.new_airspeed_cm = constrain_float(airspeed_new, aparm.airspeed_min, aparm.airspeed_max) * 100.0f;
+    return true;
+}
+
 #if AC_PRECLAND_ENABLED
 void Plane::precland_update(void)
 {
