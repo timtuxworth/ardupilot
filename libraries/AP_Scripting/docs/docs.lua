@@ -3001,6 +3001,12 @@ function terrain:status() end
 ---@return boolean
 function terrain:enabled() end
 
+--  Calculate lookahead rise in terrain. This returns extra altitude needed to clear upcoming terrain in meters
+--- @param bearing number -- direction to look ahead 
+--- @param distance number -- distance to look ahead
+--- @param climb_ratio number - assumed rate of climb of the vehicle
+--- @return number -- the hightest extra altitude reired to clear the terrain
+function lookahead(bearing, distance, climb_ratio) end
 
 -- RangeFinder state structure
 ---@class (exact) RangeFinder_State_ud
