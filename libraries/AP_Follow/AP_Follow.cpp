@@ -40,7 +40,6 @@
 
 extern const AP_HAL::HAL& hal;
 
-
 //==============================================================================
 // Constants and Definitions
 //==============================================================================
@@ -51,7 +50,7 @@ extern const AP_HAL::HAL& hal;
 #define AP_FOLLOW_OFFSET_TYPE_NED       0   // offsets are in north-east-down frame
 #define AP_FOLLOW_OFFSET_TYPE_RELATIVE  1   // offsets are relative to lead vehicle's heading
 
-#define AP_FOLLOW_ALTITUDE_TYPE_RELATIVE  1 // relative altitude is used by default   
+#define AP_FOLLOW_ALTITUDE_TYPE_RELATIVE  1 // home relative altitude is used by default
 
 #define AP_FOLLOW_POS_P_DEFAULT 0.1f    // position error gain default
 
@@ -152,7 +151,7 @@ const AP_Param::GroupInfo AP_Follow::var_info[] = {
     // @Param: _ALT_TYPE
     // @DisplayName: Follow altitude type
     // @Description: Follow altitude type
-    // @Values: 0:absolute, 1:relative
+    // @Values: 0:absolute, 1:relative, 3:terrain
     // @User: Standard
     AP_GROUPINFO("_ALT_TYPE", 10, AP_Follow, _alt_type, AP_FOLLOW_ALT_TYPE_DEFAULT),
 #endif
@@ -212,6 +211,12 @@ const AP_Param::GroupInfo AP_Follow::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("_JERK_H", 17, AP_Follow, _jerk_max_h_degsss, 360.0),
 
+    // @Param: _TIMEOUT
+    // @DisplayName: Follow timeout
+    // @Description: Follow position update from lead - timeout after x milliseconds
+    // @User: Standard
+    // @Units: ms
+    AP_GROUPINFO("_TIMEOUT", 18, AP_Follow, _timeout, AP_FOLLOW_TIMEOUT_DEFAULT),
 
     AP_GROUPEND
 };
@@ -421,6 +426,10 @@ bool AP_Follow::get_target_location_and_velocity(Location &loc, Vector3f &vel_ne
     }
     vel_ned = _estimate_vel_ned_ms;
 
+    if (_alt_type == Location::AltFrame::ABOVE_HOME) {
+        loc.change_alt_frame(Location::AltFrame::ABOVE_HOME);
+    }
+
     return true;
 }
 
@@ -622,7 +631,43 @@ bool AP_Follow::handle_global_position_int_message(const mavlink_message_t &msg)
         // use absolute altitude
         _target_location.set_alt_cm(packet.alt / 10, Location::AltFrame::ABSOLUTE);
     }
+#if APM_BUILD_TYPE(APM_BUILD_ArduPlane|APM_BUILD_ArduCopter)
+        switch((Location::AltFrame)_alt_type) {
+            case Location::AltFrame::ABSOLUTE:
+                _target_location.set_alt_cm(packet.alt * 0.1, Location::AltFrame::ABSOLUTE);
+                break;
+            case Location::AltFrame::ABOVE_HOME:
+                _target_location.set_alt_cm(packet.relative_alt * 0.1, _alt_type);
+                break;
+            case Location::AltFrame::ABOVE_TERRAIN: {
+                /// Altitude comes in AMSL
+                int32_t terrain_altitude_cm;
+                _target_location.set_alt_cm(packet.alt * 0.1, Location::AltFrame::ABSOLUTE);
+                // convert the incoming altitude to terrain altitude
+                if(_target_location.get_alt_cm(Location::AltFrame::ABOVE_TERRAIN, terrain_altitude_cm)) {
+                    _target_location.set_alt_cm(terrain_altitude_cm, Location::AltFrame::ABOVE_TERRAIN);
+                }
+                break;
+            default:
+                break;
+            }
+        }
+#else
+        if(_alt_type == Location::AltFrame::ABOVE_HOME) {
+            // above home alt
+            _target_location.set_alt_cm(packet.relative_alt / 10, Location::AltFrame::ABOVE_HOME);
+        } else {
+            // absolute altitude
+            _target_location.set_alt_cm(packet.alt / 10, Location::AltFrame::ABSOLUTE);
+        }
+#endif 
+        if (!_target_location.get_vector_from_origin_NEU(_target_position_ned)) {
+            return false;
+        }
 
+        _target_position_ned.z = -_target_position_ned.z; // NEU->NED
+        _target_position_ned *= 0.01;  // cm -> m
+// MERGE ABOVE was dodgey
     // convert global location to local NED frame position
     if (!_target_location.get_vector_from_origin_NEU(_target_pos_ned_m)) {
         return false;
@@ -917,7 +962,7 @@ bool AP_Follow::have_target(void) const
     }
 
     // check for timeout
-    if ((_last_location_update_ms == 0) || (AP_HAL::millis() - _last_location_update_ms > AP_FOLLOW_TIMEOUT_MS)) {
+    if ((_last_location_update_ms == 0) || (((AP_HAL::millis() - _last_location_update_ms) * 0.001f) > _timeout)) {
         return false;
     }
     return true;
