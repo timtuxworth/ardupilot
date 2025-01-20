@@ -35,7 +35,7 @@ altitude to acheive a safe AMSL altitude to avoid the terrain before continuing 
 
 SCRIPT_NAME = "OvrhdIntl Terrain Avoid"
 SCRIPT_NAME_SHORT = "TerrAvoid"
-SCRIPT_VERSION = "4.7.0-004"
+SCRIPT_VERSION = "4.7.0-005"
 
 REFRESH_RATE = 0.1  -- in seconds, so 10Hz
 STARTUP_DELAY = 20  -- wait this many seconds for the FC to come up before starting the script
@@ -520,7 +520,7 @@ local function start_pitching()
     end
 
     pitching_active = true
-    gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. ": Pitching started")
+    gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. ": Pitching started")
 
     -- save the current target location so we can track if we pass a waypoint while pitching
     pre_pitch_mode = vehicle_mode
@@ -528,10 +528,7 @@ local function start_pitching()
     pre_pitch_target_location = current_location_target:copy()
 
     -- pitch up by setting a very high altitude and high speed. TECS will make it so.
-    local desired_airspeed = 30
-    if AIRSPEED_MAX ~= nil then
-        desired_airspeed = AIRSPEED_MAX:get()
-    end
+    local desired_airspeed = airspeed_min
     mavlink.set_vehicle_speed({speed=desired_airspeed})
 
     pitch_last_bad_timestamp = millis():tofloat() * 0.001
@@ -573,7 +570,7 @@ local function check_pitching()
 end
 
 local function stop_pitching()
-    gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. ": Pitching DONE")
+    gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. ": Pitching DONE")
     pitching_active = false
     if pre_pitch_mode ~= vehicle_mode then
         return  -- user or maybe a failsafe changed mdoes. Don't interfere
@@ -1073,7 +1070,7 @@ local function update()
 
         groundspeed_max = ZTB_GSP_MAX:get() or -1
         groundspeed_airbrake_limit = ZTB_GSP_AIRBRAKE:get() or 0
-        airspeed_min = AIRSPEED_MIN:get() or 5
+        airspeed_min = AIRSPEED_MIN:get() or 10
         airspeed_max = AIRSPEED_MAX:get() or 30
 
         cmtc_alt_m = ZTB_CMTC_ALT:get()
@@ -1104,7 +1101,7 @@ local function update()
             -- lets check if our current flight path is likely to hit terrain 
             -- sometime soon, and if so we need to avoid it.
             local pitch_required_deg, alt_required_amsl, terrain_diff = terrain_approaching(cmtc_alt_m)
-            if pitch_required_deg > (ptch_lim_max_deg * 0.5) then
+            if pitch_required_deg > (ptch_lim_max_deg * 0.75) then
                 gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(": Can't Make that climb", terrain_diff) )
                 gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": CMTC pitch required %.0f deg", pitch_required_deg) )
                 -- need to fly OVER the highest point - with ZTB_CMTC_ALT clearance
