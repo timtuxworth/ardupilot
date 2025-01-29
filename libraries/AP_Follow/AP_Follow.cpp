@@ -35,14 +35,18 @@ extern const AP_HAL::HAL& hal;
 #define AP_FOLLOW_OFFSET_TYPE_NED       0   // offsets are in north-east-down frame
 #define AP_FOLLOW_OFFSET_TYPE_RELATIVE  1   // offsets are relative to lead vehicle's heading
 
-#define AP_FOLLOW_ALTITUDE_TYPE_RELATIVE  1 // relative altitude is used by default   
+  
+#define AP_FOLLOW_ALTITUDE_TYPE_ABSOLUTE  0 // absolute altitude is used by default
+#define AP_FOLLOW_ALTITUDE_TYPE_HOME      1 // home relative altitude is used if set
+#define AP_FOLLOW_ALTITUDE_TYPE_ORIGIN    2 // origin relative altitude is used if set 
+#define AP_FOLLOW_ALTITUDE_TYPE_TERRAIN   3 // terrain relative altitude is used if set 
 
 #define AP_FOLLOW_POS_P_DEFAULT 0.1f    // position error gain default
 
 #if APM_BUILD_TYPE(APM_BUILD_ArduPlane)
 #define AP_FOLLOW_ALT_TYPE_DEFAULT 0
 #else
-#define AP_FOLLOW_ALT_TYPE_DEFAULT AP_FOLLOW_ALTITUDE_TYPE_RELATIVE
+#define AP_FOLLOW_ALT_TYPE_DEFAULT AP_FOLLOW_ALTITUDE_TYPE_HOME
 #endif
 
 AP_Follow *AP_Follow::_singleton;
@@ -311,7 +315,6 @@ void AP_Follow::handle_msg(const mavlink_message_t &msg)
 
     // decode global-position-int message
     bool updated = false;
-
     switch (msg.msgid) {
     case MAVLINK_MSG_ID_GLOBAL_POSITION_INT: {
         updated = handle_global_position_int_message(msg);
@@ -345,6 +348,35 @@ bool AP_Follow::handle_global_position_int_message(const mavlink_message_t &msg)
         _target_location.lng = packet.lon;
 
         // select altitude source based on FOLL_ALT_TYPE param 
+        switch(_alt_type) {
+        case AP_FOLLOW_ALTITUDE_TYPE_ABSOLUTE:
+        case AP_FOLLOW_ALTITUDE_TYPE_TERRAIN:
+            _target_location.set_alt_cm(packet.alt / 10, Location::AltFrame::ABSOLUTE);
+            printf("set absolute alt %d\n", packet.alt / 10); 
+            break;
+        case AP_FOLLOW_ALTITUDE_TYPE_HOME:
+            // above home alt
+            _target_location.set_alt_cm(packet.relative_alt / 10, Location::AltFrame::ABOVE_HOME);
+            printf("set home alt %d\n", packet.alt / 10);
+            break;
+        case AP_FOLLOW_ALTITUDE_TYPE_ORIGIN:
+            // above home alt
+            _target_location.set_alt_cm(packet.relative_alt / 10, Location::AltFrame::ABOVE_ORIGIN);
+            printf("set origin alt %d\n", packet.alt / 10);
+            break;
+#ifdef AP_TERRAIN_AVAILABLEx
+        case AP_FOLLOW_ALTITUDE_TYPE_TERRAIN: {
+            float terrain_amsl_m;
+            AP_Terrain *terrain = AP::terrain();
+            if (terrain->height_amsl(_target_location, terrain_amsl_m, false)) {
+                _target_location.set_alt_cm(packet.alt / 10 - (int)(terrain_amsl_m * 100.0), Location::AltFrame::ABOVE_TERRAIN);
+                printf("set terrain alt %.2f\n",  (packet.alt / 10 - (int)(terrain_amsl_m * 100.0)*.01));
+            }
+            break;
+        }
+#endif
+        }
+        /*
         if (_alt_type == AP_FOLLOW_ALTITUDE_TYPE_RELATIVE) {
             // above home alt
             _target_location.set_alt_cm(packet.relative_alt / 10, Location::AltFrame::ABOVE_HOME);
@@ -352,6 +384,7 @@ bool AP_Follow::handle_global_position_int_message(const mavlink_message_t &msg)
             // absolute altitude
             _target_location.set_alt_cm(packet.alt / 10, Location::AltFrame::ABSOLUTE);
         }
+        */
 
         _target_velocity_ned.x = packet.vx * 0.01f; // velocity north
         _target_velocity_ned.y = packet.vy * 0.01f; // velocity east
@@ -393,7 +426,7 @@ bool AP_Follow::handle_follow_target_message(const mavlink_message_t &msg)
 
         // FOLLOW_TARGET is always AMSL, change the provided alt to
         // above home if we are configured for relative alt
-        if (_alt_type == AP_FOLLOW_ALTITUDE_TYPE_RELATIVE &&
+        if (_alt_type == AP_FOLLOW_ALTITUDE_TYPE_HOME &&
             !new_loc.change_alt_frame(Location::AltFrame::ABOVE_HOME)) {
             return false;
         }
