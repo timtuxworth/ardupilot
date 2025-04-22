@@ -2060,6 +2060,10 @@ function attitude_control:set_forward_enable(bool) end
 ---@param bool boolean
 function attitude_control:set_lateral_enable(bool) end
 
+-- Return the body-to-NED target attitude used by the quadplane-specific attitude control input methods
+-- @return Quaternion
+function attitude_control:get_attitude_target_quat() end
+
 
 -- desc
 frsky_sport = {}
