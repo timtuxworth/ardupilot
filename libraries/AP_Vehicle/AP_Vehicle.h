@@ -73,6 +73,9 @@
 #include <AP_Stats/AP_Stats.h>              // statistics library
 #if AP_SCRIPTING_ENABLED
 #include <AP_Scripting/AP_Scripting.h>
+#if AP_FOLLOW_ENABLED
+#include <AP_Follow/AP_Follow.h>
+#endif
 #endif
 
 #include <AP_Gripper/AP_Gripper_config.h>
@@ -489,6 +492,9 @@ protected:
 
 #if AP_SCRIPTING_ENABLED
     AP_Scripting scripting;
+#if AP_FOLLOW_ENABLED
+    AP_Follow follow;
+#endif
 #endif
 
     static const struct AP_Param::GroupInfo var_info[];

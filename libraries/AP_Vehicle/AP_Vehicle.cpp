@@ -28,6 +28,9 @@
 extern AP_IOMCU iomcu;
 #endif
 #include <AP_Scripting/AP_Scripting.h>
+#if AP_FOLLOW_ENABLED
+#include <AP_Follow/AP_Follow.h>
+#endif
 
 #define SCHED_TASK(func, rate_hz, max_time_micros, prio) SCHED_TASK_CLASS(AP_Vehicle, &vehicle, func, rate_hz, max_time_micros, prio)
 
@@ -612,6 +615,11 @@ const AP_Scheduler::Task AP_Vehicle::scheduler_tasks[] = {
     SCHED_TASK_CLASS(Compass,      &vehicle.compass,        cal_update,     100, 200, 75),
 #endif
     SCHED_TASK_CLASS(AP_Notify,    &vehicle.notify,         update,                   50, 300, 78),
+#if AP_FOLLOW_ENABLED
+    // when follow is actively running it will be generating navigation outputs to control the vehicle
+    // so the priority 150 was chosen. The update() method returns immediately if no follow is active.
+    SCHED_TASK_CLASS(AP_Follow,    &vehicle.follow,         update,                   10, 100, 150),
+#endif
 #if HAL_NMEA_OUTPUT_ENABLED
     SCHED_TASK_CLASS(AP_NMEA_Output, &vehicle.nmea,         update,                   50, 50, 180),
 #endif

@@ -61,6 +61,9 @@ public:
     // restore offsets to zero if necessary, should be called when vehicle exits follow mode
     void clear_offsets_if_required();
 
+    // regularly calculated estimated target location calculation
+    void update();
+
     //
     // position tracking related methods
     //
@@ -182,6 +185,10 @@ private:
     Vector3f _target_velocity_ned;  // last known velocity of target in NED frame in m/s
     Vector3f _target_accel_ned;     // last known acceleration of target in NED frame in m/s/s
     uint32_t _last_heading_update_ms;   // system time of last heading update
+    Vector3p _target_position_estimate_ned;  // last estimated position of target
+    Vector3f _target_velocity_estimate_ned;  // last estimated position of target
+    Vector3f _target_distance_estimate_ned;  // last estimated distance to target
+    Vector3f _target_distance_offsets_estimate_ned; // last estimated distance to target (with offsets)
     float _target_heading;          // heading in degrees
     bool _automatic_sysid;          // did we lock onto a sysid automatically?
     float _dist_to_target;          // latest distance to target in meters (for reporting purposes)
