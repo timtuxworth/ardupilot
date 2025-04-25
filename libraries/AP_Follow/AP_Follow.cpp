@@ -102,7 +102,7 @@ const AP_Param::GroupInfo AP_Follow::var_info[] = {
     // @Param: _OFS_TYPE
     // @DisplayName: Follow offset type
     // @Description: Follow offset type
-    // @Values: 0:North-East-Down, 1:Relative to lead vehicle heading
+    // @Values: 0:North-East-Down, 1:Relative to lead vehicle heading_deg
     // @User: Standard
     AP_GROUPINFO("_OFS_TYPE", 6, AP_Follow, _offset_type, AP_FOLLOW_OFFSET_TYPE_NED),
 
@@ -223,7 +223,6 @@ AP_Follow::AP_Follow() :
     _singleton = this;
     AP_Param::setup_object_defaults(this, var_info);
 }
-
 
 //==============================================================================
 // Target Estimation Update Functions
