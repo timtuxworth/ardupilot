@@ -48,7 +48,7 @@ extern const AP_HAL::HAL& hal;
 #define AP_FOLLOW_TIMEOUT_DEFAULT        3000
 #endif
 
-AP_Follow *AP_Follow::_singleton;
+AP_Follow* AP_Follow::_singleton;
 
 // table of user settable parameters
 const AP_Param::GroupInfo AP_Follow::var_info[] = {
@@ -158,8 +158,21 @@ const AP_Param::GroupInfo AP_Follow::var_info[] = {
 AP_Follow::AP_Follow() :
         _p_pos(AP_FOLLOW_POS_P_DEFAULT)
 {
+    if (_singleton != nullptr) {
+        AP_HAL::panic("AP_Follow must be singleton");
+    }
+
     _singleton = this;
     AP_Param::setup_object_defaults(this, var_info);
+}
+
+// Singleton accessor
+AP_Follow* AP_Follow::get_singleton() {
+    return _singleton;
+}
+
+void AP_Follow::init() {
+    // Perform initialization
 }
 
 // restore offsets to zero if necessary, should be called when vehicle exits follow mode
@@ -174,15 +187,11 @@ void AP_Follow::clear_offsets_if_required()
 // regularly calculated estimated target location calculation
 void AP_Follow::update()
 {
-    // exit immediately if not enabled
-    if (!_enabled) {
-        printf("not enabled\n");
+    // exit immediately if not enabled or no target
+    if (!_enabled or !have_target()) {
         return;
     }
-    if (!have_target()) {
-        printf("no target\n");
-        return;
-    }
+
     // calculate time since last actual position update
     const float dt = (AP_HAL::millis() - _last_location_update_ms) * 0.001f;
     // check for timeout
@@ -240,7 +249,8 @@ void AP_Follow::update()
         _dist_to_target = safe_sqrt(sq(_target_distance_offsets_estimate_ned.x) + sq(_target_distance_offsets_estimate_ned.y));
         _bearing_to_target = degrees(atan2f(_target_distance_offsets_estimate_ned.y, _target_distance_offsets_estimate_ned.x));
     }
-    printf("distance: %.1f", _dist_to_target);
+    float real_dist_to_target = safe_sqrt(sq(_target_distance_estimate_ned.x) + sq(_target_distance_estimate_ned.y));
+    printf("distance: %.1f ofs: %.1f\n", real_dist_to_target, _dist_to_target );
 }
 
 // get target's estimated location
@@ -790,11 +800,9 @@ bool AP_Follow::get_target_info(Vector3f &dist_ned, Vector3f &dist_with_offs,
 
 namespace AP {
 
-AP_Follow &follow()
-{
-    return *AP_Follow::get_singleton();
-}
-
+    AP_Follow* follow() {
+        return AP_Follow::get_singleton();
+    }
 }
 
 #endif  // AP_FOLLOW_ENABLED

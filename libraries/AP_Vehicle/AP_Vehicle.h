@@ -493,7 +493,7 @@ protected:
 #if AP_SCRIPTING_ENABLED
     AP_Scripting scripting;
 #if AP_FOLLOW_ENABLED
-    AP_Follow follow;
+    AP_Follow* follow = nullptr; 
 #endif
 #endif
 

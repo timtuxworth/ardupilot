@@ -48,9 +48,8 @@ public:
     AP_Follow();
 
     // enable as singleton
-    static AP_Follow *get_singleton(void) {
-        return _singleton;
-    }
+    static AP_Follow *get_singleton(void);
+    void init();
 
     // returns true if library is enabled
     bool enabled() const { return _enabled; }
@@ -200,7 +199,7 @@ private:
 };
 
 namespace AP {
-    AP_Follow &follow();
+    AP_Follow *follow();
 };
 
 #endif
