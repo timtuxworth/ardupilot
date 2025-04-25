@@ -81,7 +81,7 @@
 #include <AP_ICEngine/AP_ICEngine.h>
 #include <AP_Landing/AP_Landing.h>
 #include <AP_LandingGear/AP_LandingGear.h>     // Landing Gear library
-#include <AP_Follow/AP_Follow.h>
+//#include <AP_Follow/AP_Follow.h>
 #include <AP_ExternalControl/AP_ExternalControl_config.h>
 #if AP_EXTERNAL_CONTROL_ENABLED
 #include "AP_ExternalControl_Plane.h"
