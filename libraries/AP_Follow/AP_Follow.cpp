@@ -57,6 +57,9 @@ extern const AP_HAL::HAL& hal;
 #if APM_BUILD_TYPE(APM_BUILD_ArduPlane)
  #define AP_FOLLOW_ALT_TYPE_DEFAULT 0
  #define AP_FOLLOW_DIST_MAX_DEFAULT 0
+ #define AP_FOLLOW_ALTITUDE_TYPE_ORIGIN   2 // origin relative altitude
+ #define AP_FOLLOW_ALTITUDE_TYPE_TERRAIN  3 // terrain relative altitude
+ #define AP_FOLLOW_TIMEOUT_DEFAULT        600
 #else
  #define AP_FOLLOW_ALT_TYPE_DEFAULT AP_FOLLOW_ALTITUDE_TYPE_RELATIVE
  #define AP_FOLLOW_DIST_MAX_DEFAULT 100
@@ -457,7 +460,6 @@ bool AP_Follow::get_target_heading_deg(float &heading_deg)
     if (!_estimate_valid) {
         return false;
     }
-
     // return latest heading estimate
     heading_deg = degrees(_estimate_heading_rad);
     return true;
@@ -496,6 +498,7 @@ void AP_Follow::handle_msg(const mavlink_message_t &msg)
         _estimate_valid = false;   // mark estimate as invalid
         _using_follow_target = false; // reset follow-target usage flag
     }
+    printf("got message %d\n", msg.msgid);
 
     if (!should_handle_message(msg)) {
         // ignore message if filtering rules reject it (e.g., wrong sysid)
@@ -623,51 +626,36 @@ bool AP_Follow::handle_global_position_int_message(const mavlink_message_t &msg)
     _target_location.lat = packet.lat;
     _target_location.lng = packet.lon;
 
-    // set target altitude based on configured altitude type
-    if (_alt_type == AP_FOLLOW_ALTITUDE_TYPE_RELATIVE) {
-        // use relative altitude above home
+#if APM_BUILD_TYPE(APM_BUILD_ArduPlane|APM_BUILD_ArduCopter)
+    switch((Location::AltFrame)_alt_type) {
+        case Location::AltFrame::ABSOLUTE:
+            _target_location.set_alt_cm(packet.alt * 0.1, Location::AltFrame::ABSOLUTE);
+            break;
+        case Location::AltFrame::ABOVE_HOME:
+            _target_location.set_alt_cm(packet.relative_alt * 0.1, _alt_type);
+            break;
+        case Location::AltFrame::ABOVE_TERRAIN: {
+            /// Altitude comes in AMSL
+            int32_t terrain_altitude_cm;
+            _target_location.set_alt_cm(packet.alt * 0.1, Location::AltFrame::ABSOLUTE);
+            // convert the incoming altitude to terrain altitude
+            if(_target_location.get_alt_cm(Location::AltFrame::ABOVE_TERRAIN, terrain_altitude_cm)) {
+                _target_location.set_alt_cm(terrain_altitude_cm, Location::AltFrame::ABOVE_TERRAIN);
+            }
+            break;
+        default:
+            break;
+        }
+    }
+#else
+    if(_alt_type == Location::AltFrame::ABOVE_HOME) {
+        // above home alt
         _target_location.set_alt_cm(packet.relative_alt / 10, Location::AltFrame::ABOVE_HOME);
     } else {
-        // use absolute altitude
+        // absolute altitude
         _target_location.set_alt_cm(packet.alt / 10, Location::AltFrame::ABSOLUTE);
     }
-#if APM_BUILD_TYPE(APM_BUILD_ArduPlane|APM_BUILD_ArduCopter)
-        switch((Location::AltFrame)_alt_type) {
-            case Location::AltFrame::ABSOLUTE:
-                _target_location.set_alt_cm(packet.alt * 0.1, Location::AltFrame::ABSOLUTE);
-                break;
-            case Location::AltFrame::ABOVE_HOME:
-                _target_location.set_alt_cm(packet.relative_alt * 0.1, _alt_type);
-                break;
-            case Location::AltFrame::ABOVE_TERRAIN: {
-                /// Altitude comes in AMSL
-                int32_t terrain_altitude_cm;
-                _target_location.set_alt_cm(packet.alt * 0.1, Location::AltFrame::ABSOLUTE);
-                // convert the incoming altitude to terrain altitude
-                if(_target_location.get_alt_cm(Location::AltFrame::ABOVE_TERRAIN, terrain_altitude_cm)) {
-                    _target_location.set_alt_cm(terrain_altitude_cm, Location::AltFrame::ABOVE_TERRAIN);
-                }
-                break;
-            default:
-                break;
-            }
-        }
-#else
-        if(_alt_type == Location::AltFrame::ABOVE_HOME) {
-            // above home alt
-            _target_location.set_alt_cm(packet.relative_alt / 10, Location::AltFrame::ABOVE_HOME);
-        } else {
-            // absolute altitude
-            _target_location.set_alt_cm(packet.alt / 10, Location::AltFrame::ABSOLUTE);
-        }
 #endif 
-        if (!_target_location.get_vector_from_origin_NEU(_target_position_ned)) {
-            return false;
-        }
-
-        _target_position_ned.z = -_target_position_ned.z; // NEU->NED
-        _target_position_ned *= 0.01;  // cm -> m
-// MERGE ABOVE was dodgey
     // convert global location to local NED frame position
     if (!_target_location.get_vector_from_origin_NEU(_target_pos_ned_m)) {
         return false;
