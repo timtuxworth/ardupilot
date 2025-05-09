@@ -3625,6 +3625,32 @@ function arming:pre_arm_checks() end
 ---@return boolean -- true if disarmed successfully, false if already disarmed.
 function arming:disarm() end
 
+-- The avoidance library contains the core obstacle management code
+avoid = {}
+
+-- return the count of the number of obstacles currently being tracked
+---@return number -- number of obstacles being tracked
+function avoid:num_obstacles() end
+
+-- get the location of the obstacle at the supplied index
+---@param index uint32_t_ud|integer|number -- the index of the obstacle to reference
+---@return Location_ud -- Location of the obstacle
+function avoid:get_obstacle_loc(index) end
+
+-- get the velocity vector of the obstacle at the supplied index
+---@param index uint32_t_ud|integer|number -- the index of the obstacle to reference
+---@return Vector3f_ud -- Velocity of the obstacle
+function avoid:get_obstacle_vel(index) end
+
+-- get the id of the obstacle at the supplied index
+---@param index uint32_t_ud|integer|number -- the index of the obstacle to reference
+---@return number -- Id of the obstacle
+function avoid:get_obstacle_id(index) end
+
+-- get the timestamp of the obstacle at the supplied index
+---@param index uint32_t_ud|integer|number -- the index of the obstacle to reference
+---@return number -- timestamp_ms of the obstacle
+function avoid:get_obstacle_timestamp(index) end
 
 -- The ahrs library represents the Attitude Heading Reference System computed by the autopilot. 
 -- It provides estimates for the vehicles attitude, and position.
