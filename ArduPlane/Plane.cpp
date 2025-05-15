@@ -932,8 +932,7 @@ bool Plane::update_target_location(const Location &old_loc, const Location &new_
       location we prevent a race condition where the user changes mode
       or commands a different target in the controlling lua script
      */
-    if (!old_loc.same_loc_as(next_WP_loc) ||
-        old_loc.get_alt_frame() != new_loc.get_alt_frame()) {
+    if (!old_loc.same_loc_as(next_WP_loc)) {
         return false;
     }
     next_WP_loc = new_loc;

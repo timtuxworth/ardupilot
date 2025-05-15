@@ -61,6 +61,7 @@
 #include <AP_RCMapper/AP_RCMapper.h>        // RC input mapping library
 
 #include <AP_Vehicle/AP_Vehicle.h>
+#include <AP_Vehicle/AP_Vehicle_Type.h>
 #include <AP_TECS/AP_TECS.h>
 #include <AP_NavEKF2/AP_NavEKF2.h>
 #include <AP_NavEKF3/AP_NavEKF3.h>
@@ -114,6 +115,11 @@
 
 #if AP_SCRIPTING_ENABLED
 #include <AP_Scripting/AP_Scripting.h>
+#endif
+
+#if AP_OAPATHPLANNER_ENABLED
+ #include <AC_WPNav/AC_WPNav_OA.h>
+ #include <AC_Avoidance/AP_OAPathPlanner.h>
 #endif
 
 #include "RC_Channel_Plane.h"     // RC Channel Library
@@ -1302,6 +1308,23 @@ private:
 
     // last target alt we passed to tecs
     int32_t tecs_target_alt_cm;
+
+#if AP_OAPATHPLANNER_ENABLED
+    struct {
+        // oa path planning variables
+        AP_OAPathPlanner::OA_RetState _oa_state;    // state of object avoidance, if OA_SUCCESS we use _oa_destination to avoid obstacles
+        Vector3f    _origin_oabak_neu_cm;          // backup of _origin_neu_cm so it can be restored when oa completes
+        Vector3f    _destination_oabak_neu_cm;     // backup of _destination_neu_cm so it can be restored when oa completes
+        Vector3f    _next_destination_oabak_neu_cm;// backup of _next_destination_neu_cm so it can be restored when oa completes
+        bool        _terrain_alt_oabak;     // true if backup origin and destination z-axis are terrain altitudes
+        Location    prev_WP_backup;
+        Location    next_WP_backup;
+        Location    avoid_WP_backup;
+        Location    _oa_destination;        // intermediate destination during avoidance
+        Location    _oa_next_destination;   // intermediate next destination during avoidance
+    } avoidance;
+    void avoid_obstacles(void);
+#endif
 
 public:
     void failsafe_check(void);

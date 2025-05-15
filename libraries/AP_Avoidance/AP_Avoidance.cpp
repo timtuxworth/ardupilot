@@ -616,6 +616,61 @@ void AP_Avoidance::handle_msg(const mavlink_message_t &msg)
                  vel);
 }
 
+// get the avoidance radius in meters of a given obstacle type
+// should be parameterized
+float AP_Avoidance::get_obstacle_radius_m(int32_t obstacle_id) const
+{
+    if (obstacle_id < 256) {
+        // it's some form of UAV (because this will be a MAV_SYSID), 100m radius
+        return 100.0f;
+    }
+    else if (obstacle_id < 20000) {
+        // fixed wing, 300m radius
+        return 300.0f;
+    }
+    else if (obstacle_id < 30000) {
+        // weather, radius 150 at ground, 300m at 3000m, 173m at 1500ft
+        return 173.0f;
+    }
+    else if (obstacle_id < 40000) {
+        // migratory bird, 100m
+        return 100.0f;
+    }
+    else if (obstacle_id < 50000) {
+        // bird of prey, 200m
+        return 200.0f;
+    }
+    //default to 300, which is worst case
+    return 300.0f;
+}
+
+
+// translate an obstacle src_id into a string for display purposes
+char *AP_Avoidance::get_obstacle_label(int32_t obstacle_id) const
+{
+    if (obstacle_id < 256) {
+        return (char *)"MAV";
+    }
+    else if (obstacle_id < 20000) {
+        // fixed wing, 300m radius
+        return (char *)"GA";
+    }
+    else if (obstacle_id < 30000) {
+        // weather, radius 150 at ground, 300m at 3000m, 173m at 1500ft
+        return (char *)"Weather";
+    }
+    else if (obstacle_id < 40000) {
+        // migratory bird, 100m
+        return (char *)"Migratory Bird";
+    }
+    else if (obstacle_id < 50000) {
+        // bird of prey, 200m
+        return (char *)"Bird of Prey";
+    }
+    //default to 300, which is worst case
+    return (char *)"Unknown";
+}
+
 // get unit vector away from the nearest obstacle
 bool AP_Avoidance::get_vector_perpendicular(const AP_Avoidance::Obstacle *obstacle, Vector3f &vec_neu) const
 {
