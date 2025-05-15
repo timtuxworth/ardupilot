@@ -110,6 +110,24 @@ public:
     // Return standardized labels depending on the obstacle id
     char *get_obstacle_label(int32_t obstacle_id) const;
 
+       // bindings for lua
+    uint8_t num_obstacles() const {
+        return _obstacle_count;
+    }
+    Location get_obstacle_loc(uint8_t instance) const {
+        return _obstacles[instance]._location;
+    }    
+    Vector3f get_obstacle_vel(uint8_t instance) const {
+        return _obstacles[instance]._velocity;
+    }    
+    int32_t get_obstacle_id(uint8_t instance) const {
+        return _obstacles[instance].src_id;
+    }    
+    int32_t get_obstacle_timestamp(uint8_t instance) const {
+        return _obstacles[instance].timestamp_ms;
+    }
+
+
     // for holding parameters
     static const struct AP_Param::GroupInfo var_info[];
 
