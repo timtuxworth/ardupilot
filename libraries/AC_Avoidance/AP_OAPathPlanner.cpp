@@ -22,15 +22,19 @@
 #include <AP_AHRS/AP_AHRS.h>
 #include <AC_Fence/AC_Fence.h>
 #include <AP_Logger/AP_Logger.h>
+#include <AP_Vehicle/AP_Vehicle_Type.h>
 #include "AP_OABendyRuler.h"
 #include "AP_OADijkstra.h"
 
 extern const AP_HAL::HAL &hal;
 
 // parameter defaults
+#if APM_BUILD_TYPE(APM_BUILD_ArduPlane)
+static constexpr float OA_MARGIN_MAX_DEFAULT = 50;
+#else
 static constexpr float OA_MARGIN_MAX_DEFAULT = 5;
+#endif
 static constexpr int16_t OA_OPTIONS_DEFAULT = 1;
-
 static constexpr int16_t OA_UPDATE_MS = 1000;      // path planning updates run at 1hz
 static constexpr int16_t OA_TIMEOUT_MS = 3000;     // results over 3 seconds old are ignored
 
@@ -71,6 +75,13 @@ const AP_Param::GroupInfo AP_OAPathPlanner::var_info[] = {
     // @Path: AP_OABendyRuler.cpp
     AP_SUBGROUPPTR(_oabendyruler, "BR_", 6, AP_OAPathPlanner, AP_OABendyRuler),
 
+    // @Param: NOISY
+    // @DisplayName: Display Avoidance messages
+    // @Description: Send more informative messages about Object Avoidance to the Ground Station
+    // @Values: 0:Off,1:Informative,2:Debug
+    // @User: Standard
+    AP_GROUPINFO("NOISY", 7, AP_OAPathPlanner, _noisy, 1),
+
     AP_GROUPEND
 };
 
@@ -85,6 +96,7 @@ AP_OAPathPlanner::AP_OAPathPlanner()
 // perform any required initialisation
 void AP_OAPathPlanner::init()
 {
+    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA started");
     // run background task looking for best alternative destination
     switch (_type) {
     case OA_PATHPLAN_DISABLED:
@@ -94,6 +106,7 @@ void AP_OAPathPlanner::init()
         if (_oabendyruler == nullptr) {
             _oabendyruler = NEW_NOTHROW AP_OABendyRuler();
             AP_Param::load_object_from_eeprom(_oabendyruler, AP_OABendyRuler::var_info);
+            hal.console->printf("TIM: AOPathPlanne::init() BENDYRULER\n");
         }
         break;
     case OA_PATHPLAN_DIJKSTRA:
@@ -295,7 +308,6 @@ void AP_OAPathPlanner::avoidance_thread()
                 // this is a very old request, don't process it
                 continue;
             }
-
             // copy request to avoid conflict with main thread
             avoidance_request2 = avoidance_request;
 
@@ -413,6 +425,7 @@ void AP_OAPathPlanner::avoidance_thread()
             avoidance_result.dest_to_next_dest_clear = dest_to_next_dest_clear;
 
             // fill the result structure with the intermediate path
+            // if the request is OA_SUCCESS return the new values, otherwise return the original value
             avoidance_result.origin_new = (res == OA_SUCCESS) ? origin_new : avoidance_result.origin_new;
             avoidance_result.destination_new = (res == OA_SUCCESS) ? destination_new : avoidance_result.destination;
             avoidance_result.next_destination_new = (res == OA_SUCCESS) ? next_destination_new : avoidance_result.next_destination;

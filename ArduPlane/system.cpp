@@ -92,6 +92,10 @@ void Plane::init_ardupilot()
     hal.gpio->write(FENCE_TRIGGERED_PIN, 0);
 #endif
 
+#if AP_OAPATHPLANNER_ENABLED
+    g2.oa.init();
+#endif
+
     /*
      *  setup the 'main loop is dead' check. Note that this relies on
      *  the RC library being initialised.

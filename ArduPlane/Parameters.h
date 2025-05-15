@@ -370,6 +370,7 @@ public:
         k_param_quicktune,
         k_param_mode_autoland,
         k_param__gcs,
+        k_param_avoid,
 
     };
 
@@ -595,6 +596,12 @@ public:
 #if AP_PLANE_SYSTEMID_ENABLED
     AP_SystemID systemid;
 #endif
+
+#if AP_OAPATHPLANNER_ENABLED
+    // object avoidance path planning
+    AP_OAPathPlanner oa;
+#endif
+
 };
 
 extern const AP_Param::Info var_info[];

@@ -13,6 +13,7 @@
 #include "AP_OADijkstra.h"
 #include "AP_OADatabase.h"
 
+#include <GCS_MAVLink/GCS.h>
 /*
  * This class provides path planning around fence, stay-out zones and moving obstacles
  */
@@ -82,6 +83,8 @@ public:
     };
 
     uint16_t get_options() const { return _options;}
+    bool enabled() const { return _type != OA_PATHPLAN_DISABLED; };
+    uint8_t get_noisy() const { return _noisy; };
 
     static const struct AP_Param::GroupInfo var_info[];
 
@@ -121,7 +124,8 @@ private:
     AP_Int8 _type;                  // avoidance algorithm to be used
     AP_Float _margin_max;           // object avoidance will ignore objects more than this many meters from vehicle
     AP_Int16 _options;              // Bitmask for options while recovering from Object Avoidance
-    
+    AP_Int8 _noisy;                 // How informative messages displayed to GCS should be
+
     // internal variables used by front end
     HAL_Semaphore _rsem;            // semaphore for multi-thread use of avoidance_request and avoidance_result
     bool _thread_created;           // true once background thread has been created

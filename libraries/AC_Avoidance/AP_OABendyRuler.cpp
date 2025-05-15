@@ -23,9 +23,15 @@
 #include <AP_AHRS/AP_AHRS.h>
 #include <AP_Logger/AP_Logger.h>
 #include <AP_Vehicle/AP_Vehicle_Type.h>
+#include <AP_Avoidance/AP_Avoidance.h>
+#include <GCS_MAVLink/GCS_MAVLink.h>    // MAVLink GCS definitions
 
 // parameter defaults
-const float OA_BENDYRULER_LOOKAHEAD_DEFAULT = 15.0f;
+#if APM_BUILD_TYPE(APM_BUILD_ArduPlane)
+float OA_BENDYRULER_LOOKAHEAD_DEFAULT = 500.0f;
+#else
+float OA_BENDYRULER_LOOKAHEAD_DEFAULT = 15.0f;
+#endif
 const float OA_BENDYRULER_RATIO_DEFAULT = 1.5f;
 const int16_t OA_BENDYRULER_ANGLE_DEFAULT = 75;
 const int16_t OA_BENDYRULER_TYPE_DEFAULT = 1;
@@ -71,7 +77,14 @@ const AP_Param::GroupInfo AP_OABendyRuler::var_info[] = {
     // @Description: BendyRuler will search for clear path along the direction defined by this parameter
     // @Values: 1:Horizontal search, 2:Vertical search
     // @User: Standard
-    AP_GROUPINFO_FRAME("TYPE", 4, AP_OABendyRuler, _bendy_type, OA_BENDYRULER_TYPE_DEFAULT, AP_PARAM_FRAME_COPTER | AP_PARAM_FRAME_HELI | AP_PARAM_FRAME_TRICOPTER),
+    AP_GROUPINFO_FRAME("TYPE", 4, AP_OABendyRuler, _bendy_type, OA_BENDYRULER_TYPE_DEFAULT, AP_PARAM_FRAME_COPTER | AP_PARAM_FRAME_HELI | AP_PARAM_FRAME_TRICOPTER | AP_PARAM_FRAME_PLANE),
+
+    // @Param{Copter}: NOISY
+    // @DisplayName: Notify Bendy Ruler avoidance
+    // @Description: Send GCS messages for bendy ruler avoidance actions
+    // @Values: 0:None, 1:Simple, 2:Debug
+    // @User: Standard
+    AP_GROUPINFO_FRAME("NOISY", 5, AP_OABendyRuler, _bendy_noisy, 0, AP_PARAM_FRAME_COPTER | AP_PARAM_FRAME_HELI | AP_PARAM_FRAME_TRICOPTER | AP_PARAM_FRAME_PLANE),
 
     AP_GROUPEND
 };
@@ -81,6 +94,15 @@ AP_OABendyRuler::AP_OABendyRuler()
     AP_Param::setup_object_defaults(this, var_info); 
     _bearing_prev = FLT_MAX;
 }
+
+void AP_OABendyRuler::set_obstacle_label(char *label) const
+{ 
+    _obstacle_label = label; 
+};
+void AP_OABendyRuler::set_avoidance_label(char *label) const
+{ 
+    _avoidance_label = label; 
+};
 
 // run background task to find best path
 // returns true and updates origin_new and destination_new if a best path has been found.  returns false if OA is not required
@@ -137,6 +159,37 @@ bool AP_OABendyRuler::update(const Location& current_loc, const Location& destin
     return ret;
 }
 
+// Display avoidance messages to the user if they haven't been told about avoidance for > 5 seconds
+void AP_OABendyRuler::display_avoidance_message(char *message)
+{
+    const u_int32_t now_ms = AP_HAL::millis();
+
+    // Only display messages user wants to see
+    if(_bendy_noisy == 0) {
+        return;
+    }
+    // First if we are clearing avoidance, let the user know
+    if(message == nullptr)
+    {
+        // if a message has been displayed and it was more than 10 seconds ago its "cleared"
+        if(_last_avoid_message_ms != 0 && (now_ms - _last_avoid_message_ms > 10000)) {
+            _last_avoid_message_ms = 0;
+            GCS_SEND_TEXT(MAV_SEVERITY_NOTICE, "BR: AVOID cleared");
+        }
+    }
+    else {
+        if(message != _last_avoid_message) {
+            _last_avoid_message_ms = 0;
+        }
+        // if we were previously clear, or the last message was more than  5 seconds ago then display it.
+        if (_last_avoid_message_ms == 0 || now_ms - _last_avoid_message_ms > 5000) {
+            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "BR: AVOID %s", message);
+            _last_avoid_message = message;
+        }
+        _last_avoid_message_ms = now_ms;
+    }
+}
+
 // Search for path in the horizontal directions
 bool AP_OABendyRuler::search_xy_path(const Location& current_loc, const Location& destination, float ground_course_deg, Location &destination_new, float lookahead_step1_dist, float lookahead_step2_dist, float bearing_to_dest, float distance_to_dest, bool proximity_only) 
 {
@@ -150,7 +203,9 @@ bool AP_OABendyRuler::search_xy_path(const Location& current_loc, const Location
     bool have_best_bearing = false;
     float best_margin = -FLT_MAX;
     float best_margin_bearing = best_bearing;
-
+    set_obstacle_label(nullptr);
+    set_avoidance_label(nullptr);
+    // GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: bendy search");
     for (uint8_t i = 0; i <= (170 / OA_BENDYRULER_BEARING_INC_XY); i++) {
         for (uint8_t bdir = 0; bdir <= 1; bdir++) {
             // skip duplicate check of bearing straight towards destination
@@ -169,7 +224,9 @@ bool AP_OABendyRuler::search_xy_path(const Location& current_loc, const Location
             test_loc.offset_bearing(bearing_test, lookahead_step1_dist);
 
             // calculate margin from obstacles for this scenario
-            float margin = calc_avoidance_margin(current_loc, test_loc, proximity_only);
+            float margin = calc_avoidance_margin(current_loc, test_loc, proximity_only, false);
+            // Lua Plane version
+            // local margin, _ = calc_avoidance_margin(projected_loc, loc_test, our_velocity, avoid_sec1)
             if (margin > best_margin) {
                 best_margin_bearing = bearing_test;
                 best_margin = margin;
@@ -198,7 +255,7 @@ bool AP_OABendyRuler::search_xy_path(const Location& current_loc, const Location
                     test_loc2.offset_bearing(bearing_test2, distance2);
 
                     // calculate minimum margin to fence and obstacles for this scenario
-                    float margin2 = calc_avoidance_margin(test_loc, test_loc2, proximity_only);
+                    float margin2 = calc_avoidance_margin(test_loc, test_loc2, proximity_only, true);
                     if (margin2 > _margin_max) {
                         // if the chosen direction is directly towards the destination avoidance can be turned off
                         // i == 0 && j == 0 implies no deviation from bearing to destination 
@@ -213,6 +270,13 @@ bool AP_OABendyRuler::search_xy_path(const Location& current_loc, const Location
                         destination_new.offset_bearing(final_bearing, MIN(distance_to_dest, lookahead_step1_dist));
                         _current_lookahead = MIN(_lookahead, _current_lookahead * 1.1f);
                         Write_OABendyRuler((uint8_t)OABendyType::OA_BENDY_HORIZONTAL, active, bearing_to_dest, 0.0f, ignore_bearing_change, final_margin, destination, destination_new);
+                        if (active) {
+                            display_avoidance_message(_avoidance_label);
+                        }
+                        else if(!active) {
+                            display_avoidance_message(nullptr);
+                        }
+
                         return active;
                     }
                 }
@@ -243,6 +307,7 @@ bool AP_OABendyRuler::search_xy_path(const Location& current_loc, const Location
     // log results
     Write_OABendyRuler((uint8_t)OABendyType::OA_BENDY_HORIZONTAL, true, chosen_bearing, 0.0f, false, best_margin, destination, destination_new);
 
+    display_avoidance_message((char *)"many");
     return true;
 }
 
@@ -271,7 +336,7 @@ bool AP_OABendyRuler::search_vertical_path(const Location &current_loc, const Lo
             test_loc.offset_bearing_and_pitch(bearing_to_dest, pitch_delta, lookahead_step1_dist);
 
             // calculate margin from obstacles for this scenario
-            float margin = calc_avoidance_margin(current_loc, test_loc, proximity_only);
+            float margin = calc_avoidance_margin(current_loc, test_loc, proximity_only, false);
 
             if (margin > best_margin) {
                 best_margin_pitch = pitch_delta;
@@ -299,7 +364,7 @@ bool AP_OABendyRuler::search_vertical_path(const Location &current_loc, const Lo
                     test_loc2.offset_bearing_and_pitch(bearing_to_dest2, bearing_test2, distance2);
 
                     // calculate minimum margin to fence and obstacles for this scenario
-                    float margin2 = calc_avoidance_margin(test_loc, test_loc2, proximity_only);
+                    float margin2 = calc_avoidance_margin(test_loc, test_loc2, proximity_only, false);
                     if (margin2 > _margin_max) {
                         // if the chosen direction is directly towards the destination we might turn off avoidance
                         // i == 0 && j == 0 implies no deviation from bearing to destination 
@@ -310,7 +375,7 @@ bool AP_OABendyRuler::search_vertical_path(const Location &current_loc, const Lo
                             for (uint8_t k = 0; k < ARRAY_SIZE(sub_test_pitch_step2); k++) {
                                 Location test_loc_sub_test = test_loc;
                                 test_loc_sub_test.offset_bearing_and_pitch(bearing_to_dest2, sub_test_pitch_step2[k], _margin_max);
-                                float margin_sub_test = calc_avoidance_margin(test_loc, test_loc_sub_test, true);
+                                float margin_sub_test = calc_avoidance_margin(test_loc, test_loc_sub_test, true, false);
                                 if (margin_sub_test < _margin_max) {
                                     // BendyRuler will remain active
                                     active = true;
@@ -395,7 +460,7 @@ bool AP_OABendyRuler::resist_bearing_change(const Location &destination, const L
             // check margin in last bearing's direction
             Location test_loc_previous_bearing = current_loc;
             test_loc_previous_bearing.offset_bearing(wrap_180(prev_bearing), lookahead_step1_dist);
-            float previous_bearing_margin = calc_avoidance_margin(current_loc,test_loc_previous_bearing, proximity_only);
+            float previous_bearing_margin = calc_avoidance_margin(current_loc,test_loc_previous_bearing, proximity_only, false);
 
             if (margin < (_bendy_ratio * previous_bearing_margin)) {
                 // don't change direction abruptly. If margin difference is not significant, follow the last direction
@@ -417,13 +482,16 @@ bool AP_OABendyRuler::resist_bearing_change(const Location &destination, const L
 }
 
 // calculate minimum distance between a segment and any obstacle
-float AP_OABendyRuler::calc_avoidance_margin(const Location &start, const Location &end, bool proximity_only) const
+float AP_OABendyRuler::calc_avoidance_margin(const Location &start, const Location &end, bool proximity_only, bool set_labels) const
 {
     float margin_min = FLT_MAX;
 
     float latest_margin;
     
     if (calc_margin_from_object_database(start, end, latest_margin)) {
+        if(set_labels && latest_margin < margin_min) {
+            set_avoidance_label((char *)"ADSB");
+        }
         margin_min = MIN(margin_min, latest_margin);
     }
     
@@ -431,8 +499,19 @@ float AP_OABendyRuler::calc_avoidance_margin(const Location &start, const Locati
         // only need margin from proximity data
         return margin_min;
     }
+
+    if (calc_margin_from_obstacle_database(start, end, latest_margin)) {
+        if(set_labels && latest_margin < margin_min) {
+            set_avoidance_label(_obstacle_label);
+        }
+        margin_min = MIN(margin_min, latest_margin);
+    }
     
+
     if (calc_margin_from_circular_fence(start, end, latest_margin)) {
+        if(set_labels && latest_margin < margin_min) {
+            set_avoidance_label((char *)"Circular Fence");
+        }
         margin_min = MIN(margin_min, latest_margin);
     }
     
@@ -440,16 +519,25 @@ float AP_OABendyRuler::calc_avoidance_margin(const Location &start, const Locati
     // alt fence only is only needed in vertical avoidance
     if (get_type() == OABendyType::OA_BENDY_VERTICAL) {
         if (calc_margin_from_alt_fence(start, end, latest_margin)) {
+            if(set_labels && latest_margin < latest_margin) {
+                set_avoidance_label((char *)"Polygon Fence");
+            }
             margin_min = MIN(margin_min, latest_margin);
         }
     }
     #endif
 
     if (calc_margin_from_inclusion_and_exclusion_polygons(start, end, latest_margin)) {
+        if(set_labels && latest_margin < latest_margin) {
+            set_avoidance_label((char *)"Polygon Fence");
+        }
         margin_min = MIN(margin_min, latest_margin);
     }
 
     if (calc_margin_from_inclusion_and_exclusion_circles(start, end, latest_margin)) {
+        if(set_labels && latest_margin < latest_margin) {
+            set_avoidance_label((char *)"Circle");
+        }
         margin_min = MIN(margin_min, latest_margin);
     }
 
@@ -605,7 +693,7 @@ bool AP_OABendyRuler::calc_margin_from_inclusion_and_exclusion_circles(const Loc
         return false;
     }
 
-    // inclusion/exclusion circles enabled along with polygon fences
+    // inclusion/exclusion circles enabled along with polygon fences (a circle is a type of polygon fence)
     if ((fence->get_enabled_fences() & AC_FENCE_TYPE_POLYGON) == 0) {
         return false;
     }
@@ -673,6 +761,68 @@ bool AP_OABendyRuler::calc_margin_from_inclusion_and_exclusion_circles(const Loc
 #else
     return false;
 #endif // AP_FENCE_ENABLED
+}
+
+// calculate minimum distance between a path and AP_Avoidance obstacles (MAVLink) only applies to plane
+bool AP_OABendyRuler::calc_margin_from_obstacle_database(const Location &start, const Location &end, float &margin) const
+{
+    AP_Avoidance *avoid = AP_Avoidance::get_singleton();
+    float smallest_margin = FLT_MAX;
+
+    // convert start and end to offsets (in cm) from EKF origin
+    Vector3f start_NEU_cm,end_NEU_cm;
+    if (!start.get_vector_from_origin_NEU_cm(start_NEU_cm) ||
+        !end.get_vector_from_origin_NEU_cm(end_NEU_cm)) {
+        return false;
+    }
+    if (start_NEU_cm == end_NEU_cm) {
+        return false;
+    }
+
+    // convert start and end to offsets from EKF origin
+    Vector2f start_NE_cm, end_NE_cm;
+    if (!start.get_vector_xy_from_origin_NE_cm(start_NE_cm) ||
+        !end.get_vector_xy_from_origin_NE_cm(end_NE_cm)) {
+        return false;
+    }
+
+    //GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: obstacles: %d",avoid->num_obstacles() );
+    for(uint8_t i = 0; i < avoid->num_obstacles(); i++) {
+        const uint32_t obstacle_id = avoid->get_obstacle_id(i);
+        const Location obstacle_loc = avoid->get_obstacle_loc(i);
+        const float obstacle_radius_m = avoid->get_obstacle_radius_m(obstacle_id);
+        //const Vector3f obstacle_vel = avoid->get_obstacle_vel(i);
+        //const int32_t obstacle_timestamp = avoid->get_obstacle_timestamp(i);
+        /*
+        Vector3f obstacle_NEU_cm;
+        if( !obstacle_loc.get_vector_from_origin_NEU_cm(obstacle_NEU_cm)) {
+            return false;
+        }*/
+        Vector2f obstacle_NE_cm;
+        (void)obstacle_loc.get_vector_xy_from_origin_NE_cm(obstacle_NE_cm);
+
+        // TIM: This is fairly simplistic for now, needs to add timestamp jitter and velocity adjustments
+        // as per the Lua version
+
+        // margin is distance between line segment and obstacle minus obstacle's radius
+        // float m = Vector3f::closest_distance_between_line_and_point(start_NEU_cm, end_NEU_cm, obstacle_NEU_cm) * 0.01f;
+        float m = Vector2f::closest_distance_between_line_and_point(start_NE_cm, end_NE_cm, obstacle_NE_cm) * 0.01f;
+        m = m - obstacle_radius_m;
+        if (m < smallest_margin) {
+            smallest_margin = m;
+            set_obstacle_label(avoid->get_obstacle_label(obstacle_id));
+        }
+        //GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: dist end: %0.0f obs: %0.0f mrg: %0.0f xy: %0.0f", 
+        //    end.get_distance(obstacle_loc), start.get_distance(obstacle_loc), smallest_margin, xym );
+    }
+
+    // return smallest margin
+    if (smallest_margin < FLT_MAX) {
+        margin = smallest_margin;
+        return true;
+    }
+
+    return false;
 }
 
 // calculate minimum distance between a path and proximity sensor obstacles

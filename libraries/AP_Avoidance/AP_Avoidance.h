@@ -105,6 +105,11 @@ public:
     // add obstacles into the Avoidance system from MAVLink messages
     void handle_msg(const mavlink_message_t &msg);
 
+    // Return standardized radius values depending on the obstacle id
+    float get_obstacle_radius_m(int32_t obstacle_id) const;
+    // Return standardized labels depending on the obstacle id
+    char *get_obstacle_label(int32_t obstacle_id) const;
+
     // for holding parameters
     static const struct AP_Param::GroupInfo var_info[];
 

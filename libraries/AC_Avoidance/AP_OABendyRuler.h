@@ -8,6 +8,7 @@
 #include <AP_Common/Location.h>
 #include <AP_Math/AP_Math.h>
 #include <AP_Logger/AP_Logger_config.h>
+#include <GCS_MAVLink/GCS_MAVLink.h>    // MAVLink GCS definitions
 
 /*
  * BendyRuler avoidance algorithm for avoiding the polygon and circular fence and dynamic objects detected by the proximity sensor
@@ -32,6 +33,14 @@ public:
     // bendy_type is set to the type of BendyRuler used
     bool update(const Location& current_loc, const Location& destination, const Vector2f &ground_speed_vec, Location &origin_new, Location &destination_new, OABendyType &bendy_type, bool proximity_only);
 
+    // allow setting of _obstacle_label
+    void set_obstacle_label(char *label) const;
+    // allow setting of _avoidance_label
+    void set_avoidance_label(char *label) const;
+
+    // allow getting of _description_label
+    char *get_obstacle_label() { return _obstacle_label; };
+
     static const struct AP_Param::GroupInfo var_info[];
 
 private:
@@ -46,7 +55,7 @@ private:
     bool search_vertical_path(const Location &current_loc, const Location &destination, Location &destination_new, float lookahead_step1_dist, float lookahead_step2_dist, float bearing_to_dest, float distance_to_dest, bool proximity_only);
 
     // calculate minimum distance between a path and any obstacle
-    float calc_avoidance_margin(const Location &start, const Location &end, bool proximity_only) const;
+    float calc_avoidance_margin(const Location &start, const Location &end, bool proximity_only, bool set_labels) const;
 
     // determine if BendyRuler should accept the new bearing or try and resist it. Returns true if bearing is not changed  
     bool resist_bearing_change(const Location &destination, const Location &current_loc, bool active, float bearing_test, float lookahead_step1_dist, float margin, Location &prev_dest, float &prev_bearing, float &final_bearing, float &final_margin, bool proximity_only) const;    
@@ -71,6 +80,13 @@ private:
     // on success returns true and updates margin
     bool calc_margin_from_object_database(const Location &start, const Location &end, float &margin) const;
 
+    // calculate minimum distance between a path and MAVLink/AP_Avoidance obstacles
+    // on success returns true and updates margin
+    bool calc_margin_from_obstacle_database(const Location &start, const Location &end, float &margin) const;
+
+    // Display messages to the user that avoidance is happening
+    void display_avoidance_message(char * message);
+
     // Logging function
 #if HAL_LOGGING_ENABLED
     void Write_OABendyRuler(const uint8_t type, const bool active, const float target_yaw, const float target_pitch, const bool resist_chg, const float margin, const Location &final_dest, const Location &oa_dest) const;
@@ -86,11 +102,20 @@ private:
     AP_Float _bendy_ratio;          // object avoidance will avoid major directional change if change in margin ratio is less than this param
     AP_Int16 _bendy_angle;          // object avoidance will try avoiding change in direction over this much angle
     AP_Int8  _bendy_type;           // Type of BendyRuler to run
+    AP_Int8  _bendy_noisy;          // Display messages (or not) for Bendy Ruler avoidance activities
     
     // internal variables used by background thread
     float _current_lookahead;       // distance (in meters) ahead of the vehicle we are looking for obstacles
     float _bearing_prev;            // stored bearing in degrees 
     Location _destination_prev;     // previous destination, to check if there has been a change in destination
+
+    // Values used by get_noisy() to display context of the avoidance
+    mutable char *_obstacle_label;
+    mutable char *_avoidance_label;
+
+    // Keep track of time mostly to give messages to the user without spamming them
+    uint32_t _last_avoid_message_ms;
+    char *_last_avoid_message;
 };
 
 #endif  // AP_OAPATHPLANNER_BENDYRULER_ENABLED

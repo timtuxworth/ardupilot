@@ -26,12 +26,15 @@
 #include <AP_Vehicle/AP_Vehicle_Type.h>
 #include <stdio.h>
 
-#if !APM_BUILD_TYPE(APM_BUILD_ArduPlane)
-
 #if APM_BUILD_TYPE(APM_BUILD_Rover)
- # define AP_AVOID_BEHAVE_DEFAULT AC_Avoid::BehaviourType::BEHAVIOR_STOP
+ #define AP_AVOID_MARGIN_DEFAULT 2.0f
+ #define AP_AVOID_BEHAVE_DEFAULT AC_Avoid::BehaviourType::BEHAVIOR_STOP
+#elif APM_BUILD_TYPE(APM_BUILD_ArduPlane)
+ #define AP_AVOID_MARGIN_DEFAULT 10.0f
+ #define AP_AVOID_BEHAVE_DEFAULT AC_Avoid::BehaviourType::BEHAVIOR_STOP
 #else
- # define AP_AVOID_BEHAVE_DEFAULT AC_Avoid::BehaviourType::BEHAVIOR_SLIDE
+ #define AP_AVOID_MARGIN_DEFAULT 2.0f
+ #define AP_AVOID_BEHAVE_DEFAULT AC_Avoid::BehaviourType::BEHAVIOR_SLIDE
 #endif
 
 #if APM_BUILD_COPTER_OR_HELI
@@ -70,7 +73,7 @@ const AP_Param::GroupInfo AC_Avoid::var_info[] = {
     // @Units: m
     // @Range: 1 10
     // @User: Standard
-    AP_GROUPINFO("MARGIN", 4, AC_Avoid, _margin, 2.0f),
+    AP_GROUPINFO("MARGIN", 4, AC_Avoid, _margin, AP_AVOID_MARGIN_DEFAULT),
 
     // @Param{Copter, Rover}: BEHAVE
     // @DisplayName: Avoidance behaviour
@@ -1540,7 +1543,5 @@ AC_Avoid *ac_avoid()
 }
 
 }
-
-#endif // !APM_BUILD_Arduplane
 
 #endif  // AP_AVOIDANCE_ENABLED
