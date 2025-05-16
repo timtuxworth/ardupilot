@@ -203,7 +203,8 @@ bool AP_OABendyRuler::search_xy_path(const Location& current_loc, const Location
     bool have_best_bearing = false;
     float best_margin = -FLT_MAX;
     float best_margin_bearing = best_bearing;
-    set_obstacle_label(nullptr);
+    // Enable user friendly display of Avoidance information (there's a parameter to turn it off)
+    set_obstacle_label(nullptr);    
     set_avoidance_label(nullptr);
     // GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: bendy search");
     for (uint8_t i = 0; i <= (170 / OA_BENDYRULER_BEARING_INC_XY); i++) {
@@ -485,11 +486,13 @@ bool AP_OABendyRuler::resist_bearing_change(const Location &destination, const L
 float AP_OABendyRuler::calc_avoidance_margin(const Location &start, const Location &end, bool proximity_only, bool set_labels) const
 {
     float margin_min = FLT_MAX;
+    char *label;
 
     float latest_margin;
     
     if (calc_margin_from_object_database(start, end, latest_margin)) {
-        if(set_labels && latest_margin < margin_min) {
+        if(set_labels && 
+            latest_margin < margin_min) {
             set_avoidance_label((char *)"ADSB");
         }
         margin_min = MIN(margin_min, latest_margin);
@@ -510,7 +513,7 @@ float AP_OABendyRuler::calc_avoidance_margin(const Location &start, const Locati
 
     if (calc_margin_from_circular_fence(start, end, latest_margin)) {
         if(set_labels && latest_margin < margin_min) {
-            set_avoidance_label((char *)"Circular Fence");
+            set_avoidance_label((char *)"Circle");
         }
         margin_min = MIN(margin_min, latest_margin);
     }
@@ -519,7 +522,7 @@ float AP_OABendyRuler::calc_avoidance_margin(const Location &start, const Locati
     // alt fence only is only needed in vertical avoidance
     if (get_type() == OABendyType::OA_BENDY_VERTICAL) {
         if (calc_margin_from_alt_fence(start, end, latest_margin)) {
-            if(set_labels && latest_margin < latest_margin) {
+            if(set_labels && latest_margin < margin_min) {
                 set_avoidance_label((char *)"Polygon Fence");
             }
             margin_min = MIN(margin_min, latest_margin);
@@ -527,16 +530,16 @@ float AP_OABendyRuler::calc_avoidance_margin(const Location &start, const Locati
     }
     #endif
 
-    if (calc_margin_from_inclusion_and_exclusion_polygons(start, end, latest_margin)) {
-        if(set_labels && latest_margin < latest_margin) {
-            set_avoidance_label((char *)"Polygon Fence");
+    if (calc_margin_from_inclusion_and_exclusion_polygons(start, end, latest_margin, label)) {
+        if(set_labels && latest_margin < margin_min) {
+            set_avoidance_label(label);
         }
         margin_min = MIN(margin_min, latest_margin);
     }
 
-    if (calc_margin_from_inclusion_and_exclusion_circles(start, end, latest_margin)) {
-        if(set_labels && latest_margin < latest_margin) {
-            set_avoidance_label((char *)"Circle");
+    if (calc_margin_from_inclusion_and_exclusion_circles(start, end, latest_margin, label)) {
+        if(set_labels && latest_margin < margin_min) {
+            set_avoidance_label(label);
         }
         margin_min = MIN(margin_min, latest_margin);
     }
@@ -613,7 +616,7 @@ bool AP_OABendyRuler::calc_margin_from_alt_fence(const Location &start, const Lo
 
 // calculate minimum distance between a path and all inclusion and exclusion polygons
 // on success returns true and updates margin
-bool AP_OABendyRuler::calc_margin_from_inclusion_and_exclusion_polygons(const Location &start, const Location &end, float &margin) const
+bool AP_OABendyRuler::calc_margin_from_inclusion_and_exclusion_polygons(const Location &start, const Location &end, float &margin, char *&label) const
 {
 #if AP_FENCE_ENABLED
     const AC_Fence *fence = AC_Fence::get_singleton();
@@ -657,6 +660,7 @@ bool AP_OABendyRuler::calc_margin_from_inclusion_and_exclusion_polygons(const Lo
         if (!margin_updated || (margin_new < margin)) {
             margin_updated = true;
             margin = margin_new;
+            label = (char *)"Inclusion";
         }
     }
 
@@ -673,6 +677,7 @@ bool AP_OABendyRuler::calc_margin_from_inclusion_and_exclusion_polygons(const Lo
         if (!margin_updated || (margin_new < margin)) {
             margin_updated = true;
             margin = margin_new;
+            label = (char *)"Exclusion";
         }
     }
 
@@ -684,7 +689,7 @@ bool AP_OABendyRuler::calc_margin_from_inclusion_and_exclusion_polygons(const Lo
 
 // calculate minimum distance between a path and all inclusion and exclusion circles
 // on success returns true and updates margin
-bool AP_OABendyRuler::calc_margin_from_inclusion_and_exclusion_circles(const Location &start, const Location &end, float &margin) const
+bool AP_OABendyRuler::calc_margin_from_inclusion_and_exclusion_circles(const Location &start, const Location &end, float &margin, char *&label) const
 {
 #if AP_FENCE_ENABLED
     // exit immediately if fence is not enabled
@@ -733,6 +738,7 @@ bool AP_OABendyRuler::calc_margin_from_inclusion_and_exclusion_circles(const Loc
             if (!margin_updated || (margin_new < margin)) {
                 margin_updated = true;
                 margin = margin_new;
+                label = (char *)"Inclusion";
             }
         }
     }
@@ -753,6 +759,7 @@ bool AP_OABendyRuler::calc_margin_from_inclusion_and_exclusion_circles(const Loc
             if (!margin_updated || (margin_new < margin)) {
                 margin_updated = true;
                 margin = margin_new;
+                label = (char *)"Exclusion";
             }
         }
     }

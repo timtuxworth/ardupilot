@@ -1165,6 +1165,12 @@ private:
 
     // avoidance_adsb.cpp
     void avoidance_adsb_update(void);
+    bool avoidance_allowed(void) { return arming.is_armed() && is_flying() && (
+                                        flight_stage != AP_FixedWing::FlightStage::TAKEOFF &&
+                                        flight_stage != AP_FixedWing::FlightStage::LAND &&
+                                        flight_stage != AP_FixedWing::FlightStage::ABORT_LANDING &&
+                                        flight_stage != AP_FixedWing::FlightStage::VTOL
+                                        ); };
 
     // servos.cpp
     void set_servos();
@@ -1312,17 +1318,12 @@ private:
 #if AP_OAPATHPLANNER_ENABLED
     struct {
         // oa path planning variables
-        AP_OAPathPlanner::OA_RetState _oa_state;    // state of object avoidance, if OA_SUCCESS we use _oa_destination to avoid obstacles
-        Vector3f    _origin_oabak_neu_cm;          // backup of _origin_neu_cm so it can be restored when oa completes
-        Vector3f    _destination_oabak_neu_cm;     // backup of _destination_neu_cm so it can be restored when oa completes
-        Vector3f    _next_destination_oabak_neu_cm;// backup of _next_destination_neu_cm so it can be restored when oa completes
-        bool        _terrain_alt_oabak;     // true if backup origin and destination z-axis are terrain altitudes
-        Location    prev_WP_backup;
-        Location    next_WP_backup;
-        Location    avoid_WP_backup;
-        Location    _oa_destination;        // intermediate destination during avoidance
-        Location    _oa_next_destination;   // intermediate next destination during avoidance
-    } avoidance;
+        AP_OAPathPlanner::OA_RetState oa_state;    // state of object avoidance, if OA_SUCCESS we use _oa_destination to avoid obstacles
+        Location                      prev_WP_backup;
+        Location                      next_WP_backup;
+        Location                      avoid_WP_backup;
+        Mode::Number                  mode_backup;
+    } _avoidance;
     void avoid_obstacles(void);
 #endif
 

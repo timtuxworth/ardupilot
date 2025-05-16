@@ -487,35 +487,32 @@ bool Plane::reached_loiter_target(void)
 // do obstacle avoidance if enabled
 void Plane::avoid_obstacles()
 {
-    Location avoid_current_loc;     // Need the current loc when the avoidance starts for update_target_location()
+    // Location avoid_current_loc;     // Need the current loc when the avoidance starts for update_target_location()
     Location next_next_WP_loc;      // dummy value required by mission_avoidance but not used in plane
     // run path planning around obstacles
     AP_OAPathPlanner *oa = AP_OAPathPlanner::get_singleton();
-    if(oa == nullptr || !oa->enabled() || !arming.is_armed() || !plane.is_flying() ||
-        !AP::ahrs().get_location(avoid_current_loc)) {
+    //if(oa == nullptr || !oa->enabled() || !arming.is_armed() || !plane.is_flying() || plane.flight_stage == AP_FixedWing::FlightStage::TAKEOFF ||
+    //    !AP::ahrs().get_location(current_loc)) {
+    //    return;
+    //}
+    if(oa == nullptr || !oa->enabled() || !have_position || !avoidance_allowed()) {
         return;
     }
 
-    // backup _origin and _destination_neu_cm when not doing oa
-    if (avoidance._oa_state == AP_OAPathPlanner::OA_NOT_REQUIRED) {// && !next_WP_loc.same_loc_as(avoidance.next_WP_backup)) {
-        //avoidance._origin_oabak_neu_cm = avoidance._origin_neu_cm;
-        //avoidance._destination_oabak_neu_cm = _destination_neu_cm;
-        //avoidance._terrain_alt_oabak = _terrain_alt;
-        //avoidance._next_destination_oabak_neu_cm = _next_destination_neu_cm;
-        avoidance.prev_WP_backup = prev_WP_loc;
-        avoidance.next_WP_backup =                  // remember the destination before starting avoidance
-        avoidance.avoid_WP_backup = next_WP_loc;    // remember the avoidance destination each time we reset until we are finished avoiding
+    // backup prev_WP_loc and next_WP_loc
+    if (_avoidance.oa_state == AP_OAPathPlanner::OA_NOT_REQUIRED) {
+        _avoidance.prev_WP_backup = prev_WP_loc;
+        _avoidance.next_WP_backup =                  // remember the destination before starting avoidance
+        _avoidance.avoid_WP_backup = next_WP_loc;    // remember the interim avoidance destination each time we reset until we are finished avoiding
+        _avoidance.mode_backup = plane.control_mode->mode_number();
     }
 
-    // convert origin, destination and next_destination to Locations and pass into oa
-    //const Location origin_loc(_origin_oabak_neu_cm, _terrain_alt_oabak ? Location::AltFrame::ABOVE_TERRAIN : Location::AltFrame::ABOVE_ORIGIN);
-    //const Location next_destination_loc(_next_destination_oabak_neu_cm, _terrain_alt_oabak ? Location::AltFrame::ABOVE_TERRAIN : Location::AltFrame::ABOVE_ORIGIN);
     Location oa_origin_new, oa_destination_new, oa_next_destination_new;
     bool dest_to_next_dest_clear = true;
     AP_OAPathPlanner::OAPathPlannerUsed path_planner_used = AP_OAPathPlanner::OAPathPlannerUsed::None;
-    const AP_OAPathPlanner::OA_RetState oa_retstate = oa->mission_avoidance(avoid_current_loc,
-                                                                            avoidance.prev_WP_backup,
-                                                                            avoidance.next_WP_backup,
+    const AP_OAPathPlanner::OA_RetState oa_retstate = oa->mission_avoidance(current_loc,
+                                                                            _avoidance.prev_WP_backup,
+                                                                            _avoidance.next_WP_backup,
                                                                             next_next_WP_loc,
                                                                             oa_origin_new,
                                                                             oa_destination_new,
@@ -537,31 +534,40 @@ void Plane::avoid_obstacles()
 
     case AP_OAPathPlanner::OA_NOT_REQUIRED:
     // GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: Not required");
-        if (avoidance._oa_state != oa_retstate) {
+        if (_avoidance.oa_state != oa_retstate) {
             // object avoidance has become inactive so reset target to original destination
-            if(!avoidance.next_WP_backup.is_zero() && !next_WP_loc.same_loc_as(avoidance.next_WP_backup)) {
+
+            /*if(!_avoidance.next_WP_backup.is_zero() && !next_WP_loc.same_loc_as(_avoidance.next_WP_backup)) {
                 // We switch from targeting the OA destination back to our original next_WP
                 // GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: reset alt: %d/%d", avoidance.next_WP_backup.alt, avoidance.next_WP_backup.get_alt_frame());
-                if(plane.update_target_location(avoidance.avoid_WP_backup, avoidance.next_WP_backup)) {
+                if(plane.update_target_location(_avoidance.avoid_WP_backup, _avoidance.next_WP_backup)) {
                     // if new target set successfully, update destination
-                    // GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: reset target GOOD");                    
-                    avoidance.avoid_WP_backup = avoidance.next_WP_backup;
+                    // GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: reset target GOOD");  
+                    // No need to set this here, it will be set correctly when we come back in next time around                  
+                    //_avoidance.avoid_WP_backup = _avoidance.next_WP_backup;
                 }
                 else {
                     GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: reset target FAILED");
                 }
+            }*/
+            if (_avoidance.mode_backup == Mode::Number::AUTO || _avoidance.mode_backup == Mode::Number::RTL || 
+                _avoidance.mode_backup == Mode::Number::GUIDED || _avoidance.mode_backup == Mode::Number::AVOID_ADSB ) {
+                // Need to deal with guided "heading" submode. 
+                plane.set_guided_WP(_avoidance.next_WP_backup);
+                _avoidance.avoid_WP_backup = _avoidance.next_WP_backup;
             }
-            avoidance._oa_state = oa_retstate;
+            _avoidance.oa_state = oa_retstate;
+            plane.set_mode_by_number(_avoidance.mode_backup, ModeReason::AVOIDANCE);
         }
         break;
 
     case AP_OAPathPlanner::OA_PROCESSING:
         // CS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: Processing");
-        avoidance._oa_state = oa_retstate;
+        _avoidance.oa_state = oa_retstate;
         break;
 
     case AP_OAPathPlanner::OA_ERROR:
-        avoidance._oa_state = oa_retstate;
+        _avoidance.oa_state = oa_retstate;
         GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: ERROR - stop? Loiter?");
         // during processing or in case of error stop the vehicle
         // by setting the oa_destination to a stopping point
@@ -590,47 +596,66 @@ void Plane::avoid_obstacles()
 
         case AP_OAPathPlanner::OAPathPlannerUsed::Dijkstras:
             // Dijkstra's.  Action is only needed if path planner has just became active or the target destination's lat or lon has changed
-            if ((avoidance._oa_state != AP_OAPathPlanner::OA_SUCCESS) || 
-                    !oa_destination_new.same_latlon_as(avoidance._oa_destination)) {
+            if ((_avoidance.oa_state != AP_OAPathPlanner::OA_SUCCESS) || 
+                    !oa_destination_new.same_latlon_as(_avoidance.avoid_WP_backup)) {
 
-                oa_destination_new.linearly_interpolate_alt(avoidance.prev_WP_backup, avoidance.next_WP_backup);
+                // make sure that both origin and destination are in the same frame, necessary for the interpolations below
+                _avoidance.prev_WP_backup.change_alt_frame(_avoidance.next_WP_backup.get_alt_frame());
+                oa_destination_new.linearly_interpolate_alt(_avoidance.prev_WP_backup, _avoidance.next_WP_backup);
 
                 // set new OA adjusted destination to fly to
-                if(plane.update_target_location(oa_origin_new, oa_destination_new)) {
+                if(plane.update_target_location(_avoidance.avoid_WP_backup, oa_destination_new)) {
                     // if new target set successfully, update oa state and destination
+                    _avoidance.oa_state = oa_retstate;
+                    _avoidance.avoid_WP_backup = oa_destination_new;
                 }
-                avoidance._oa_state = oa_retstate;
-                avoidance._oa_destination = oa_destination_new;
+                else {
+                    // This means something changed. Likely the mission is now heading to a new waypoint. (or a manual override)
+                    // we want to reset back to "NOT_REQUIRED", so we force the update of the _backup variables 
+                    // at the beginning of the loop.
+                    _avoidance.oa_state = AP_OAPathPlanner::OA_NOT_REQUIRED;
+                    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: update target FAILED");
+                }
             }
             break;
 
         case AP_OAPathPlanner::OAPathPlannerUsed::BendyRulerHorizontal: {
+            // make sure that both origin and destination are in the same frame, necessary for the interpolations below
+            _avoidance.prev_WP_backup.change_alt_frame(_avoidance.next_WP_backup.get_alt_frame());
             // altitude target interpolated from current_loc's distance along the original path
-            avoidance.prev_WP_backup.change_alt_frame(avoidance.next_WP_backup.get_alt_frame());
-            oa_destination_new.linearly_interpolate_alt(avoidance.prev_WP_backup, avoidance.next_WP_backup);
-            if(plane.update_target_location(avoidance.avoid_WP_backup, oa_destination_new)) {
+            oa_destination_new.linearly_interpolate_alt(_avoidance.prev_WP_backup, _avoidance.next_WP_backup);
+
+            plane.set_mode_by_number(Mode::Number::GUIDED, ModeReason::AVOIDANCE);
+            plane.guided_state.target_heading_type = GUIDED_HEADING_NONE;
+            plane.set_guided_WP(oa_destination_new);
+            _avoidance.avoid_WP_backup = oa_destination_new;
+
+            _avoidance.oa_state = oa_retstate;
+            /*
+            if(plane.update_target_location(_avoidance.avoid_WP_backup, oa_destination_new)) {
+                // GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: update target GOOD");
                 //GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: prev alt: %d/%d", avoidance.prev_WP_backup.alt, avoidance.prev_WP_backup.get_alt_frame());
                 //GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: set alt: %d/%d", oa_destination_new.alt, oa_destination_new.get_alt_frame());
-                avoidance.avoid_WP_backup = oa_destination_new;
                 // if new target set successfully, update oa state and destination
-                // GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: update target GOOD");
-                avoidance._oa_state = oa_retstate;
-                avoidance._oa_destination = oa_destination_new;
-                avoidance._oa_next_destination = oa_next_destination_new;
+                _avoidance.oa_state = oa_retstate;
+                _avoidance.avoid_WP_backup = oa_destination_new;
+                GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: update target Ok");
             }
             else {
                 // This means something changed. Likely the mission is now heading to a new waypoint. (or a manual override)
                 // we want to reset back to "NOT_REQUIRED", so we force the update of the _backup variables 
                 // at the beginning of the loop.
-                avoidance._oa_state = AP_OAPathPlanner::OA_NOT_REQUIRED;
+                _avoidance.oa_state = AP_OAPathPlanner::OA_NOT_REQUIRED;
                 GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: update target FAILED");
             }
+            */
             return;
         }
 
         case AP_OAPathPlanner::OAPathPlannerUsed::BendyRulerVertical: {
-            avoidance._oa_state = oa_retstate;
-            avoidance._oa_destination = oa_destination_new;
+            _avoidance.oa_state = oa_retstate;
+            _avoidance.avoid_WP_backup = oa_destination_new;
+            // This probably needs work
             return;
         }
 
