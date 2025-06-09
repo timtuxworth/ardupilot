@@ -660,7 +660,7 @@ bool AP_OABendyRuler::calc_margin_from_inclusion_and_exclusion_polygons(const Lo
         if (!margin_updated || (margin_new < margin)) {
             margin_updated = true;
             margin = margin_new;
-            label = (char *)"Inclusion";
+            label = (char *)"Include";
         }
     }
 
@@ -677,7 +677,7 @@ bool AP_OABendyRuler::calc_margin_from_inclusion_and_exclusion_polygons(const Lo
         if (!margin_updated || (margin_new < margin)) {
             margin_updated = true;
             margin = margin_new;
-            label = (char *)"Exclusion";
+            label = (char *)"Exclude";
         }
     }
 
@@ -738,7 +738,7 @@ bool AP_OABendyRuler::calc_margin_from_inclusion_and_exclusion_circles(const Loc
             if (!margin_updated || (margin_new < margin)) {
                 margin_updated = true;
                 margin = margin_new;
-                label = (char *)"Inclusion";
+                label = (char *)"Include";
             }
         }
     }
@@ -759,7 +759,7 @@ bool AP_OABendyRuler::calc_margin_from_inclusion_and_exclusion_circles(const Loc
             if (!margin_updated || (margin_new < margin)) {
                 margin_updated = true;
                 margin = margin_new;
-                label = (char *)"Exclusion";
+                label = (char *)"Exclude";
             }
         }
     }
