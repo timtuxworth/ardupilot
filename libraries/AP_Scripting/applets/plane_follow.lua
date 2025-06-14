@@ -25,7 +25,7 @@
    ZPR_TURN_DEG - if the target is more than this many degrees left or right, assume it's turning
 --]]
 
-SCRIPT_VERSION = "4.7.0-059"
+SCRIPT_VERSION = "4.7.0-062"
 SCRIPT_NAME = "Plane Follow"
 SCRIPT_NAME_SHORT = "PFollow"
 
@@ -53,6 +53,9 @@ local now = millis():tofloat() * 0.001
 local now_target_heading = now
 local now_telemetry_request = now
 local now_follow_lost = now
+local now_debug = now
+local now_heading = now
+local now_debug = now
 local follow_enabled = false
 local too_close_follow_up = 0
 local save_target_heading1 = -400.0
@@ -69,7 +72,7 @@ local function bind_add_param(name, idx, default_value)
    return Parameter(PARAM_TABLE_PREFIX .. name)
 end
 -- setup follow mode specific parameters
-assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 25), 'could not add param table')
+assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 30), 'could not add param table')
 
 -- add a parameter and bind it to a variable
 --local function bind_add_param2(name, idx, default_value)
@@ -175,7 +178,7 @@ ZPF_ALT_OVR = bind_add_param("ALT_OVR", 9, 0)
     // @Description: P gain for the speed PID controller distance component
     // @Range: 0 1
 --]]
-ZPF_D_P = bind_add_param("D_P", 11, 0.0005)
+ZPF_D_P = bind_add_param("D_P", 11, 0.0004)
 
 --[[
     // @Param: ZPF_D_I
@@ -183,7 +186,7 @@ ZPF_D_P = bind_add_param("D_P", 11, 0.0005)
     // @Description: I gain for the speed PID  distance component
     // @Range: 0 1
 --]]
-ZPF_D_I = bind_add_param("D_I", 12, 0.0005)
+ZPF_D_I = bind_add_param("D_I", 12, 0.00005)
 
 --[[
     // @Param: ZPF_D_D
@@ -191,7 +194,7 @@ ZPF_D_I = bind_add_param("D_I", 12, 0.0005)
     // @Description: D gain for the speed PID controller distance component
     // @Range: 0 1
 --]]
-ZPF_D_D = bind_add_param("D_D", 13, 0.00025)
+ZPF_D_D = bind_add_param("D_D", 13, 0.0005)
 
 --[[
     // @Param: ZPF_V_P
@@ -199,7 +202,7 @@ ZPF_D_D = bind_add_param("D_D", 13, 0.00025)
     // @Description: P gain for the speed PID controller velocity component
     // @Range: 0 1
 --]]
-ZPF_V_P = bind_add_param("V_P", 14, 0.0005)
+ZPF_V_P = bind_add_param("V_P", 14, 0.0004)
 
 --[[
     // @Param: ZPF_V_I
@@ -207,7 +210,7 @@ ZPF_V_P = bind_add_param("V_P", 14, 0.0005)
     // @Description: I gain for the speed PID controller velocity component
     // @Range: 0 1
 --]]
-ZPF_V_I = bind_add_param("V_I", 15, 0.0005)
+ZPF_V_I = bind_add_param("V_I", 15, 0.00005)
 
 --[[
     // @Param: ZPF_V_D
@@ -215,7 +218,7 @@ ZPF_V_I = bind_add_param("V_I", 15, 0.0005)
     // @Description: D gain for the speed PID controller velocity component
     // @Range: 0 1
 --]]
-ZPF_V_D = bind_add_param("V_D", 16, 0.00025)
+ZPF_V_D = bind_add_param("V_D", 16, 0.0005)
 
 --[[
     // @Param: ZPF_LkAHD
@@ -223,7 +226,7 @@ ZPF_V_D = bind_add_param("V_D", 16, 0.00025)
     // @Description: Time to "lookahead" when calculating distance errors
     // @Units: s
 --]]
-ZPF_LKAHD = bind_add_param("LKAHD", 17, 6)
+ZPF_LKAHD = bind_add_param("LKAHD", 17, 3)
 
 --[[
     // @Param: ZPF_DIST_FUDGE
@@ -258,8 +261,59 @@ ZPF_SR_CH = bind_add_param("SR_CH", 20, -1)
 --]]
 ZPF_SR_INT = bind_add_param("SR_INT", 21, 50)
 
-REFRESH_RATE = 0.05   -- in seconds, so 20Hz
-LOST_TARGET_TIMEOUT = (ZPF_TIMEOUT:get() or 10) / REFRESH_RATE
+--[[
+    // @Param: ZPF_XT_P
+    // @DisplayName: Plane Follow crosstrack PID controller P term
+    // @Description: P term for the crosstrack/heading PID controller
+    // @Range: 0 1
+--]]
+ZPF_XT_P = bind_add_param("XT_P", 22, 0.8)
+
+--[[
+    // @Param: ZPF_XT_I
+    // @DisplayName: Plane Follow crosstrack PID controller I term
+    // @Description: I term for the crosstrack/heading PID controller
+    // @Range: 0 1
+--]]
+ZPF_XT_I = bind_add_param("XT_I", 23, 0.01)
+
+--[[
+    // @Param: ZPF_XT_D
+    // @DisplayName: Plane Follow crosstrack PID controller D term
+    // @Description: D term for the crosstrack/heading PID controller
+    // @Range: 0 1
+--]]
+ZPF_XT_D = bind_add_param("XT_D", 24, 0.5)
+
+--[[
+    // @Param: ZPF_XT_MAX
+    // @DisplayName: Plane Follow crosstrack PID controller maximum correction
+    // @Description: maximum correction retured by the crosstrack/heading PID controller
+    // @Range: 0 1
+    // @Units: deg
+--]]
+ZPF_XT_MAX = bind_add_param("XT_MAX", 25, 45)
+
+--[[
+    // @Param: ZPF_XT_I_MAX
+    // @DisplayName: Plane Follow crosstrack PID controller maximum integral
+    // @Description: maximum I applied the crosstrack/heading PID controller
+    // @Range: 0 100
+    // @Units: ms
+--]]
+ZPF_XT_I_MAX = bind_add_param("XT_I_MAX", 26, 100)
+
+--[[
+    // @Param: ZPF_REFRESH
+    // @DisplayName: Plane Follow refresh rate 
+    // @Description: refresh rate for Plane Follow updates
+    // @Range: 0 0.2
+    // @Units: s
+--]]
+ZPF_REFRESH = bind_add_param("REFRESH", 27, 0.05)
+
+local refresh_rate = ZPF_REFRESH:get() or 0.05   -- in seconds, so 20Hz by default
+LOST_TARGET_TIMEOUT = (ZPF_TIMEOUT:get() or 10) / refresh_rate
 OVERSHOOT_ANGLE = ZPF_OVRSHT_DEG:get() or 75.0
 TURNING_ANGLE = ZPF_TURN_DEG:get() or 20.0
 DISTANCE_LOOKAHEAD_SECONDS = ZPF_LKAHD:get() or 5.0
@@ -309,6 +363,71 @@ local pid_controller_velocity = speedpid.speed_controller(ZPF_V_P:get() or 0.01,
                                                             ZPF_V_D:get() or 0.005,
                                                             0.5, airspeed_min, airspeed_max)
 
+CrossTrackPID = {}
+CrossTrackPID.__index = CrossTrackPID
+
+function CrossTrackPID:new(kp, ki, kd, max_correction, integral_limit)
+      local self = setmetatable({}, CrossTrackPID)
+      self.kp = kp or 0.8
+      self.ki = ki or 0.01
+      self.kd = kd or 0.5
+      self.max_correction = max_correction or 30  -- degrees
+      self.integral_limit = integral_limit or 100 -- m·s
+
+      self.integral = 0
+      self.last_error = 0
+
+      return self
+end
+
+-- reset integrator to an initial value
+function CrossTrackPID:reset()
+   local self = setmetatable({}, CrossTrackPID)
+   self.integral = 0
+   self.last_error = 0
+end
+
+function CrossTrackPID:wrap_angle_deg(angle)
+      angle = (angle + 180) % 360
+      if angle < 0 then angle = angle + 360 end
+      return angle - 180
+end
+
+function CrossTrackPID:compute(desired_track_heading, cross_track_error, dt)
+      -- Derivative
+      local error_rate = (cross_track_error - self.last_error) / dt
+
+      -- Integral with clamp
+      self.integral = self.integral + cross_track_error * dt
+      if self.integral > self.integral_limit then self.integral = self.integral_limit end
+      if self.integral < -self.integral_limit then self.integral = -self.integral_limit end
+
+      -- PID correction (heading offset in degrees)
+      local correction = self.kp * cross_track_error +
+                        self.kd * error_rate +
+                        self.ki * self.integral
+
+      -- Clamp heading correction
+      if correction > self.max_correction then correction = self.max_correction end
+      if correction < -self.max_correction then correction = -self.max_correction end
+
+      -- Apply correction (subtract because +error = left of track)
+      local corrected_heading = desired_track_heading - correction
+      corrected_heading = (corrected_heading + 360) % 360
+
+      -- Save state
+      self.last_error = cross_track_error
+
+      return corrected_heading
+end
+-- end of CrossTrackPID {} class definition
+
+-- Instantiate the crosstrack/heading PID controller (outside update loop) 
+local xt_pid = CrossTrackPID:new(ZPF_XT_P:get() or 0.9,
+                                 ZPF_XT_I:get() or 0.01,
+                                 ZPF_XT_D:get() or 0.5,
+                                 ZPF_XT_MAX:get() or 45,
+                                 ZPF_XT_I_MAX:get() or 100)
 
 local mavlink_attitude = require("mavlink_attitude")
 local mavlink_attitude_receiver = mavlink_attitude.mavlink_attitude_receiver()
@@ -324,6 +443,7 @@ local function follow_frame_to_mavlink(follow_frame)
    return mavlink_frame
 end
 
+-- this enables sending command_int MAVLink comments to the _current_ vehicle not over the wire
 local mavlink_command_int = require("mavlink_command_int")
 
 -- set_vehicle_target_altitude() Parameters
@@ -397,38 +517,8 @@ local function set_vehicle_speed(speed)
    end
 end
 
--- set_vehicle_target_location() Parameters
--- target.groundspeed (-1 for ignore)
--- target.radius (defaults to 2m)
--- target.yaw - not really yaw - it's the loiter direction 1 = CCW, -1 = CW NaN = default
--- target.lat - latitude in decimal degrees
--- target.lng - longitude in decimal degrees
--- target.alt - target alitude in meters
-local function set_vehicle_target_location(target)
-   local radius = target.radius or 2.0
-   local yaw = target.yaw or 1
-   -- If we are on the right side of the vehicle make sure any loitering is CCW (moves away from the other plane)
-   -- yaw > 0 - CCW = turn to the right of the target point
-   -- yaw < 0 - Clockwise = turn to the left of the target point
-   -- if following direct we turn on the "outside"
-
-   -- if we were in HEADING mode, need to switch out of it so that REPOSITION will work
-   -- Note that MAVLink DO_REPOSITION requires altitude in meters
-   set_vehicle_heading({type = MAV_HEADING_TYPE.DEFAULT})
-   if not gcs:run_command_int(MAV_CMD_INT.DO_REPOSITION, { frame = follow_frame_to_mavlink(target.frame),
-                              p1 = target.groundspeed or -1,
-                              p2 = 1,
-                              p3 = radius,
-                              p4 = yaw,
-                              x = target.lat,
-                              y = target.lng,
-                              z = target.alt }) then  -- altitude in m
-      gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. ": MAVLink DO_REPOSITION returned false")
-   end
-end
-
 --[[
-   return true if we are in a state where follow can apply
+   follow_active() - return true if we are in a state where follow can apply
 --]]
 local reported_target = true
 local lost_target_now = now
@@ -458,7 +548,16 @@ local function follow_active()
 end
 
 --[[
-   check for user activating follow using an RC switch set HIGH
+   follow_check() - check for user activating follow using an RC switch 
+      - set HIGH and if so
+         - switches to GUIDED
+         - enables follow
+         - resets the PID controllers
+      -- set LOW and if so
+         - exits from GUIDED to the ZPF_EXIT_MODE
+         - disables follow
+      -- checks for user simulating telemetry fail using ZPF_SIM_TELF_FN
+         - enables (HIGH)/disables (LOW) 
 --]]
 local last_follow_active_state = rc:get_aux_cached(ZPF_ACT_FN:get())
 local last_tel_fail_state = rc:get_aux_cached(ZPF_SIM_TELF_FN:get())
@@ -488,9 +587,9 @@ local function follow_check()
          vehicle:set_mode(FLIGHT_MODE.GUIDED)
          follow_enabled = true
          lost_target_countdown = LOST_TARGET_TIMEOUT
-         --speed_controller_pid.reset()
          pid_controller_distance.reset()
          pid_controller_velocity.reset()
+         xt_pid.reset()
          gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. ": enabled")
       end
       -- Don't know what to do with the 3rd switch position right now.
@@ -546,6 +645,43 @@ local function calculate_airspeed_from_groundspeed(velocity_vector)
    return airspeed
 end
 
+-- ChatGPT code to calculate the distance to the target along_track and cross_track
+local function calculate_track_distance(P_f, P_l)
+    -- Get the follower's ground-relative velocity
+    local V_f = ahrs:get_velocity_NED()
+    if V_f == nil or (V_f:x() == 0 and V_f:y() == 0) then
+        -- No valid velocity, return zeros
+        return 0, 0
+    end
+
+    -- Create horizontal velocity vector
+    local D_f = Vector3f()
+    D_f:x(V_f:x())
+    D_f:y(V_f:y())
+    D_f:z(0)
+
+    -- Normalize in-place
+    D_f:normalize()
+
+    -- Get relative position vector
+    local R = P_f:get_distance_NED(P_l)
+
+    -- Along-track distance: projection of R onto D_f
+    local along_track_distance = R:dot(D_f)
+
+    -- Cross-track distance: projection onto perpendicular to D_f
+    local perp_D_f = Vector3f()
+    perp_D_f:x(-D_f:y())
+    perp_D_f:y(D_f:x())
+    perp_D_f:z(0)
+    perp_D_f:normalize()
+
+    local cross_track_distance = R:dot(perp_D_f)
+
+    -- -ve cross_track_distance to align to the sign of FOLL_OFS_Y where +ve is to the right
+    return along_track_distance, -cross_track_distance
+end
+
 -- main update function
 local function update()
    now = millis():tofloat() * 0.001
@@ -562,7 +698,7 @@ local function update()
    local long_distance = close_distance * 4.0
    local altitude_override = ZPF_ALT_OVR:get() or 0
 
-   LOST_TARGET_TIMEOUT = (ZPF_TIMEOUT:get() or 10) / REFRESH_RATE
+   LOST_TARGET_TIMEOUT = (ZPF_TIMEOUT:get() or 10) / refresh_rate
    OVERSHOOT_ANGLE = ZPF_OVRSHT_DEG:get() or 75.0
    TURNING_ANGLE = ZPF_TURN_DEG:get() or 20.0
    foll_ofs_y = FOLL_OFS_Y:get() or 0.0
@@ -635,16 +771,16 @@ local function update()
     target_dist_ofs = _dist_to_target;
 
    --]]
-   target_distance, target_distance_offset, _ = follow:get_target_dist_and_vel_ned() -- THIS HAS TO BE FIRST
+   target_distance, target_distance_offset, _ = follow:get_target_dist_and_vel_NED_m()
    target_location, target_velocity = follow:get_target_location_and_velocity()
    target_location_offset, target_velocity_offset = follow:get_target_location_and_velocity_ofs()
-   xy_dist = follow:get_distance_to_target() -- this value is set by get_target_dist_and_vel_ned() - why do I have to know this? 
+   --xy_dist = follow:get_distance_to_target_m() -- this value is set by get_target_dist_and_vel_ned() - why do I have to know this? 
    target_heading = follow:get_target_heading_deg() or -400
 
    -- if we lose the target wait for LOST_TARGET_TIMEOUT seconds to try to reaquire it
    if target_location == nil or target_location_offset == nil or
       target_velocity == nil or target_velocity_offset == nil or
-      target_distance_offset == nil or current_target == nil or target_distance == nil or xy_dist == nil or
+      target_distance_offset == nil or current_target == nil or target_distance == nil or
       simulate_telemetry_failed then
       lost_target_countdown = lost_target_countdown - 1
       if lost_target_countdown <= 0 then
@@ -668,11 +804,20 @@ local function update()
       now_follow_lost = now
    end
 
+      -- c++ calculation 
+   -- _dist_to_target_m = ofs_dist_vec.xy().length();
+   xy_dist = current_location:get_distance(target_location_offset)
+
+   local along_track_distance, cross_track_distance = calculate_track_distance(current_location, target_location_offset)
+
    -- target_velocity from MAVLink (via AP_Follow) is groundspeed, need to convert to airspeed, 
    -- we can only assume the windspeed for the target is the same as the chase plane
-   local target_airspeed = calculate_airspeed_from_groundspeed(target_velocity_offset)
+   -- pre Kinematic
+   -- local target_airspeed = calculate_airspeed_from_groundspeed(target_velocity)
+   -- post Kinematic
+   local target_airspeed = calculate_airspeed_from_groundspeed(target_velocity)
 
-   local vehicle_heading = math.abs(wrap_360(math.deg(ahrs:get_yaw())))
+   local vehicle_heading = math.abs(wrap_360(math.deg(ahrs:get_yaw_rad())))
    local heading_to_target_offset = math.deg(current_location:get_bearing(target_location_offset))
 
    -- offset_angle is the difference between the current heading of the follow vehicle and the target_location (with offsets)
@@ -685,13 +830,7 @@ local function update()
    -- default the desired heading to the target heading (adjusted for projected turns) - we might change this below
    local airspeed_difference = vehicle_airspeed - target_airspeed
 
-   -- distance seem to be out by about 0.92s at approximately current airspeed just eyeballing it.
-   xy_dist = math.abs(xy_dist) - vehicle_airspeed * distance_fudge
-   -- xy_dist will always be a positive value. To get -v to represent overshoot, use the offset_angle
-   -- to decide if the target is behind
-   if (math.abs(xy_dist) < long_distance) and (math.abs(offset_angle) > OVERSHOOT_ANGLE) then
-      xy_dist = -xy_dist
-   end
+   xy_dist = along_track_distance
 
    -- projected_distance is how far off the target we expect to be if we maintain the current airspeed for DISTANCE_LOOKAHEAD_SECONDS
    local projected_distance = xy_dist - airspeed_difference * DISTANCE_LOOKAHEAD_SECONDS
@@ -757,16 +896,19 @@ local function update()
             tight_turn = true
          end
 
+         --[[
          -- if the roll direction is the same as the rollspeed then we are heading into a turn, otherwise we are finishing a turn
-         if foll_ofs_y == 0 or
+         if -- foll_ofs_y == 0 or This is probably broken
             (target_attitude.roll < 0 and target_attitude.rollspeed < 0) or
             (target_attitude.roll > 0 and target_attitude.rollspeed > 0) then
             turn_starting = true
             target_angle = wrap_360(target_angle - angle_adjustment)
             desired_heading = wrap_360(target_heading - angle_adjustment)
+            --gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. string.format(": dist: %.0f proj: %0.f heading tgt: %.0f des: %.0f adj: %.0f", xy_dist, projected_distance, target_heading, desired_heading, angle_adjustment))
             -- push the target heading back because it hasn't figured out we are turning yet
             save_target_heading1 = save_target_heading2
          end
+         --]]
 
          -- calculate the path/distance around the turn for the lead and follow vehicle so we can slow down or speed up
          -- depending on which is flying the shorter path
@@ -821,29 +963,36 @@ local function update()
    end
 
    local mechanism = 0 -- for logging 1: position/location 2:heading
+   local mechanism_text = ""
    local close = (math.abs(projected_distance) < close_distance)
    local too_wide = (math.abs(target_distance_rotated:y()) > (close_distance/4) and not turning)
 
    -- xy_dist < 3.0 is a special case because mode_guided will try to loiter around the target location if within 2m
    -- target_heading - vehicle_heading catches the circumstance where the target vehicle is heaidng in completely the opposite direction
-   if math.abs(xy_dist or 0.0) < 10.0 or
+   if (math.abs(xy_dist or 0.0) < airspeed_max * 0.75 or (math.abs(cross_track_distance) < airspeed_max * 0.25)) or
          ((turning and ((tight_turn and turn_starting) or use_wide_turns or foll_ofs_y == 0)) or -- turning 
          ((close or overshot) and not too_wide) -- we are very close to the target
          ) then
-      set_vehicle_heading({heading = desired_heading})
-      set_vehicle_target_altitude({alt = target_altitude, frame = foll_alt_type}) -- pass altitude in meters (location has it in cm)
+      -- 
       mechanism = 2 -- heading - for logging
+      mechanism_text = "hdg"
    elseif target_location_offset ~= nil then
-      set_vehicle_target_location({lat = target_location_offset:lat(),
-                                    lng = target_location_offset:lng(),
-                                    alt = target_altitude,
-                                    frame = foll_alt_type,
-                                    yaw = foll_ofs_y})
+      -- override the heading to point directly to the target location with offsets.
+      desired_heading = heading_to_target_offset
       mechanism = 1  -- position/location - for logging
+      mechanism_text = "pos"
    end
+   -- The desired heading needs a PID controller, especially when it gets close.
+   desired_heading = xt_pid:compute(desired_heading, cross_track_distance, now - now_heading)
+
+   set_vehicle_heading({heading = desired_heading})
+   set_vehicle_target_altitude({alt = target_altitude, frame = foll_alt_type}) -- pass altitude in meters (location has it in cm)
 
    -- dv = interim delta velocity based on the pid controller using projected_distance per loop as the error (we want distance == 0)
-   local dv_error = projected_distance * REFRESH_RATE
+   local dv_error = xy_dist * refresh_rate * 2.0
+   if dv_error < 0 then
+      dv_error = dv_error * 5.0  -- fudge factor to deal with it being harder to slow down from overshoot
+   end
    -- re-project the distance error based on the turning angle
    -- if (turning and (tight_turn and turn_starting)) and math.abs(offset_angle) > TURNING_ANGLE  and turning_airspeed_ratio > 0 then
    if turning_airspeed_ratio > 0 and turning_airspeed_ratio < 2.0 then
@@ -855,7 +1004,18 @@ local function update()
    if dv_error ~= nil then
       dv = pid_controller_distance.update(airspeed_error, dv_error)
       airspeed_new = pid_controller_velocity.update(vehicle_airspeed, dv)
-
+      --[[
+      if now - now_debug > 1 then
+         --gcs:send_taxt(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. string.format("asp: %0.1f tar: %0.1f", vehicle_airspeed, target_velocity:length()))
+         gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. string.format(": dist: %.0f proj: %0.f vel: %.1f asp: %.1f new:%.1f dve: %.1f dv %.1f err: %.1f hdg: %.0f %s", 
+                                                                                 xy_dist, projected_distance, vehicle_airspeed, target_airspeed, airspeed_new, dv_error, dv, airspeed_error, desired_heading, mechanism_text))
+         --gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. string.format(": dist: %.0f fwd: %0.1f x: %.1f proj: %0.f asp: %.1f new:%.1f hdg: tar %.1f new %0.1f %s",
+         --                                                                        xy_dist, along_track_distance, cross_track_distance, projected_distance, target_airspeed, airspeed_new, target_heading, desired_heading, mechanism_text))
+         now_debug = now
+      end
+      --   gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. string.format(": dist: %.0f proj: %0.f heading tgt: %.0f des: %.0f %s", xy_dist, projected_distance, target_heading, desired_heading, mechanism_text))
+      --end
+      --]]
       set_vehicle_speed({speed = constrain(airspeed_new, airspeed_min, airspeed_max)})
    end
 
@@ -908,7 +1068,7 @@ local function protected_wrapper()
       -- down a bit so we don't flood the console with errors
       return protected_wrapper, 1000
    end
-   return protected_wrapper, 1000 * REFRESH_RATE
+   return protected_wrapper, 1000 * refresh_rate
 end
 
 local function delayed_startup()
