@@ -306,6 +306,7 @@ void AP_Follow::update_estimates()
     Vector3f offset_m = _offset_m.get();
 
     // calculate estimated position and velocity with offsets applied
+
     if (offset_m.is_zero() || (_offset_type == AP_FOLLOW_OFFSET_TYPE_NED)) {
         // offsets are in NED frame: simple addition
         _ofs_estimate_pos_ned_m = _estimate_pos_ned_m + offset_m.topostype();
@@ -498,7 +499,6 @@ void AP_Follow::handle_msg(const mavlink_message_t &msg)
         _estimate_valid = false;   // mark estimate as invalid
         _using_follow_target = false; // reset follow-target usage flag
     }
-    printf("got message %d\n", msg.msgid);
 
     if (!should_handle_message(msg)) {
         // ignore message if filtering rules reject it (e.g., wrong sysid)
