@@ -3817,6 +3817,12 @@ function follow:get_target_location_and_velocity_ofs() end
 ---@return Vector3f_ud|nil
 function follow:get_target_location_and_velocity() end
 
+-- get the SYSID_THISMAV of the target
+---@return integer
+function follow:get_target_sysid() end
+
+-- get target's heading in degrees (0 = north, 90 = east)
+
 -- desc
 ---@return uint32_t_ud
 function follow:get_last_update_ms() end
