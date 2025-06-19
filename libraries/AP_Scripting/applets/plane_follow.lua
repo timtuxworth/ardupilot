@@ -820,8 +820,7 @@ local function update()
    -- post Kinematic
    local target_airspeed = calculate_airspeed_from_groundspeed(target_velocity)
 
-   -- local vehicle_heading = math.abs(wrap_360(math.deg(ahrs:get_yaw_rad())))
-   local vehicle_heading = math.abs(wrap_360(math.deg(ahrs:get_yaw())))
+   local vehicle_heading = math.abs(wrap_360(math.deg(ahrs:get_yaw_rad())))
    local heading_to_target_offset = math.deg(current_location:get_bearing(target_location_offset))
 
    -- offset_angle is the difference between the current heading of the follow vehicle and the target_location (with offsets)
