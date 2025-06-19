@@ -25,7 +25,7 @@
    ZPR_TURN_DEG - if the target is more than this many degrees left or right, assume it's turning
 --]]
 
-SCRIPT_VERSION = "4.7.0-062"
+SCRIPT_VERSION = "4.7.0-063"
 SCRIPT_NAME = "Plane Follow"
 SCRIPT_NAME_SHORT = "PFollow"
 
@@ -771,16 +771,15 @@ local function update()
     target_dist_ofs = _dist_to_target;
 
    --]]
-   target_distance, target_distance_offset, _ = follow:get_target_dist_and_vel_NED_m()
    target_location, target_velocity = follow:get_target_location_and_velocity()
    target_location_offset, target_velocity_offset = follow:get_target_location_and_velocity_ofs()
-   --xy_dist = follow:get_distance_to_target_m() -- this value is set by get_target_dist_and_vel_ned() - why do I have to know this? 
+
    target_heading = follow:get_target_heading_deg() or -400
 
    -- if we lose the target wait for LOST_TARGET_TIMEOUT seconds to try to reaquire it
    if target_location == nil or target_location_offset == nil or
       target_velocity == nil or target_velocity_offset == nil or
-      target_distance_offset == nil or current_target == nil or target_distance == nil or
+      current_target == nil or 
       simulate_telemetry_failed then
       lost_target_countdown = lost_target_countdown - 1
       if lost_target_countdown <= 0 then
@@ -804,8 +803,12 @@ local function update()
       now_follow_lost = now
    end
 
-      -- c++ calculation 
+   -- calculate the target_distance and target distance offset so we don't need to call get_target_dist_and_vel_NED
+   local new_target_distance = current_location:get_distance_NED(target_location_offset)
+
+   -- c++ calculation 
    -- _dist_to_target_m = ofs_dist_vec.xy().length();
+   -- xy_dist = current_location:get_distance(target_location_offset)
    xy_dist = current_location:get_distance(target_location_offset)
 
    local along_track_distance, cross_track_distance = calculate_track_distance(current_location, target_location_offset)
@@ -817,14 +820,16 @@ local function update()
    -- post Kinematic
    local target_airspeed = calculate_airspeed_from_groundspeed(target_velocity)
 
-   local vehicle_heading = math.abs(wrap_360(math.deg(ahrs:get_yaw_rad())))
+   -- local vehicle_heading = math.abs(wrap_360(math.deg(ahrs:get_yaw_rad())))
+   local vehicle_heading = math.abs(wrap_360(math.deg(ahrs:get_yaw())))
    local heading_to_target_offset = math.deg(current_location:get_bearing(target_location_offset))
 
    -- offset_angle is the difference between the current heading of the follow vehicle and the target_location (with offsets)
    local offset_angle = wrap_180(vehicle_heading - heading_to_target_offset)
 
    -- rotate the target_distance_offsets in NED to the same direction has the follow vehicle, we use this below
-   local target_distance_rotated = target_distance_offset:copy()
+   -- local target_distance_rotated = target_distance_offset:copy()
+   local target_distance_rotated = new_target_distance:copy()
    target_distance_rotated:rotate_xy(math.rad(vehicle_heading))
 
    -- default the desired heading to the target heading (adjusted for projected turns) - we might change this below
