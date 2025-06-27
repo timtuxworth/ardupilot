@@ -542,7 +542,7 @@ void Plane::avoid_obstacles()
                 // GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: reset alt: %d/%d", avoidance.next_WP_backup.alt, avoidance.next_WP_backup.get_alt_frame());
                 if(plane.update_target_location(_avoidance.avoid_WP_backup, _avoidance.next_WP_backup)) {
                     // if new target set successfully, update destination
-                    // GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: reset target GOOD");  
+                    // GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: reset target GOOD");
                     // No need to set this here, it will be set correctly when we come back in next time around                  
                     //_avoidance.avoid_WP_backup = _avoidance.next_WP_backup;
                 }
