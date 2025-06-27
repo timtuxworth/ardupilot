@@ -106,7 +106,6 @@ void AP_OAPathPlanner::init()
         if (_oabendyruler == nullptr) {
             _oabendyruler = NEW_NOTHROW AP_OABendyRuler();
             AP_Param::load_object_from_eeprom(_oabendyruler, AP_OABendyRuler::var_info);
-            hal.console->printf("TIM: AOPathPlanne::init() BENDYRULER\n");
         }
         break;
     case OA_PATHPLAN_DIJKSTRA:
