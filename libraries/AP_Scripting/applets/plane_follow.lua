@@ -18,14 +18,14 @@
    a scripting switch to allow guided to track the vehicle id in FOLL_SYSID
    Uses the AP_Follow library so all of the existing FOLL_* parameters are used
    as documented for Copter, + add 3 more for this script
-   ZPF_EXIT_MODE - the mode to switch to when follow is turned of using the switch
-   ZPF_FAIL_MODE - the mode to switch to if the target is lost
-   ZPF_TIMEOUT - number of seconds to try to reaquire the target after losing it before failing
-   ZPF_OVRSHT_DEG - if the target is more than this many degrees left or right, assume an overshoot
-   ZPR_TURN_DEG - if the target is more than this many degrees left or right, assume it's turning
+   FOLLP_EXIT_MODE - the mode to switch to when follow is turned of using the switch
+   FOLLP_FAIL_MODE - the mode to switch to if the target is lost
+   FOLLP_TIMEOUT - number of seconds to try to reaquire the target after losing it before failing
+   FOLLP_OVRSHT_DEG - if the target is more than this many degrees left or right, assume an overshoot
+   FOLLP_TURN_DEG - if the target is more than this many degrees left or right, assume it's turning
 --]]
 
-SCRIPT_VERSION = "4.7.0-063"
+SCRIPT_VERSION = "4.7.0-064"
 SCRIPT_NAME = "Plane Follow"
 SCRIPT_NAME_SHORT = "PFollow"
 
@@ -63,8 +63,8 @@ local save_target_heading2 = -400.0
 local save_target_altitude
 local tight_turn = false
 
-local PARAM_TABLE_KEY = 120
-local PARAM_TABLE_PREFIX = "ZPF_"
+local PARAM_TABLE_KEY = 123
+local PARAM_TABLE_PREFIX = "FOLLP_"
 
 -- add a parameter and bind it to a variable
 local function bind_add_param(name, idx, default_value)
@@ -73,14 +73,6 @@ local function bind_add_param(name, idx, default_value)
 end
 -- setup follow mode specific parameters
 assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 30), 'could not add param table')
-
--- add a parameter and bind it to a variable
---local function bind_add_param2(name, idx, default_value)
---   assert(param:add_param(PARAM_TABLE_KEY2, idx, name, default_value), string.format('could not add param %s', name))
---   return Parameter(PARAM_TABLE_PREFIX2 .. name)
---end
--- setup follow mode specific parameters- second tranche
--- assert(param:add_table(PARAM_TABLE_KEY2, PARAM_TABLE_PREFIX2, 10), 'could not add param table')
 
 -- This uses the exisitng FOLL_* parameters and just adds a couple specific to this script
 -- but because most of the logic is already in AP_Follow (called by binding to follow:) there
@@ -94,240 +86,240 @@ local foll_sysid = FOLL_SYSID:get() or -1
 local foll_ofs_y = FOLL_OFS_Y:get() or 0.0
 local foll_alt_type = FOLL_ALT_TYPE:get() or ALT_FRAME.GLOBAL
 
--- Add these ZPF_ parameters specifically for this script
+-- Add these FOLLP_ parameters specifically for this script
 --[[
-  // @Param: ZPF_FAIL_MODE
+  // @Param: FOLLP_FAIL_MODE
   // @DisplayName: Plane Follow lost target mode
   // @Description: Mode to switch to if the target is lost (no signal or > FOLL_DIST_MAX). 
   // @User: Standard
 --]]
-ZPF_FAIL_MODE = bind_add_param('FAIL_MODE', 1, FLIGHT_MODE.RTL)
+FOLLP_FAIL_MODE = bind_add_param('FAIL_MODE', 1, FLIGHT_MODE.RTL)
 
 --[[
-  // @Param: ZPF_EXIT_MODE
+  // @Param: FOLLP_EXIT_MODE
   // @DisplayName: Plane Follow exit mode
   // @Description: Mode to switch to when follow mode is exited normally
   // @User: Standard
 --]]
-ZPF_EXIT_MODE = bind_add_param('EXIT_MODE', 2, FLIGHT_MODE.LOITER)
+FOLLP_EXIT_MODE = bind_add_param('EXIT_MODE', 2, FLIGHT_MODE.LOITER)
 
 --[[
-    // @Param: ZPF_ACT_FN
+    // @Param: FOLLP_ACT_FN
     // @DisplayName: Plane Follow Scripting ActivationFunction
     // @Description: Setting an RC channel's _OPTION to this value will use it for Plane Follow enable/disable
     // @Range: 300 307
 --]]
-ZPF_ACT_FN = bind_add_param("ACT_FN", 3, 301)
+FOLLP_ACT_FN = bind_add_param("ACT_FN", 3, 301)
 
 --[[
-    // @Param: ZPF_TIMEOUT
+    // @Param: FOLLP_TIMEOUT
     // @DisplayName: Plane Follow Telemetry Timeout
     // @Description: How long to try reaquire a target if telemetry from the lead vehicle is lost.
     // @Range: 0 30
     // @Units: s
 --]]
-ZPF_TIMEOUT = bind_add_param("TIMEOUT", 4, 10)
+FOLLP_TIMEOUT = bind_add_param("TIMEOUT", 4, 10)
 
 --[[
-    // @Param: ZPF_OVRSHT_DEG
+    // @Param: FOLLP_OVRSHT_DEG
     // @DisplayName: Plane Follow Scripting Overshoot Angle
     // @Description: If the target is greater than this many degrees left or right, assume an overshoot 
     // @Range: 0 180
     // @Units: deg
 --]]
-ZPF_OVRSHT_DEG = bind_add_param("OVRSHT_DEG", 5, 75)
+FOLLP_OVRSHT_DEG = bind_add_param("OVRSHT_DEG", 5, 75)
 
 --[[
-    // @Param: ZPF_TURN_DEG
+    // @Param: FOLLP_TURN_DEG
     // @DisplayName: Plane Follow Scripting Turn Angle
     // @Description: If the target is greater than this many degrees left or right, assume it's turning
     // @Range: 0 180
     // @Units: deg
 --]]
-ZPF_TURN_DEG = bind_add_param("TURN_DEG", 6, 15)
+FOLLP_TURN_DEG = bind_add_param("TURN_DEG", 6, 15)
 
 --[[
-    // @Param: ZPF_DIST_CLOSE
+    // @Param: FOLLP_DIST_CLOSE
     // @DisplayName: Plane Follow Scripting Close Distance
     // @Description: When closer than this distance assume we track by heading
     // @Range: 0 100
     // @Units: m
 --]]
-ZPF_DIST_CLOSE = bind_add_param("DIST_CLOSE", 7, 50)
+FOLLP_DIST_CLOSE = bind_add_param("DIST_CLOSE", 7, 75)
 
 --[[
-    // @Param: ZPF_WIDE_TURNS
+    // @Param: FOLLP_WIDE_TURNS
     // @DisplayName: Plane Follow Scripting Wide Turns
     // @Description: Use wide turns when following a turning target. Alternative is "cutting the corner"
     // @Range: 0 1
 --]]
-ZPF_WIDE_TURNS = bind_add_param("WIDE_TURNS", 8, 1)
+FOLLP_WIDE_TURNS = bind_add_param("WIDE_TURNS", 8, 1)
 
 --[[
-    // @Param: ZPF_ALT
+    // @Param: FOLLP_ALT
     // @DisplayName: Plane Follow Scripting Altitude Override
     // @Description: When non zero, this altitude value (in FOLL_ALT_TYPE frame) overrides the value sent by the target vehicle
     // @Range: 0 1000
     // @Units: m
 --]]
-ZPF_ALT_OVR = bind_add_param("ALT_OVR", 9, 0)
+FOLLP_ALT_OVR = bind_add_param("ALT_OVR", 9, 0)
 
 --[[
-    // @Param: ZPF_D_P
+    // @Param: FOLLP_D_P
     // @DisplayName: Plane Follow Scripting distance P gain
     // @Description: P gain for the speed PID controller distance component
     // @Range: 0 1
 --]]
-ZPF_D_P = bind_add_param("D_P", 11, 0.0004)
+FOLLP_D_P = bind_add_param("D_P", 11, 0.00025)
 
 --[[
-    // @Param: ZPF_D_I
+    // @Param: FOLLP_D_I
     // @DisplayName: Plane Follow Scripting distance I gain
     // @Description: I gain for the speed PID  distance component
     // @Range: 0 1
 --]]
-ZPF_D_I = bind_add_param("D_I", 12, 0.00005)
+FOLLP_D_I = bind_add_param("D_I", 12, 0.00025)
 
 --[[
-    // @Param: ZPF_D_D
+    // @Param: FOLLP_D_D
     // @DisplayName: Plane Follow Scripting distance D gain
     // @Description: D gain for the speed PID controller distance component
     // @Range: 0 1
 --]]
-ZPF_D_D = bind_add_param("D_D", 13, 0.0005)
+FOLLP_D_D = bind_add_param("D_D", 13, 0.00013)
 
 --[[
-    // @Param: ZPF_V_P
+    // @Param: FOLLP_V_P
     // @DisplayName: Plane Follow Scripting speed P gain
     // @Description: P gain for the speed PID controller velocity component
     // @Range: 0 1
 --]]
-ZPF_V_P = bind_add_param("V_P", 14, 0.0004)
+FOLLP_V_P = bind_add_param("V_P", 14, 0.00025)
 
 --[[
-    // @Param: ZPF_V_I
+    // @Param: FOLLP_V_I
     // @DisplayName: Plane Follow Scripting speed I gain
     // @Description: I gain for the speed PID controller velocity component
     // @Range: 0 1
 --]]
-ZPF_V_I = bind_add_param("V_I", 15, 0.00005)
+FOLLP_V_I = bind_add_param("V_I", 15, 0.00025)
 
 --[[
-    // @Param: ZPF_V_D
+    // @Param: FOLLP_V_D
     // @DisplayName: Plane Follow Scripting speed D gain
     // @Description: D gain for the speed PID controller velocity component
     // @Range: 0 1
 --]]
-ZPF_V_D = bind_add_param("V_D", 16, 0.0005)
+FOLLP_V_D = bind_add_param("V_D", 16, 0.0005)
 
 --[[
-    // @Param: ZPF_LkAHD
+    // @Param: FOLLP_LkAHD
     // @DisplayName: Plane Follow Lookahead seconds
     // @Description: Time to "lookahead" when calculating distance errors
     // @Units: s
 --]]
-ZPF_LKAHD = bind_add_param("LKAHD", 17, 3)
+FOLLP_LKAHD = bind_add_param("LKAHD", 17, 3)
 
 --[[
-    // @Param: ZPF_DIST_FUDGE
+    // @Param: FOLLP_DIST_FUDGE
     // @DisplayName: Plane Follow distance fudge factor
     // @Description: THe distance returned by the AP_FOLLOW library might be off by about this factor of airspeed
     // @Units: s
 --]]
-ZPF_DIST_FUDGE = bind_add_param("DIST_FUDGE", 18, 0.92)
+FOLLP_DIST_FUDGE = bind_add_param("DIST_FUDGE", 18, 0.0)
 
 --[[
-    // @Param: ZPF_SIM_TELF_FN
+    // @Param: FOLLP_SIM_TLF_FN
     // @DisplayName: Plane Follow Simulate Telemetry fail function
     // @Description: Set this switch to simulate losing telemetry from the other vehicle
     // @Range: 300 307
 --]]
-ZPF_SIM_TELF_FN = bind_add_param("SIM_TELF_FN", 19, 302)
+FOLLP_SIM_TLF_FN = bind_add_param("SIM_TlF_FN", 19, 302)
 
 --[[
-    // @Param: ZPF_SR_CH
+    // @Param: FOLLP_SR_CH
     // @DisplayName: Plane Follow Stream Rate Serial Channel
     // @Description: This is the serial/channel where mavlink messages will go to the target vehicle
     // @Range: 0 9
 --]]
-ZPF_SR_CH = bind_add_param("SR_CH", 20, -1)
+FOLLP_SR_CH = bind_add_param("SR_CH", 20, -1)
 
 --[[
-    // @Param: ZPF_SR_INT
+    // @Param: FOLLP_SR_INT
     // @DisplayName: Plane Follow Stream Rate Interval
     // @Description: This is the stream rate (milliseconds between messages) that the chase plane will request from the lead plane for GLOBAL_POSITION_INT and ATTITUDE telemetry. Set to -1 to disable.
     // @Range: 25 500
     // @Units: ms
 --]]
-ZPF_SR_INT = bind_add_param("SR_INT", 21, 50)
+FOLLP_SR_INT = bind_add_param("SR_INT", 21, 50)
 
 --[[
-    // @Param: ZPF_XT_P
+    // @Param: FOLLP_XT_P
     // @DisplayName: Plane Follow crosstrack PID controller P term
     // @Description: P term for the crosstrack/heading PID controller
     // @Range: 0 1
 --]]
-ZPF_XT_P = bind_add_param("XT_P", 22, 0.8)
+FOLLP_XT_P = bind_add_param("XT_P", 22, 0.8)
 
 --[[
-    // @Param: ZPF_XT_I
+    // @Param: FOLLP_XT_I
     // @DisplayName: Plane Follow crosstrack PID controller I term
     // @Description: I term for the crosstrack/heading PID controller
     // @Range: 0 1
 --]]
-ZPF_XT_I = bind_add_param("XT_I", 23, 0.01)
+FOLLP_XT_I = bind_add_param("XT_I", 23, 0.01)
 
 --[[
-    // @Param: ZPF_XT_D
+    // @Param: FOLLP_XT_D
     // @DisplayName: Plane Follow crosstrack PID controller D term
     // @Description: D term for the crosstrack/heading PID controller
     // @Range: 0 1
 --]]
-ZPF_XT_D = bind_add_param("XT_D", 24, 0.5)
+FOLLP_XT_D = bind_add_param("XT_D", 24, 0.5)
 
 --[[
-    // @Param: ZPF_XT_MAX
+    // @Param: FOLLP_XT_MAX
     // @DisplayName: Plane Follow crosstrack PID controller maximum correction
     // @Description: maximum correction retured by the crosstrack/heading PID controller
     // @Range: 0 1
     // @Units: deg
 --]]
-ZPF_XT_MAX = bind_add_param("XT_MAX", 25, 45)
+FOLLP_XT_MAX = bind_add_param("XT_MAX", 25, 45)
 
 --[[
-    // @Param: ZPF_XT_I_MAX
+    // @Param: FOLLP_XT_I_MAX
     // @DisplayName: Plane Follow crosstrack PID controller maximum integral
     // @Description: maximum I applied the crosstrack/heading PID controller
     // @Range: 0 100
     // @Units: ms
 --]]
-ZPF_XT_I_MAX = bind_add_param("XT_I_MAX", 26, 100)
+FOLLP_XT_I_MAX = bind_add_param("XT_I_MAX", 26, 100)
 
 --[[
-    // @Param: ZPF_REFRESH
+    // @Param: FOLLP_REFRESH
     // @DisplayName: Plane Follow refresh rate 
     // @Description: refresh rate for Plane Follow updates
     // @Range: 0 0.2
     // @Units: s
 --]]
-ZPF_REFRESH = bind_add_param("REFRESH", 27, 0.05)
+FOLLP_REFRESH = bind_add_param("REFRESH", 27, 0.05)
 
-local refresh_rate = ZPF_REFRESH:get() or 0.05   -- in seconds, so 20Hz by default
-LOST_TARGET_TIMEOUT = (ZPF_TIMEOUT:get() or 10) / refresh_rate
-OVERSHOOT_ANGLE = ZPF_OVRSHT_DEG:get() or 75.0
-TURNING_ANGLE = ZPF_TURN_DEG:get() or 20.0
-DISTANCE_LOOKAHEAD_SECONDS = ZPF_LKAHD:get() or 5.0
+local refresh_rate = FOLLP_REFRESH:get() or 0.05   -- in seconds, so 20Hz by default
+LOST_TARGET_TIMEOUT = (FOLLP_TIMEOUT:get() or 10) / refresh_rate
+OVERSHOOT_ANGLE = FOLLP_OVRSHT_DEG:get() or 75.0
+TURNING_ANGLE = FOLLP_TURN_DEG:get() or 20.0
+DISTANCE_LOOKAHEAD_SECONDS = FOLLP_LKAHD:get() or 5.0
 
 local lost_target_countdown = LOST_TARGET_TIMEOUT
 
-local fail_mode = ZPF_FAIL_MODE:get() or FLIGHT_MODE.QRTL
-local exit_mode = ZPF_EXIT_MODE:get() or FLIGHT_MODE.LOITER
+local fail_mode = FOLLP_FAIL_MODE:get() or FLIGHT_MODE.QRTL
+local exit_mode = FOLLP_EXIT_MODE:get() or FLIGHT_MODE.LOITER
 
-local use_wide_turns = ZPF_WIDE_TURNS:get() or 1
+local use_wide_turns = FOLLP_WIDE_TURNS:get() or 1
 
-local distance_fudge = ZPF_DIST_FUDGE:get() or 0.92
+local distance_fudge = FOLLP_DIST_FUDGE:get() or 0.92
 
-local target_serial_channel = ZPF_SR_CH:get() or -1
+local target_serial_channel = FOLLP_SR_CH:get() or -1
 
 local simulate_telemetry_failed = false
 
@@ -353,16 +345,17 @@ local function constrain(v, vmin, vmax)
 end
 
 local speedpid = require("speedpid")
-local pid_controller_distance = speedpid.speed_controller(ZPF_D_P:get() or 0.01,
-                                                            ZPF_D_I:get() or 0.01,
-                                                            ZPF_D_D:get() or 0.005,
+local pid_controller_distance = speedpid.speed_controller(FOLLP_D_P:get() or 0.01,
+                                                            FOLLP_D_I:get() or 0.01,
+                                                            FOLLP_D_D:get() or 0.005,
                                                             0.5, airspeed_min - airspeed_max, airspeed_max - airspeed_min)
 
-local pid_controller_velocity = speedpid.speed_controller(ZPF_V_P:get() or 0.01,
-                                                            ZPF_V_I:get() or 0.01,
-                                                            ZPF_V_D:get() or 0.005,
+local pid_controller_velocity = speedpid.speed_controller(FOLLP_V_P:get() or 0.01,
+                                                            FOLLP_V_I:get() or 0.01,
+                                                            FOLLP_V_D:get() or 0.005,
                                                             0.5, airspeed_min, airspeed_max)
 
+-- We need a PID controller to manage cross track errors
 CrossTrackPID = {}
 CrossTrackPID.__index = CrossTrackPID
 
@@ -423,12 +416,13 @@ end
 -- end of CrossTrackPID {} class definition
 
 -- Instantiate the crosstrack/heading PID controller (outside update loop) 
-local xt_pid = CrossTrackPID:new(ZPF_XT_P:get() or 0.9,
-                                 ZPF_XT_I:get() or 0.01,
-                                 ZPF_XT_D:get() or 0.5,
-                                 ZPF_XT_MAX:get() or 45,
-                                 ZPF_XT_I_MAX:get() or 100)
+local xt_pid = CrossTrackPID:new(FOLLP_XT_P:get() or 0.9,
+                                 FOLLP_XT_I:get() or 0.01,
+                                 FOLLP_XT_D:get() or 0.5,
+                                 FOLLP_XT_MAX:get() or 45,
+                                 FOLLP_XT_I_MAX:get() or 100)
 
+-- Some utilities tohelp with MAVLink
 local mavlink_attitude = require("mavlink_attitude")
 local mavlink_attitude_receiver = mavlink_attitude.mavlink_attitude_receiver()
 
@@ -554,19 +548,19 @@ end
          - enables follow
          - resets the PID controllers
       -- set LOW and if so
-         - exits from GUIDED to the ZPF_EXIT_MODE
+         - exits from GUIDED to the FOLLP_EXIT_MODE
          - disables follow
-      -- checks for user simulating telemetry fail using ZPF_SIM_TELF_FN
+      -- checks for user simulating telemetry fail using FOLLP_SIM_TLF_FN
          - enables (HIGH)/disables (LOW) 
 --]]
-local last_follow_active_state = rc:get_aux_cached(ZPF_ACT_FN:get())
-local last_tel_fail_state = rc:get_aux_cached(ZPF_SIM_TELF_FN:get())
+local last_follow_active_state = rc:get_aux_cached(FOLLP_ACT_FN:get())
+local last_tel_fail_state = rc:get_aux_cached(FOLLP_SIM_TLF_FN:get())
 
 local function follow_check()
-   if ZPF_ACT_FN == nil then
+   if FOLLP_ACT_FN == nil then
       return
    end
-   local foll_act_fn = ZPF_ACT_FN:get()
+   local foll_act_fn = FOLLP_ACT_FN:get()
    if foll_act_fn == nil then
       return
    end
@@ -595,7 +589,7 @@ local function follow_check()
       -- Don't know what to do with the 3rd switch position right now.
       last_follow_active_state = active_state
    end
-   local sim_tel_fail = ZPF_SIM_TELF_FN:get()
+   local sim_tel_fail = FOLLP_SIM_TLF_FN:get()
    local tel_fail_state = rc:get_aux_cached(sim_tel_fail)
    if tel_fail_state ~= last_tel_fail_state then
       if tel_fail_state == 0 then
@@ -694,23 +688,23 @@ local function update()
    end
 
    -- set the target frame as per user set parameter - this is fundamental to this working correctly
-   local close_distance = ZPF_DIST_CLOSE:get() or airspeed_cruise * 2.0
+   local close_distance = FOLLP_DIST_CLOSE:get() or airspeed_cruise * 2.0
    local long_distance = close_distance * 4.0
-   local altitude_override = ZPF_ALT_OVR:get() or 0
+   local altitude_override = FOLLP_ALT_OVR:get() or 0
 
-   LOST_TARGET_TIMEOUT = (ZPF_TIMEOUT:get() or 10) / refresh_rate
-   OVERSHOOT_ANGLE = ZPF_OVRSHT_DEG:get() or 75.0
-   TURNING_ANGLE = ZPF_TURN_DEG:get() or 20.0
+   LOST_TARGET_TIMEOUT = (FOLLP_TIMEOUT:get() or 10) / refresh_rate
+   OVERSHOOT_ANGLE = FOLLP_OVRSHT_DEG:get() or 75.0
+   TURNING_ANGLE = FOLLP_TURN_DEG:get() or 20.0
    foll_ofs_y = FOLL_OFS_Y:get() or 0.0
    foll_alt_type = FOLL_ALT_TYPE:get() or ALT_FRAME.GLOBAL
-   use_wide_turns = ZPF_WIDE_TURNS:get() or 1
-   distance_fudge = ZPF_DIST_FUDGE:get() or 0.92
-   target_serial_channel = ZPF_SR_CH:get() or 0
+   use_wide_turns = FOLLP_WIDE_TURNS:get() or 1
+   distance_fudge = FOLLP_DIST_FUDGE:get() or 0.92
+   target_serial_channel = FOLLP_SR_CH:get() or 0
 
    -- Need to request that the follow vehicle sends telemetry at a reasonable rate
    -- we send a new request every 10 seconds, just to make sure the message gets through
    if (now - now_telemetry_request) > 10 then
-      local stream_interval = ZPF_SR_INT:get() or 50
+      local stream_interval = FOLLP_SR_INT:get() or 50
       if stream_interval > 0 then
          -- we'd like to get GLOBAL_POSITION_INT and ATTITUDE messages from the target vehicle at 20Hz = every 50ms
          mavlink_command_int.request_message_interval(target_serial_channel, {sysid = foll_sysid, message_id = MAV_CMD_INT.ATTITUDE, interval_ms = stream_interval})
