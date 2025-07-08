@@ -25,7 +25,7 @@
    FOLLP_TURN_DEG - if the target is more than this many degrees left or right, assume it's turning
 --]]
 
-SCRIPT_VERSION = "4.7.0-064"
+SCRIPT_VERSION = "4.7.0-065"
 SCRIPT_NAME = "Plane Follow"
 SCRIPT_NAME_SHORT = "PFollow"
 
@@ -221,14 +221,6 @@ FOLLP_V_D = bind_add_param("V_D", 16, 0.0005)
 FOLLP_LKAHD = bind_add_param("LKAHD", 17, 3)
 
 --[[
-    // @Param: FOLLP_DIST_FUDGE
-    // @DisplayName: Plane Follow distance fudge factor
-    // @Description: THe distance returned by the AP_FOLLOW library might be off by about this factor of airspeed
-    // @Units: s
---]]
-FOLLP_DIST_FUDGE = bind_add_param("DIST_FUDGE", 18, 0.0)
-
---[[
     // @Param: FOLLP_SIM_TLF_FN
     // @DisplayName: Plane Follow Simulate Telemetry fail function
     // @Description: Set this switch to simulate losing telemetry from the other vehicle
@@ -316,8 +308,6 @@ local fail_mode = FOLLP_FAIL_MODE:get() or FLIGHT_MODE.QRTL
 local exit_mode = FOLLP_EXIT_MODE:get() or FLIGHT_MODE.LOITER
 
 local use_wide_turns = FOLLP_WIDE_TURNS:get() or 1
-
-local distance_fudge = FOLLP_DIST_FUDGE:get() or 0.92
 
 local target_serial_channel = FOLLP_SR_CH:get() or -1
 
@@ -437,7 +427,7 @@ local function follow_frame_to_mavlink(follow_frame)
    return mavlink_frame
 end
 
--- this enables sending command_int MAVLink comments to the _current_ vehicle not over the wire
+-- this enables sending command_int MAVLink commands to the _current_ vehicle not over the wire
 local mavlink_command_int = require("mavlink_command_int")
 
 -- set_vehicle_target_altitude() Parameters
@@ -617,6 +607,7 @@ local function wrap_180(angle)
     return res
 end
 
+-- convert a groundspeed to airspeed using windspeed and EAS2TAS (from AHRS)
 local function calculate_airspeed_from_groundspeed(velocity_vector)
    --[[ 
    This is the code from AHRS.cpp    
@@ -676,6 +667,20 @@ local function calculate_track_distance(P_f, P_l)
     return along_track_distance, -cross_track_distance
 end
 
+-- if enabled - request telemetry from the lead vehicle at FOLLP_SR_INT rate (milliseconds between messages)
+local function request_telemetry_from_target()
+   -- we send a new request every 10 seconds, just to make sure the message gets through
+   if (now - now_telemetry_request) > 10 then
+      local stream_interval = FOLLP_SR_INT:get() or 50
+      if stream_interval > 0 then
+         -- we'd like to get GLOBAL_POSITION_INT and ATTITUDE messages from the target vehicle at 20Hz = every 50ms
+         mavlink_command_int.request_message_interval(target_serial_channel, {sysid = foll_sysid, message_id = MAV_CMD_INT.ATTITUDE, interval_ms = stream_interval})
+         mavlink_command_int.request_message_interval(target_serial_channel, {sysid = foll_sysid, message_id = MAV_CMD_INT.GLO, interval_ms = stream_interval})
+         now_telemetry_request = now
+      end
+   end
+end
+
 -- main update function
 local function update()
    now = millis():tofloat() * 0.001
@@ -698,20 +703,10 @@ local function update()
    foll_ofs_y = FOLL_OFS_Y:get() or 0.0
    foll_alt_type = FOLL_ALT_TYPE:get() or ALT_FRAME.GLOBAL
    use_wide_turns = FOLLP_WIDE_TURNS:get() or 1
-   distance_fudge = FOLLP_DIST_FUDGE:get() or 0.92
    target_serial_channel = FOLLP_SR_CH:get() or 0
 
    -- Need to request that the follow vehicle sends telemetry at a reasonable rate
-   -- we send a new request every 10 seconds, just to make sure the message gets through
-   if (now - now_telemetry_request) > 10 then
-      local stream_interval = FOLLP_SR_INT:get() or 50
-      if stream_interval > 0 then
-         -- we'd like to get GLOBAL_POSITION_INT and ATTITUDE messages from the target vehicle at 20Hz = every 50ms
-         mavlink_command_int.request_message_interval(target_serial_channel, {sysid = foll_sysid, message_id = MAV_CMD_INT.ATTITUDE, interval_ms = stream_interval})
-         mavlink_command_int.request_message_interval(target_serial_channel, {sysid = foll_sysid, message_id = MAV_CMD_INT.GLO, interval_ms = stream_interval})
-         now_telemetry_request = now
-      end
-   end
+   request_telemetry_from_target()
 
    --[[
       get the current navigation target. 
@@ -720,8 +715,6 @@ local function update()
    local target_location_offset              -- Location  of the target with FOLL_OFS_* offsets applied
    local target_velocity -- = Vector3f()     -- current velocity of lead vehicle
    local target_velocity_offset -- Vector3f  -- velocity to the offset target_location_offset
-   local target_distance -- = Vector3f()     -- vector to lead vehicle
-   local target_distance_offset              -- vector to the target taking offsets into account
    local xy_dist                             -- distance to target with offsets in meters
    local target_heading                      -- heading of the target vehicle
 
@@ -735,36 +728,6 @@ local function update()
    local vehicle_airspeed = ahrs:airspeed_estimate()
    local current_target = vehicle:get_target_location()
 
-   -- because of the methods available on AP_Follow, need to call these multiple methods get_target_dist_and_vel_ned() MUST BE FIRST
-   -- to get target_location, target_velocity, target distance and target 
-   -- and yes target_offsets (hopefully the same value) is returned by both methods
-   -- even worse - both internally call get_target_location_and_Velocity, but making a single method
-   -- in AP_Follow is probably a high flash cost, so we just take the runtime hit
-   --[[
-   target_distance, target_distance_offsets, target_velocity = follow:get_target_dist_and_vel_ned() -- THIS HAS TO BE FIRST
-   target_location, target_velocity = follow:get_target_location_and_velocity()
-   target_location_offset, target_velocity = follow:get_target_location_and_velocity_ofs()
-   local xy_dist = follow:get_distance_to_target() -- this value is set by get_target_dist_and_vel_ned() - why do I have to know this?
-   local target_heading = follow:get_target_heading_deg()
-
-   target_distance, target_distance_offset,
-      target_velocity, target_velocity_offset,
-      target_location, target_location_offset,
-      xy_dist = follow:get_target_info()
-
-   // The order here is VERY important. This needs to called first because it updates a lot of internal variables
-    if(!get_target_dist_and_vel_ned(dist_ned, dist_with_offs, target_vel_ned)) {
-        return false;
-    }
-    if(!get_target_location_and_velocity(target_loc,target_vel_ned)) {
-        return false;
-    }
-    if(!get_target_location_and_velocity_ofs(target_loc_ofs, target_vel_ned_ofs)) {
-        return false;
-    }
-    target_dist_ofs = _dist_to_target;
-
-   --]]
    target_location, target_velocity = follow:get_target_location_and_velocity()
    target_location_offset, target_velocity_offset = follow:get_target_location_and_velocity_ofs()
 
@@ -797,7 +760,7 @@ local function update()
       now_follow_lost = now
    end
 
-   -- calculate the target_distance and target distance offset so we don't need to call get_target_dist_and_vel_NED
+   -- calculate the target_distance from target distance offset so we don't need to call get_target_dist_and_vel_NED
    local new_target_distance = current_location:get_distance_NED(target_location_offset)
 
    -- c++ calculation 
@@ -871,7 +834,6 @@ local function update()
    local target_attitude = mavlink_attitude_receiver.get_attitude(foll_sysid)
    local pre_roll_target_heading = target_heading
    local desired_heading = target_heading
-   local angle_adjustment
    local turning_airspeed_ratio = 1.0
    tight_turn = false
    if target_attitude ~= nil and target_airspeed ~= nil and target_airspeed > airspeed_min then
@@ -887,26 +849,11 @@ local function update()
          -- target_turn_radius = vehicle_airspeed * vehicle_airspeed / (9.80665 * math.tan(target_attitude.roll + target_attitude.rollspeed))
          local target_tangent_angle = wrap_360(math.deg(math.pi/2.0 - vehicle_airspeed / target_turn_radius))
 
-         angle_adjustment = target_tangent_angle * 0.6
          -- if the roll direction is the same as the y offset, then we are turning on the "inside" (a tight turn) 
          if (target_attitude.roll < 0 and foll_ofs_y < 0) or
             (target_attitude.roll > 0 and foll_ofs_y > 0) then
             tight_turn = true
          end
-
-         --[[
-         -- if the roll direction is the same as the rollspeed then we are heading into a turn, otherwise we are finishing a turn
-         if -- foll_ofs_y == 0 or This is probably broken
-            (target_attitude.roll < 0 and target_attitude.rollspeed < 0) or
-            (target_attitude.roll > 0 and target_attitude.rollspeed > 0) then
-            turn_starting = true
-            target_angle = wrap_360(target_angle - angle_adjustment)
-            desired_heading = wrap_360(target_heading - angle_adjustment)
-            --gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. string.format(": dist: %.0f proj: %0.f heading tgt: %.0f des: %.0f adj: %.0f", xy_dist, projected_distance, target_heading, desired_heading, angle_adjustment))
-            -- push the target heading back because it hasn't figured out we are turning yet
-            save_target_heading1 = save_target_heading2
-         end
-         --]]
 
          -- calculate the path/distance around the turn for the lead and follow vehicle so we can slow down or speed up
          -- depending on which is flying the shorter path
@@ -961,11 +908,9 @@ local function update()
    end
 
    local mechanism = 0 -- for logging 1: position/location 2:heading
-   local mechanism_text = ""
    local close = (math.abs(projected_distance) < close_distance)
    local too_wide = (math.abs(target_distance_rotated:y()) > (close_distance/4) and not turning)
 
-   -- xy_dist < 3.0 is a special case because mode_guided will try to loiter around the target location if within 2m
    -- target_heading - vehicle_heading catches the circumstance where the target vehicle is heaidng in completely the opposite direction
    if (math.abs(xy_dist or 0.0) < airspeed_max * 0.75 or (math.abs(cross_track_distance) < airspeed_max * 0.25)) or
          ((turning and ((tight_turn and turn_starting) or use_wide_turns or foll_ofs_y == 0)) or -- turning 
@@ -973,12 +918,10 @@ local function update()
          ) then
       -- 
       mechanism = 2 -- heading - for logging
-      mechanism_text = "hdg"
    elseif target_location_offset ~= nil then
       -- override the heading to point directly to the target location with offsets.
       desired_heading = heading_to_target_offset
       mechanism = 1  -- position/location - for logging
-      mechanism_text = "pos"
    end
    -- The desired heading needs a PID controller, especially when it gets close.
    desired_heading = xt_pid:compute(desired_heading, cross_track_distance, now - now_heading)
@@ -1041,7 +984,7 @@ local function update()
                   turning_airspeed_ratio,
                   mechanism, log_too_close, log_too_close_follow_up, log_overshot
                )
-   logger:write("ZPF2",'AngT,AngO,Alt,AltT,AltFrm,HdgT,Hdg,HdgP,HdgO','ffffbffff','ddmm-dddd','---------',
+   logger:write("ZPF2",'AngT,AngO,Alt,AltT,AltFrm,HdgT,Hdg,HdgP,HdgO,XTD','ffffbfffff','ddmm-ddddm','----------',
                   target_angle,
                   offset_angle,
                   current_altitude,
@@ -1050,7 +993,8 @@ local function update()
                   target_heading,
                   vehicle_heading,
                   pre_roll_target_heading,
-                  desired_heading
+                  desired_heading,
+                  cross_track_distance
                )
 end
 
@@ -1074,7 +1018,7 @@ local function delayed_startup()
    return protected_wrapper()
 end
 
--- start running update loop - waiting 20s for the AP to initialize
+-- start running update loop - waiting 20s for the AP to initialize if not armed
 if FWVersion:type() == 3 then
    if arming:is_armed() then
       return delayed_startup, 1000
