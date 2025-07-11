@@ -170,7 +170,7 @@ FOLLP_ALT_OVR = bind_add_param("ALT_OVR", 9, 0)
     // @Description: P gain for the speed PID controller distance component
     // @Range: 0 1
 --]]
-FOLLP_D_P = bind_add_param("D_P", 11, 0.00025)
+FOLLP_D_P = bind_add_param("D_P", 10, 0.00025)
 
 --[[
     // @Param: FOLLP_D_I
@@ -178,7 +178,7 @@ FOLLP_D_P = bind_add_param("D_P", 11, 0.00025)
     // @Description: I gain for the speed PID  distance component
     // @Range: 0 1
 --]]
-FOLLP_D_I = bind_add_param("D_I", 12, 0.00025)
+FOLLP_D_I = bind_add_param("D_I", 11, 0.00025)
 
 --[[
     // @Param: FOLLP_D_D
@@ -186,7 +186,7 @@ FOLLP_D_I = bind_add_param("D_I", 12, 0.00025)
     // @Description: D gain for the speed PID controller distance component
     // @Range: 0 1
 --]]
-FOLLP_D_D = bind_add_param("D_D", 13, 0.00013)
+FOLLP_D_D = bind_add_param("D_D", 12, 0.00013)
 
 --[[
     // @Param: FOLLP_V_P
@@ -194,7 +194,7 @@ FOLLP_D_D = bind_add_param("D_D", 13, 0.00013)
     // @Description: P gain for the speed PID controller velocity component
     // @Range: 0 1
 --]]
-FOLLP_V_P = bind_add_param("V_P", 14, 0.00025)
+FOLLP_V_P = bind_add_param("V_P", 13, 0.00025)
 
 --[[
     // @Param: FOLLP_V_I
@@ -202,7 +202,7 @@ FOLLP_V_P = bind_add_param("V_P", 14, 0.00025)
     // @Description: I gain for the speed PID controller velocity component
     // @Range: 0 1
 --]]
-FOLLP_V_I = bind_add_param("V_I", 15, 0.00025)
+FOLLP_V_I = bind_add_param("V_I", 14, 0.00025)
 
 --[[
     // @Param: FOLLP_V_D
@@ -210,7 +210,7 @@ FOLLP_V_I = bind_add_param("V_I", 15, 0.00025)
     // @Description: D gain for the speed PID controller velocity component
     // @Range: 0 1
 --]]
-FOLLP_V_D = bind_add_param("V_D", 16, 0.0005)
+FOLLP_V_D = bind_add_param("V_D", 15, 0.0005)
 
 --[[
     // @Param: FOLLP_LkAHD
@@ -218,7 +218,7 @@ FOLLP_V_D = bind_add_param("V_D", 16, 0.0005)
     // @Description: Time to "lookahead" when calculating distance errors
     // @Units: s
 --]]
-FOLLP_LKAHD = bind_add_param("LKAHD", 17, 3)
+FOLLP_LKAHD = bind_add_param("LKAHD", 16, 3)
 
 --[[
     // @Param: FOLLP_SIM_TLF_FN
@@ -226,7 +226,7 @@ FOLLP_LKAHD = bind_add_param("LKAHD", 17, 3)
     // @Description: Set this switch to simulate losing telemetry from the other vehicle
     // @Range: 300 307
 --]]
-FOLLP_SIM_TLF_FN = bind_add_param("SIM_TlF_FN", 19, 302)
+FOLLP_SIM_TLF_FN = bind_add_param("SIM_TlF_FN", 17, 302)
 
 --[[
     // @Param: FOLLP_SR_CH
@@ -234,7 +234,7 @@ FOLLP_SIM_TLF_FN = bind_add_param("SIM_TlF_FN", 19, 302)
     // @Description: This is the serial/channel where mavlink messages will go to the target vehicle
     // @Range: 0 9
 --]]
-FOLLP_SR_CH = bind_add_param("SR_CH", 20, -1)
+FOLLP_SR_CH = bind_add_param("SR_CH", 18, -1)
 
 --[[
     // @Param: FOLLP_SR_INT
@@ -243,7 +243,7 @@ FOLLP_SR_CH = bind_add_param("SR_CH", 20, -1)
     // @Range: 25 500
     // @Units: ms
 --]]
-FOLLP_SR_INT = bind_add_param("SR_INT", 21, 50)
+FOLLP_SR_INT = bind_add_param("SR_INT", 19, 50)
 
 --[[
     // @Param: FOLLP_XT_P
@@ -251,7 +251,7 @@ FOLLP_SR_INT = bind_add_param("SR_INT", 21, 50)
     // @Description: P term for the crosstrack/heading PID controller
     // @Range: 0 1
 --]]
-FOLLP_XT_P = bind_add_param("XT_P", 22, 0.8)
+FOLLP_XT_P = bind_add_param("XT_P", 20, 0.8)
 
 --[[
     // @Param: FOLLP_XT_I
@@ -259,7 +259,7 @@ FOLLP_XT_P = bind_add_param("XT_P", 22, 0.8)
     // @Description: I term for the crosstrack/heading PID controller
     // @Range: 0 1
 --]]
-FOLLP_XT_I = bind_add_param("XT_I", 23, 0.01)
+FOLLP_XT_I = bind_add_param("XT_I", 21, 0.01)
 
 --[[
     // @Param: FOLLP_XT_D
@@ -267,7 +267,7 @@ FOLLP_XT_I = bind_add_param("XT_I", 23, 0.01)
     // @Description: D term for the crosstrack/heading PID controller
     // @Range: 0 1
 --]]
-FOLLP_XT_D = bind_add_param("XT_D", 24, 0.5)
+FOLLP_XT_D = bind_add_param("XT_D", 22, 0.5)
 
 --[[
     // @Param: FOLLP_XT_MAX
@@ -276,7 +276,7 @@ FOLLP_XT_D = bind_add_param("XT_D", 24, 0.5)
     // @Range: 0 1
     // @Units: deg
 --]]
-FOLLP_XT_MAX = bind_add_param("XT_MAX", 25, 45)
+FOLLP_XT_MAX = bind_add_param("XT_MAX", 23, 45)
 
 --[[
     // @Param: FOLLP_XT_I_MAX
@@ -285,7 +285,7 @@ FOLLP_XT_MAX = bind_add_param("XT_MAX", 25, 45)
     // @Range: 0 100
     // @Units: ms
 --]]
-FOLLP_XT_I_MAX = bind_add_param("XT_I_MAX", 26, 100)
+FOLLP_XT_I_MAX = bind_add_param("XT_I_MAX", 24, 100)
 
 --[[
     // @Param: FOLLP_REFRESH
@@ -294,7 +294,7 @@ FOLLP_XT_I_MAX = bind_add_param("XT_I_MAX", 26, 100)
     // @Range: 0 0.2
     // @Units: s
 --]]
-FOLLP_REFRESH = bind_add_param("REFRESH", 27, 0.05)
+FOLLP_REFRESH = bind_add_param("REFRESH", 25, 0.05)
 
 local refresh_rate = FOLLP_REFRESH:get() or 0.05   -- in seconds, so 20Hz by default
 LOST_TARGET_TIMEOUT = (FOLLP_TIMEOUT:get() or 10) / refresh_rate
@@ -427,7 +427,7 @@ local function follow_frame_to_mavlink(follow_frame)
    return mavlink_frame
 end
 
--- this enables sending command_int MAVLink commands to the _current_ vehicle not over the wire
+-- this enables sending command_int MAVLink commands to a different vehicle not the current vehicle
 local mavlink_command_int = require("mavlink_command_int")
 
 -- set_vehicle_target_altitude() Parameters
@@ -945,18 +945,6 @@ local function update()
    if dv_error ~= nil then
       dv = pid_controller_distance.update(airspeed_error, dv_error)
       airspeed_new = pid_controller_velocity.update(vehicle_airspeed, dv)
-      --[[
-      if now - now_debug > 1 then
-         --gcs:send_taxt(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. string.format("asp: %0.1f tar: %0.1f", vehicle_airspeed, target_velocity:length()))
-         gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. string.format(": dist: %.0f proj: %0.f vel: %.1f asp: %.1f new:%.1f dve: %.1f dv %.1f err: %.1f hdg: %.0f %s", 
-                                                                                 xy_dist, projected_distance, vehicle_airspeed, target_airspeed, airspeed_new, dv_error, dv, airspeed_error, desired_heading, mechanism_text))
-         --gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. string.format(": dist: %.0f fwd: %0.1f x: %.1f proj: %0.f asp: %.1f new:%.1f hdg: tar %.1f new %0.1f %s",
-         --                                                                        xy_dist, along_track_distance, cross_track_distance, projected_distance, target_airspeed, airspeed_new, target_heading, desired_heading, mechanism_text))
-         now_debug = now
-      end
-      --   gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. string.format(": dist: %.0f proj: %0.f heading tgt: %.0f des: %.0f %s", xy_dist, projected_distance, target_heading, desired_heading, mechanism_text))
-      --end
-      --]]
       set_vehicle_speed({speed = constrain(airspeed_new, airspeed_min, airspeed_max)})
    end
 
