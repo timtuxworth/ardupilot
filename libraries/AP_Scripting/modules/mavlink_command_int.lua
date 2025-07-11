@@ -109,7 +109,6 @@ function MAVLink_command_int.send(channel, message)
     return true
 end
 
-
 -- request another vehicle to send specific mavlink messages at a particular interval
 -- set_message_interval() Parameters
 -- channel = the channel (telemetry link) on this autopilot to send out the request

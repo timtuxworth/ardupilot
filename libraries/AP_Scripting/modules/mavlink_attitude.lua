@@ -103,7 +103,7 @@ function MAVLinkAttitude.mavlink_attitude_receiver()
              { "yawspeed", "<f" },
              }
     ATTITUDE_map[ATTITUDE_map.id] = ATTITUDE_MESSAGE
-    local mavlink_msgs = require("mavlink_msgs")
+    local mavlink_msgs = require("MAVLink/mavlink_msgs")
     local jitter_correction = MAVLinkAttitude.JitterCorrection(5000, 100)
 
     -- initialise mavlink rx with  buffer depth and number of messages
@@ -167,7 +167,6 @@ function MAVLinkAttitude.mavlink_attitude_receiver()
                         attitude.pitchspeed,
                         attitude.yawspeed
                      )
-
                  return attitude
              end
           end
