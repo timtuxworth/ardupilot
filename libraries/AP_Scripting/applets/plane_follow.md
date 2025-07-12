@@ -20,92 +20,86 @@ The script adds the following parameters to control it's behaviour. It uses
 the existing FOLL parameters that are used for the Copter FOLLOW mode. In addition
 the following "ZPF" parameters are added: Z = scripting, P = Plane, F = Follow.
 
-## ZPF_FAIL_MODE
+## FOLLP_FAIL_MODE
 
 This is the mode the plane will change to if following fails. Failure happens
 if the following plane loses telemetry from the target, or the distance exceeds
 FOLL_DIST_MAX.
 
-## ZPF_EXIT_MODE
+## FOLLP_EXIT_MODE
 
 The flight mode the plane will switch to if it exits following. 
 
-## ZPF_ACT_FN
+## FOLLP_ACT_FN
 
 The scripting action that will trigger the plane to start following. When this
 happens the plane will switch to GUIDED mode and the script will use guided mode
 commands to steer the plane towards the target.
 
-## ZPF_TIMEOUT
+## FOLLP_TIMEOUT
 
 If the target is lost, this is the timeout to wait to re-aquire the target before 
-triggering ZPF_FAIL_MODE
+triggering FOLLP_FAIL_MODE
 
-## ZPF_OVRSHT_DEG
+## FOLLP_OVRSHT_DEG
 
 This is for the heuristic that uses the difference between the target vehicle heading
 and the follow vehicle heading to determine if the vehicle has overshot and should slow
 down and turn around. 75 degrees is a good start but tune for your circumstances.
 
-## ZPF_TURN_DEG
+## FOLLP_TURN_DEG
 
 This is for the heuristic that uses the difference between the target vehicle heading
 and the follow vehicle heading to determine if the target vehicle is executing a turn.
 15 degrees is a good start but tune for your circumstances.
 
-## ZPF_DIST_CLOSE
+## FOLLP_DIST_CLOSE
 
 One of the most important heuristics the follow logic uses to match the heading and speed
 of the target plane is to trigger different behavior when the target location is "close".
 How close is determined by this value, likely a larger number makes more sense for larger 
 and faster vehicles and lower values for smaller and slower vehicles. Tune for your circumstances.
 
-## ZPF_ALT_OVR
+## FOLLP_ALT_OVR
 
 The follow logic can have the follow vehicle track the altitude of the target, but setting a value
-in ZPF_ALT_OVR allows the follow vehicle to follow at a fixed altitude regardless of the altitude
-of the target. The ZPF_ALT_OVR is in meters in FOLL_ALT_TYPE frame. 
+in FOLLP_ALT_OVR allows the follow vehicle to follow at a fixed altitude regardless of the altitude
+of the target. The FOLLP_ALT_OVR is in meters in FOLL_ALT_TYPE frame. 
 
-## ZPF_D_P
+## FOLLP_D_P
 
 The follow logic uses two PID controllers for controlling speed, the first uses distance (D) 
 as the error. This is the P gain for the "D" PID controller.
 
-## ZPF_D_I
+## FOLLP_D_I
 
 The follow logic uses two PID controllers for controlling speed, the first uses distance (D) 
 as the error. This is the I gain for the "D" PID controller.
 
-## ZPF_D_D
+## FOLLP_D_D
 
 The follow logic uses two PID controllers for controlling speed, the first uses distance (D) 
 as the error. This is the D gain for the "D" PID controller.
 
-## ZPF_V_P
+## FOLLP_V_P
 
 The follow logic uses two PID controllers for controlling speed, the first uses velocity (V) 
 as the error. This is the P gain for the "V" PID controller.
 
-## ZPF_V_I
+## FOLLP_V_I
 
 The follow logic uses two PID controllers for controlling speed, the first uses distance (V) 
 as the error. This is the I gain for the "V" PID controller.
 
-## ZPF_V_D
+## FOLLP_V_D
 
 The follow logic uses two PID controllers for controlling speed, the first uses distance (V) 
 as the error. This is the D gain for the "V" PID controller.
 
-## ZPF_LKAHD
+## FOLLP_LKAHD
 
 Time to "lookahead" when calculating distance errors.
 
-## ZPF_DIST_FUDGE
-
-This parameter might be a bad idea, but it seems the xy_distance between the target offset location
-and the follow vehicle returned by AP_Follow appears to be off by a factor of 
-`airspeed * a fudge factor`
-This allows this fudge factor to be adjusted until a better solution can be found for this problem.
 
 # Operation
 Enable Lua scripting by setting `SCR_ENABLE = 1` on the FOLLOW plane.
@@ -113,7 +107,7 @@ Enable Lua scripting by setting `SCR_ENABLE = 1` on the FOLLOW plane.
 Install the lua script in the APM/scripts directory on the flight
 controller's microSD card on the FOLLOW plane. 
 
-Install the speedpid.lua, mavlink_attitude.lua and mavlink_msgs.lua files
+Install the speedpid.lua, mavlink_command_int.lua, mavlink_attitude.lua and mavlink_msgs.lua files
 in the `APM/scripts/modules` directory on the SD card on the FOLLOW plane.
 
 No scripts are required on the target plane.

@@ -25,7 +25,7 @@
    FOLLP_TURN_DEG - if the target is more than this many degrees left or right, assume it's turning
 --]]
 
-SCRIPT_VERSION = "4.7.0-065"
+SCRIPT_VERSION = "4.7.0-066"
 SCRIPT_NAME = "Plane Follow"
 SCRIPT_NAME_SHORT = "PFollow"
 
@@ -532,53 +532,11 @@ local function follow_active()
 end
 
 --[[
-   follow_check() - check for user activating follow using an RC switch 
-      - set HIGH and if so
-         - switches to GUIDED
-         - enables follow
-         - resets the PID controllers
-      -- set LOW and if so
-         - exits from GUIDED to the FOLLP_EXIT_MODE
-         - disables follow
       -- checks for user simulating telemetry fail using FOLLP_SIM_TLF_FN
          - enables (HIGH)/disables (LOW) 
 --]]
-local last_follow_active_state = rc:get_aux_cached(FOLLP_ACT_FN:get())
 local last_tel_fail_state = rc:get_aux_cached(FOLLP_SIM_TLF_FN:get())
-
-local function follow_check()
-   if FOLLP_ACT_FN == nil then
-      return
-   end
-   local foll_act_fn = FOLLP_ACT_FN:get()
-   if foll_act_fn == nil then
-      return
-   end
-   local active_state = rc:get_aux_cached(foll_act_fn)
-   if (active_state ~= last_follow_active_state) then
-      if( active_state == 0) then
-         if follow_enabled then
-            -- Follow disabled - return to EXIT mode
-            vehicle:set_mode(exit_mode)
-            follow_enabled = false
-            gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. ": disabled")
-         end
-      elseif (active_state == 2) then
-         if not (arming:is_armed()) then
-            gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. ": must be armed")
-         end
-         -- Follow enabled - switch to guided mode
-         vehicle:set_mode(FLIGHT_MODE.GUIDED)
-         follow_enabled = true
-         lost_target_countdown = LOST_TARGET_TIMEOUT
-         pid_controller_distance.reset()
-         pid_controller_velocity.reset()
-         xt_pid.reset()
-         gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. ": enabled")
-      end
-      -- Don't know what to do with the 3rd switch position right now.
-      last_follow_active_state = active_state
-   end
+local function sim_check()
    local sim_tel_fail = FOLLP_SIM_TLF_FN:get()
    local tel_fail_state = rc:get_aux_cached(sim_tel_fail)
    if tel_fail_state ~= last_tel_fail_state then
@@ -589,6 +547,64 @@ local function follow_check()
       end
       last_tel_fail_state = tel_fail_state
    end
+end
+
+local function enable_follow_mode()
+   if follow_enabled then
+      return
+   end
+   if not arming:is_armed() then
+      gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. ": must be armed")
+      return
+   end
+   -- Follow enabled - switch to guided mode but only if armed 
+   vehicle:set_mode(FLIGHT_MODE.GUIDED)
+   follow_enabled = true
+   lost_target_countdown = LOST_TARGET_TIMEOUT
+   pid_controller_distance.reset()
+   pid_controller_velocity.reset()
+   xt_pid.reset()
+   gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. ": enabled")
+end
+local function disable_follow_mode()
+   if not follow_enabled then
+      return
+   end
+   -- Follow switched to disabled - return to EXIT mode
+   vehicle:set_mode(exit_mode)
+   follow_enabled = false
+   gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. ": disabled")
+end
+
+--[[
+   follow_check() - check for user activating follow using an RC switch 
+      - set HIGH and if so
+         - switches to GUIDED
+         - enables follow
+         - resets the PID controllers
+      -- set LOW and if so
+         - exits from GUIDED to the FOLLP_EXIT_MODE
+         - disables follow
+--]]
+local last_follow_active_state = rc:get_aux_cached(FOLLP_ACT_FN:get())
+local function follow_check()
+   if FOLLP_ACT_FN == nil then
+      return
+   end
+   local foll_act_fn = FOLLP_ACT_FN:get()
+   if foll_act_fn == nil then
+      return
+   end
+   local active_state = rc:get_aux_cached(foll_act_fn)
+   if (active_state == last_follow_active_state) then
+      return
+   end
+   if( active_state == 0) then
+      disable_follow_mode()
+   elseif (active_state == 2) then
+      enable_follow_mode()
+   end
+   last_follow_active_state = active_state
 end
 
 local function wrap_360(angle)
@@ -687,6 +703,7 @@ local function update()
    ahrs_eas2tas = ahrs:get_EAS2TAS()
    windspeed_vector = ahrs:wind_estimate()
 
+   sim_check()
    follow_check()
    if not follow_active() then
       return
