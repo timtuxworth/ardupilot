@@ -348,24 +348,24 @@ local crosstrackpid = {}
 crosstrackpid.__index = crosstrackpid
 
 function crosstrackpid:new(kp, ki, kd, max_correction, integral_limit)
-      local self = setmetatable({}, crosstrackpid)
-      self.kp = kp or 0.8
-      self.ki = ki or 0.01
-      self.kd = kd or 0.5
+      local instance = setmetatable({}, crosstrackpid)
+      instance.kp = kp or 0.8
+      instance.ki = ki or 0.01
+      instance.kd = kd or 0.5
       self.max_correction = max_correction or 30  -- degrees
-      self.integral_limit = integral_limit or 100 -- m·s
+      instance.integral_limit = integral_limit or 100 -- m·s
 
-      self.integral = 0
-      self.last_error = 0
+      instance.integral = 0
+      instance.last_error = 0
 
-      return self
+      return instance
 end
 
 -- reset integrator to an initial value
 function crosstrackpid:reset()
-   local self = setmetatable({}, crosstrackpid)
-   self.integral = 0
-   self.last_error = 0
+   local instance = setmetatable({}, crosstrackpid)
+   instance.integral = 0
+   instance.last_error = 0
 end
 
 function crosstrackpid:wrap_angle_deg(angle)
@@ -859,10 +859,6 @@ local function update()
          local target_turn_radius = vehicle_airspeed * vehicle_airspeed / (9.80665 * math.tan(target_attitude.roll + rollspeed_impact))
 
          turning = true
-         -- predict the roll in 1s from now and use that based on rollspeed
-         -- need some more maths to convert a roll angle into a turn angle - from Mission Planner:
-         -- target_turn_radius = vehicle_airspeed * vehicle_airspeed / (9.80665 * math.tan(target_attitude.roll + target_attitude.rollspeed))
-         local target_tangent_angle = wrap_360(math.deg(math.pi/2.0 - vehicle_airspeed / target_turn_radius))
 
          -- if the roll direction is the same as the y offset, then we are turning on the "inside" (a tight turn) 
          if (target_attitude.roll < 0 and foll_ofs_y < 0) or
