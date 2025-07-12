@@ -50,18 +50,20 @@ extern const AP_HAL::HAL& hal;
 #define AP_FOLLOW_OFFSET_TYPE_NED       0   // offsets are in north-east-down frame
 #define AP_FOLLOW_OFFSET_TYPE_RELATIVE  1   // offsets are relative to lead vehicle's heading
 
+#define AP_FOLLOW_ALTITUDE_TYPE_ABSOLUTE  0 // altitudes are absolute
 #define AP_FOLLOW_ALTITUDE_TYPE_RELATIVE  1 // home relative altitude is used by default
+#define AP_FOLLOW_ALTITUDE_TYPE_ORIGIN    2 // origin relative altitude
+#define AP_FOLLOW_ALTITUDE_TYPE_TERRAIN   3 // terrain relative altitude
+
+#define AP_FOLLOW_ALT_TYPE_DEFAULT AP_FOLLOW_ALTITUDE_TYPE_RELATIVE
 
 #define AP_FOLLOW_POS_P_DEFAULT 0.1f    // position error gain default
 
+#define AP_FOLLOW_TIMEOUT_DEFAULT        600
+
 #if APM_BUILD_TYPE(APM_BUILD_ArduPlane)
- #define AP_FOLLOW_ALT_TYPE_DEFAULT 0
- #define AP_FOLLOW_DIST_MAX_DEFAULT 0
- #define AP_FOLLOW_ALTITUDE_TYPE_ORIGIN   2 // origin relative altitude
- #define AP_FOLLOW_ALTITUDE_TYPE_TERRAIN  3 // terrain relative altitude
- #define AP_FOLLOW_TIMEOUT_DEFAULT        600
+ #define AP_FOLLOW_DIST_MAX_DEFAULT 500
 #else
- #define AP_FOLLOW_ALT_TYPE_DEFAULT AP_FOLLOW_ALTITUDE_TYPE_RELATIVE
  #define AP_FOLLOW_DIST_MAX_DEFAULT 100
 #endif
 
@@ -214,12 +216,14 @@ const AP_Param::GroupInfo AP_Follow::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("_JERK_H", 17, AP_Follow, _jerk_max_h_degsss, 360.0),
 
+#if !(APM_BUILD_TYPE(APM_BUILD_Rover)) 
     // @Param: _TIMEOUT
     // @DisplayName: Follow timeout
     // @Description: Follow position update from lead - timeout after x milliseconds
     // @User: Standard
     // @Units: ms
     AP_GROUPINFO("_TIMEOUT", 18, AP_Follow, _timeout, AP_FOLLOW_TIMEOUT_DEFAULT),
+#endif
 
     AP_GROUPEND
 };
