@@ -53,9 +53,7 @@ local now = millis():tofloat() * 0.001
 local now_target_heading = now
 local now_telemetry_request = now
 local now_follow_lost = now
-local now_debug = now
 local now_heading = now
-local now_debug = now
 local follow_enabled = false
 local too_close_follow_up = 0
 local save_target_heading1 = -400.0
@@ -346,11 +344,11 @@ local pid_controller_velocity = speedpid.speed_controller(FOLLP_V_P:get() or 0.0
                                                             0.5, airspeed_min, airspeed_max)
 
 -- We need a PID controller to manage cross track errors
-CrossTrackPID = {}
-CrossTrackPID.__index = CrossTrackPID
+local crosstrackpid = {}
+crosstrackpid.__index = crosstrackpid
 
-function CrossTrackPID:new(kp, ki, kd, max_correction, integral_limit)
-      local self = setmetatable({}, CrossTrackPID)
+function crosstrackpid:new(kp, ki, kd, max_correction, integral_limit)
+      local self = setmetatable({}, crosstrackpid)
       self.kp = kp or 0.8
       self.ki = ki or 0.01
       self.kd = kd or 0.5
@@ -364,19 +362,19 @@ function CrossTrackPID:new(kp, ki, kd, max_correction, integral_limit)
 end
 
 -- reset integrator to an initial value
-function CrossTrackPID:reset()
-   local self = setmetatable({}, CrossTrackPID)
+function crosstrackpid:reset()
+   local self = setmetatable({}, crosstrackpid)
    self.integral = 0
    self.last_error = 0
 end
 
-function CrossTrackPID:wrap_angle_deg(angle)
+function crosstrackpid:wrap_angle_deg(angle)
       angle = (angle + 180) % 360
       if angle < 0 then angle = angle + 360 end
       return angle - 180
 end
 
-function CrossTrackPID:compute(desired_track_heading, cross_track_error, dt)
+function crosstrackpid:compute(desired_track_heading, cross_track_error, dt)
       -- Derivative
       local error_rate = (cross_track_error - self.last_error) / dt
 
@@ -403,10 +401,10 @@ function CrossTrackPID:compute(desired_track_heading, cross_track_error, dt)
 
       return corrected_heading
 end
--- end of CrossTrackPID {} class definition
+-- end of crosstrackpid {} class definition
 
 -- Instantiate the crosstrack/heading PID controller (outside update loop) 
-local xt_pid = CrossTrackPID:new(FOLLP_XT_P:get() or 0.9,
+local xt_pid = crosstrackpid:new(FOLLP_XT_P:get() or 0.9,
                                  FOLLP_XT_I:get() or 0.01,
                                  FOLLP_XT_D:get() or 0.5,
                                  FOLLP_XT_MAX:get() or 45,
