@@ -7336,10 +7336,9 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         self.start_subtest("Plane Follow Script Load and Start")
 
         self.install_applet_script_context("plane_follow.lua")
-        self.install_script_module(self.script_modules_source_path("speedpid.lua"),"speedpid.lua")
-        self.install_script_module(self.script_modules_source_path("mavlink_command_int.lua"),"mavlink_command_int.lua")
-        self.install_script_module(self.script_modules_source_path("mavlink_attitude.lua"),"mavlink_attitude.lua")
-        #self.install_script_module("libraries/AP_Scripting/modules/MAVLink/mavlink_msgs.lua","mavlink/mavlink_msgs.lua")
+        self.install_script_module(self.script_modules_source_path("speedpid.lua"), "speedpid.lua")
+        self.install_script_module(self.script_modules_source_path("mavlink_command_int.lua"), "mavlink_command_int.lua")
+        self.install_script_module(self.script_modules_source_path("mavlink_attitude.lua"), "mavlink_attitude.lua")
         self.install_mavlink_module()
 
         self.set_parameters({
@@ -7356,13 +7355,13 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         self.wait_text("Plane Follow .* script loaded", regex=True, check_context=True)
 
         self.wait_ready_to_arm()
-        self.set_rc(7,2000)
+        self.set_rc(7, 2000)
         self.wait_text("PFollow: must be armed", check_context=True)
-        self.set_rc(7,1000)
+        self.set_rc(7, 1000)
         self.arm_vehicle()
-        self.set_rc(7,2000)
+        self.set_rc(7, 2000)
         self.wait_text("PFollow: enabled", check_context=True)
-        self.set_rc(7,1000)
+        self.set_rc(7, 1000)
         self.wait_text("PFollow: disabled", check_context=True)
         self.disarm_vehicle()
 
