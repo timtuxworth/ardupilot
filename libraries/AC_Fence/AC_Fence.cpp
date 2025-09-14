@@ -682,6 +682,105 @@ bool AC_Fence::auto_enable_fence_floor()
     return false;
 }
 
+//==============================================================================
+// Fence Distance Calculation Functions
+//==============================================================================
+
+// calculate the distance to any include/exclude polygon fence from a given fixed length path
+// Returns the smallest or "most bad" distance which might be negative
+// Returns positive if the location is on the "good" side of the fence (outside an exclusion fence or inside an inclusion fence)
+// Returns negative if teh location on the "bad" side of the fence (inside an exclusion fence or outside a inclusion fence)
+bool AC_Fence::calculate_fence_distance_path_to_polygon_include(const Location &start, const Location &end, float &margin_m) const
+{
+    float margin_min_m = FLT_MAX;
+
+    const uint8_t num_inclusion_polygons = _poly_loader.get_inclusion_polygon_count();
+    if ((num_inclusion_polygons == 0)) {
+        return false;
+    }
+
+    // convert start and end to offsets from EKF origin
+    Vector2f start_NE, end_NE;
+    if (!start.get_vector_xy_from_origin_NE_cm(start_NE) ||
+        !end.get_vector_xy_from_origin_NE_cm(end_NE)) {
+        return false;
+    }
+
+    // get fence margin
+    const float fence_margin = get_margin();
+
+    // iterate through inclusion polygons and calculate minimum margin
+    bool margin_updated = false;
+    for (uint8_t i = 0; i < num_inclusion_polygons; i++) {
+        uint16_t num_points;
+        const Vector2f* boundary = _poly_loader.get_inclusion_polygon(i, num_points);
+     
+        // if outside the fence margin is the closest distance but with negative sign
+        const float sign = Polygon_outside(start_NE, boundary, num_points) ? -1.0f : 1.0f;
+
+        // calculate min distance (in meters) from line to polygon
+        float margin_new_m = (sign * Polygon_closest_distance_line(boundary, num_points, start_NE, end_NE) * 0.01f) - fence_margin;
+        if (!margin_updated || (margin_new_m < margin_min_m)) {
+            margin_updated = true;
+            margin_min_m = margin_new_m;
+        }
+    }
+    if(margin_updated) {
+        margin_m = margin_min_m;
+        return true;
+    }
+    return false;
+}
+
+// Returns the smallest or "most bad" distance which might be negative
+// Returns positive if the location is on the "good" side of the fence (outside an exclusion fence or inside an inclusion fence)
+// Returns negative if teh location on the "bad" side of the fence (inside an exclusion fence or outside a inclusion fence)
+bool AC_Fence::calculate_fence_distance_path_to_polygon_exclude(const Location &start, const Location &end, float &margin_m) const
+{
+    float margin_min_m = FLT_MAX;
+
+    const uint8_t num_exclusion_polygons = _poly_loader.get_exclusion_polygon_count();
+    if ((num_exclusion_polygons == 0)) {
+        return false;
+    }
+
+    // convert start and end to offsets from EKF origin
+    Vector2f start_NE, end_NE;
+    if (!start.get_vector_xy_from_origin_NE_cm(start_NE) ||
+        !end.get_vector_xy_from_origin_NE_cm(end_NE)) {
+        return false;
+    }
+
+    // get fence margin
+    const float fence_margin = get_margin();
+
+    // iterate through exclusion polygons and calculate minimum margin
+    bool margin_updated = false;
+    for (uint8_t i = 0; i < num_exclusion_polygons; i++) {
+        uint16_t num_points;
+        const Vector2f* boundary = _poly_loader.get_exclusion_polygon(i, num_points);
+   
+        // if start is inside the polygon the margin's sign is reversed
+        const float sign = Polygon_outside(start_NE, boundary, num_points) ? 1.0f : -1.0f;
+
+        // calculate min distance (in meters) from line to polygon
+        float margin_new = (sign * Polygon_closest_distance_line(boundary, num_points, start_NE, end_NE) * 0.01f) - fence_margin;
+        if (!margin_updated || (margin_new < margin_m)) {
+            margin_updated = true;
+            margin_m = margin_new;
+        }
+    }
+
+    return margin_updated;
+
+    if(margin_updated) {
+        margin_m = margin_min_m;
+        return true;
+    }
+    return false;
+}
+
+
 // check_fence_polygon - returns true if the poly fence is freshly
 // breached.  That includes being inside exclusion zones and outside
 // inclusions zones

@@ -206,6 +206,10 @@ public:
     }
 #endif
 
+    bool calculate_fence_distance_path_to_polygon_include(const Location &start, const Location &end, float &margin_m) const;
+    bool calculate_fence_distance_path_to_polygon_exclude(const Location &start, const Location &end, float &margin_m) const;
+    bool calculate_fence_distance_path_to_location(const Location &loc, float &margin);
+
 private:
     static AC_Fence *_singleton;
 
