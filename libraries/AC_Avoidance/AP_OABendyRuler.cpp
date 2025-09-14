@@ -174,7 +174,7 @@ void AP_OABendyRuler::display_avoidance_message(char *message)
         // if a message has been displayed and it was more than 10 seconds ago its "cleared"
         if(_last_avoid_message_ms != 0 && (now_ms - _last_avoid_message_ms > 10000)) {
             _last_avoid_message_ms = 0;
-            GCS_SEND_TEXT(MAV_SEVERITY_NOTICE, "BR: AVOID cleared");
+            GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "BR: AVOID cleared");
         }
     }
     else {
@@ -185,8 +185,8 @@ void AP_OABendyRuler::display_avoidance_message(char *message)
         if (_last_avoid_message_ms == 0 || now_ms - _last_avoid_message_ms > 5000) {
             GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "BR: AVOID %s", message);
             _last_avoid_message = message;
+            _last_avoid_message_ms = now_ms;
         }
-        _last_avoid_message_ms = now_ms;
     }
 }
 
@@ -619,6 +619,7 @@ bool AP_OABendyRuler::calc_margin_from_alt_fence(const Location &start, const Lo
 bool AP_OABendyRuler::calc_margin_from_inclusion_and_exclusion_polygons(const Location &start, const Location &end, float &margin, char *&label) const
 {
 #if AP_FENCE_ENABLED
+
     const AC_Fence *fence = AC_Fence::get_singleton();
     if (fence == nullptr) {
         return false;
@@ -629,6 +630,22 @@ bool AP_OABendyRuler::calc_margin_from_inclusion_and_exclusion_polygons(const Lo
         return false;
     }
 
+    bool margin_updated = false;
+    float margin_new_m;
+    bool found_fence = fence->calculate_fence_distance_path_to_polygon_include(start, end, margin_new_m);
+    if (found_fence && margin_new_m < margin) {
+        label = "Poly Include";
+        margin = margin_new_m;
+        margin_updated = true;
+    }
+    found_fence = fence->calculate_fence_distance_path_to_polygon_exclude(start, end, margin_new_m);
+    if (found_fence && margin_new_m < margin) {
+        label = "Poly Exclude";
+        margin = margin_new_m;
+        margin_updated = true;
+    }
+    return margin_updated;
+/*
     // return immediately if no inclusion nor exclusion polygons
     const uint8_t num_inclusion_polygons = fence->polyfence().get_inclusion_polygon_count();
     const uint8_t num_exclusion_polygons = fence->polyfence().get_exclusion_polygon_count();
@@ -647,7 +664,6 @@ bool AP_OABendyRuler::calc_margin_from_inclusion_and_exclusion_polygons(const Lo
     const float fence_margin = fence->get_horizontal_margin();
 
     // iterate through inclusion polygons and calculate minimum margin
-    bool margin_updated = false;
     for (uint8_t i = 0; i < num_inclusion_polygons; i++) {
         uint16_t num_points;
         const Vector2f* boundary = fence->polyfence().get_inclusion_polygon(i, num_points);
@@ -682,6 +698,7 @@ bool AP_OABendyRuler::calc_margin_from_inclusion_and_exclusion_polygons(const Lo
     }
 
     return margin_updated;
+*/
 #else
     return false;
 #endif // AP_FENCE_ENABLED
@@ -763,8 +780,7 @@ bool AP_OABendyRuler::calc_margin_from_inclusion_and_exclusion_circles(const Loc
             }
         }
     }
-
-    return margin_updated;
+    return true;
 #else
     return false;
 #endif // AP_FENCE_ENABLED
