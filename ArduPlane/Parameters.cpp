@@ -1267,10 +1267,11 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
     // @Increment: 1
     // @User: Advanced
     AP_GROUPINFO("CLIMB_SLOPE_HGT", 39, ParametersG2, waypoint_climb_slope_height_min, 25),
+
 #if AP_OAPATHPLANNER_ENABLED
 // @Group: OA_
 // @Path: ../libraries/AC_Avoidance/AP_OAPathPlanner.cpp
-AP_SUBGROUPINFO(oa, "OA_", 39, ParametersG2, AP_OAPathPlanner),
+AP_SUBGROUPINFO(oa, "OA_", 40, ParametersG2, AP_OAPathPlanner),
 #endif
 
     // @Param: GUIDED_TIMEOUT
