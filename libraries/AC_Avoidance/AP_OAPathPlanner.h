@@ -95,7 +95,7 @@ private:
     bool start_thread();
 
     // helper function to map OABendyType to OAPathPlannerUsed
-    OAPathPlannerUsed map_bendytype_to_pathplannerused(AP_OABendyRuler::OABendyType bendy_type);
+    OAPathPlannerUsed map_bendytype_to_pathplannerused(AP_OABendyRuler::OABendyResult bendy_result);
 
     // an avoidance request from the navigation code
     struct avoidance_info {

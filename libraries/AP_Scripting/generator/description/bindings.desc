@@ -90,6 +90,15 @@ singleton AP_Arming method get_aux_auth_id boolean uint8_t'Null
 singleton AP_Arming method set_aux_auth_passed void uint8_t'skip_check
 singleton AP_Arming method set_aux_auth_failed void uint8_t'skip_check string
 
+include AP_Avoidance/AP_Avoidance.h
+
+singleton AP_Avoidance rename avoid
+singleton AP_Avoidance method num_obstacles uint8_t
+singleton AP_Avoidance method get_obstacle_loc Location uint8_t'skip_check
+singleton AP_Avoidance method get_obstacle_vel Vector3f uint8_t'skip_check
+singleton AP_Avoidance method get_obstacle_id int32_t uint8_t'skip_check
+singleton AP_Avoidance method get_obstacle_timestamp int32_t uint8_t'skip_check
+
 include AP_BattMonitor/AP_BattMonitor.h
 
 include AP_BattMonitor/AP_BattMonitor_Scripting.h

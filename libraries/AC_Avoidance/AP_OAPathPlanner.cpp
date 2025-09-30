@@ -186,18 +186,17 @@ bool AP_OAPathPlanner::start_thread()
 }
 
 // helper function to map OABendyType to OAPathPlannerUsed
-AP_OAPathPlanner::OAPathPlannerUsed AP_OAPathPlanner::map_bendytype_to_pathplannerused(AP_OABendyRuler::OABendyType bendy_type)
+AP_OAPathPlanner::OAPathPlannerUsed AP_OAPathPlanner::map_bendytype_to_pathplannerused(AP_OABendyRuler::OABendyResult bendy_result)
 {
-    switch (bendy_type) {
-    case AP_OABendyRuler::OABendyType::OA_BENDY_HORIZONTAL:
-        return OAPathPlannerUsed::BendyRulerHorizontal;
-
-    case AP_OABendyRuler::OABendyType::OA_BENDY_VERTICAL:
-        return OAPathPlannerUsed::BendyRulerVertical;
-
-    default:
-    case AP_OABendyRuler::OABendyType::OA_BENDY_DISABLED:
-        return OAPathPlannerUsed::None;
+    // Switch on the bendy_type enum field
+    switch (bendy_result.bendy_type) {
+        case AP_OABendyRuler::OABendyType::OA_BENDY_HORIZONTAL:
+            return OAPathPlannerUsed::BendyRulerHorizontal;
+        case AP_OABendyRuler::OABendyType::OA_BENDY_VERTICAL:
+            return OAPathPlannerUsed::BendyRulerVertical;
+        case AP_OABendyRuler::OABendyType::OA_BENDY_DISABLED:
+        default:
+            return OAPathPlannerUsed::None;
     }
 }
 
@@ -328,11 +327,11 @@ void AP_OAPathPlanner::avoidance_thread()
             }
             _oabendyruler->set_config(_margin_max);
 
-            AP_OABendyRuler::OABendyType bendy_type;
-            if (_oabendyruler->update(avoidance_request2.current_loc, avoidance_request2.destination, avoidance_request2.ground_speed_vec, origin_new, destination_new, bendy_type, false)) {
+            AP_OABendyRuler::OABendyResult bendy_result;
+            if (_oabendyruler->update(avoidance_request2.current_loc, avoidance_request2.destination, avoidance_request2.ground_speed_vec, origin_new, destination_new, bendy_result, false)) {
                 res = OA_SUCCESS;
             }
-            path_planner_used = map_bendytype_to_pathplannerused(bendy_type);
+            path_planner_used = map_bendytype_to_pathplannerused(bendy_result);
             break;
         }
 
@@ -370,12 +369,12 @@ void AP_OAPathPlanner::avoidance_thread()
                 continue;
             } 
             _oabendyruler->set_config(_margin_max);
-            AP_OABendyRuler::OABendyType bendy_type;
-            if (_oabendyruler->update(avoidance_request2.current_loc, avoidance_request2.destination, avoidance_request2.ground_speed_vec, origin_new, destination_new, bendy_type, proximity_only)) {
+            AP_OABendyRuler::OABendyResult bendy_result;
+            if (_oabendyruler->update(avoidance_request2.current_loc, avoidance_request2.destination, avoidance_request2.ground_speed_vec, origin_new, destination_new, bendy_result, proximity_only)) {
                 // detected a obstacle by vehicle's proximity sensor. Switch avoidance to BendyRuler till obstacle is out of the way
                 proximity_only = false;
                 res = OA_SUCCESS;
-                path_planner_used = map_bendytype_to_pathplannerused(bendy_type);
+                path_planner_used = map_bendytype_to_pathplannerused(bendy_result);
                 break;
             } else {
                 // cleared all obstacles, trigger Dijkstra's to calculate path based on current deviated position  

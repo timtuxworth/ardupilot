@@ -1,121 +1,199 @@
 #pragma once
 
-#include "AC_Avoidance_config.h"
-
-#if AP_OAPATHPLANNER_BENDYRULER_ENABLED
-
 #include <AP_Common/AP_Common.h>
-#include <AP_Common/Location.h>
+#include <AP_Param/AP_Param.h>
 #include <AP_Math/AP_Math.h>
-#include <AP_Logger/AP_Logger_config.h>
-#include <GCS_MAVLink/GCS_MAVLink.h>    // MAVLink GCS definitions
+#include <AC_Fence/AC_Fence.h>
+#include <AP_Common/Location.h>
 
-/*
- * BendyRuler avoidance algorithm for avoiding the polygon and circular fence and dynamic objects detected by the proximity sensor
- */
 class AP_OABendyRuler {
 public:
-    AP_OABendyRuler();
-
-    CLASS_NO_COPY(AP_OABendyRuler);  /* Do not allow copies */
-
-    // send configuration info stored in front end parameters
-    void set_config(float margin_max) { _margin_max = MAX(margin_max, 0.0f); }
-
+    // Define OABendyType INSIDE the class
+// Use the existing OABendyType enum
     enum class OABendyType {
         OA_BENDY_DISABLED   = 0,
         OA_BENDY_HORIZONTAL = 1,
         OA_BENDY_VERTICAL   = 2,
+        OA_BENDY_OBJECT     = 3,
     };
 
-    // run background task to find best path
-    // returns true and updates origin_new and destination_new if a best path has been found.  returns false if OA is not required
-    // bendy_type is set to the type of BendyRuler used
-    bool update(const Location& current_loc, const Location& destination, const Vector2f &ground_speed_vec, Location &origin_new, Location &destination_new, OABendyType &bendy_type, bool proximity_only);
+    // Define the result struct INSIDE the class
+    struct OABendyResult {
+        Vector2f avoidance_vec;
+        Vector2f origin;
+        float nearest_distance;
+        OABendyType bendy_type;  // Use the enum type
+        
+        void reset() {
+            avoidance_vec.zero();
+            origin.zero();
+            nearest_distance = 0;
+            bendy_type = OABendyType::OA_BENDY_DISABLED;
+        }
+    };
 
-    // allow setting of _obstacle_label
-    void set_obstacle_label(char *label) const;
-    // allow setting of _avoidance_label
-    void set_avoidance_label(char *label) const;
+    AP_OABendyRuler();
 
-    // allow getting of _description_label
-    char *get_obstacle_label() { return _obstacle_label; };
+    /* Do not allow copies */
+    CLASS_NO_COPY(AP_OABendyRuler);
+
+    static AP_OABendyRuler *get_singleton(void) { return _singleton; }
+
+    // init - perform any required initialisation
+    void init();
+
+    // pre-calculation that applies to all avoidance threads
+    void pre_update();
+
+    // main update function to find new path
+    bool update(const Location& current_loc, const Location& destination, const Vector2f &ground_speed_vec, Location &origin_new, Location &destination_new, OABendyResult &bendy_result, bool proximity_only);
+
+    // set fence system
+    void set_fence(const AC_Fence* fence) { _fence = fence; }
+
+    // configure the BendyRuler
+    void set_config(float margin_max);
+
+    // returns true if bendy ruler is enabled and has a current location
+    bool enabled() const { return _have_current_loc; }
+
+    // returns object avoidance margin in meters
+    float get_margin() const { return _margin; }
+
+    // returns the minimum distance the vehicle must stay from objects in meters
+    float get_min_distance() const { return _min_distance; }
+
+    // returns the look ahead time in seconds
+    float get_lookahead_time() const { return _lookahead_time; }
+
+    // returns the look ahead time in seconds for the current speed
+    float get_lookahead_time_for_speed(float speed) const { return _lookahead_time; }
+
+    // returns the maximum look ahead distance in meters
+    float get_lookahead_max() const { return _lookahead_max; }
+
+    // returns the maximum speed in m/s
+    float get_max_speed() const { return _max_speed; }
+
+    // returns the maximum acceleration in m/s/s
+    float get_max_accel() const { return _max_accel; }
+
+    // returns the maximum turn rate in rad/s
+    float get_max_turn_rate() const { return _max_turn_rate; }
+
+    // returns the maximum turn angle in radians
+    float get_max_turn_angle() const { return _max_turn_angle; }
+
+    // returns the maximum turn angle in radians for the current speed
+    float get_max_turn_angle_for_speed(float speed) const { return _max_turn_angle; }
+
+    // returns the maximum turn rate in rad/s for the current speed
+    float get_max_turn_rate_for_speed(float speed) const { return _max_turn_rate; }
+
+    // returns the maximum acceleration in m/s/s for the current speed
+    float get_max_accel_for_speed(float speed) const { return _max_accel; }
+
+    // returns the maximum speed in m/s for the current turn rate
+    float get_max_speed_for_turn_rate(float turn_rate) const { return _max_speed; }
+
+    // returns the maximum speed in m/s for the current turn angle
+    float get_max_speed_for_turn_angle(float turn_angle) const { return _max_speed; }
+
+    // returns the maximum speed in m/s for the current acceleration
+    float get_max_speed_for_accel(float accel) const { return _max_accel; }
+
+    // returns the maximum turn rate in rad/s for the current acceleration
+    float get_max_turn_rate_for_accel(float accel) const { return _max_turn_rate; }
+
+    // returns the maximum turn angle in radians for the current acceleration
+    float get_max_turn_angle_for_accel(float accel) const { return _max_turn_angle; }
+
+    // Logging method
+    void Write_OABendyRuler(const uint8_t type, const bool active, const float target_yaw, const float target_pitch, const bool resist_chg, const float margin, const Location &final_dest, const Location &oa_dest) const;
 
     static const struct AP_Param::GroupInfo var_info[];
 
 private:
+    static AP_OABendyRuler *_singleton;
 
-    // return type of BendyRuler in use
-    OABendyType get_type() const;
+    // Spatial hash for ray tracing optimization
+    static const uint16_t OA_MAX_OBSTACLES = 256;
+    static const uint16_t OA_MAX_FENCE_SEGMENTS = 100;
+    static const uint16_t OA_BITMASK_SIZE = (OA_MAX_OBSTACLES + 31) / 32;
 
-    // search for path in XY direction
-    bool search_xy_path(const Location& current_loc, const Location& destination, float ground_course_deg, Location &destination_new, float lookahead_step_1_dist, float lookahead_step_2_dist, float bearing_to_dest, float distance_to_dest, bool proximity_only);
+    class AP_OASpatialHash {
+    private:
+        static const uint16_t OA_SPATIAL_HASH_SIZE = 64;
+        static const uint16_t OA_MAX_OBSTACLES_PER_CELL = 10;
+        
+        struct OACell {
+            uint16_t obstacle_count;
+            uint16_t obstacle_indices[OA_MAX_OBSTACLES_PER_CELL];
+        };
+        
+        float _cell_size;
+        OACell _cells[OA_SPATIAL_HASH_SIZE][OA_SPATIAL_HASH_SIZE];
+        Vector2f _grid_origin;
+        
+        bool _world_to_grid(const Vector2f& pos, uint16_t& grid_x, uint16_t& grid_y) const;
+        
+    public:
+        void init(float cell_size, const Vector2f& origin);
+        void clear();
+        bool add_obstacle(const Vector2f& pos, float radius, uint16_t obstacle_id);
+        void query_radius(const Vector2f& pos, float radius, uint32_t obstacle_mask[OA_BITMASK_SIZE]);
+        bool ray_intersect_dda(const Vector2f& start, const Vector2f& end, float& distance, uint16_t& obstacle_id);
+        bool obstacle_in_mask(const uint32_t obstacle_mask[OA_BITMASK_SIZE], uint16_t obstacle_id) const;
+    };
 
-    // search for path in the Vertical directions
-    bool search_vertical_path(const Location &current_loc, const Location &destination, Location &destination_new, float lookahead_step1_dist, float lookahead_step2_dist, float bearing_to_dest, float distance_to_dest, bool proximity_only);
+    // Parameters
+    AP_Float _margin;
+    AP_Float _min_distance;
+    AP_Float _lookahead_time;
+    AP_Float _lookahead_max;
+    AP_Float _max_speed;
+    AP_Float _max_accel;
+    AP_Float _max_turn_rate;
+    AP_Float _max_turn_angle;
 
-    // calculate minimum distance between a path and any obstacle
-    float calc_avoidance_margin(const Location &start, const Location &end, bool proximity_only, bool set_labels) const;
+    // Fence integration
+    const AC_Fence* _fence;
+    bool _fences_loaded;
+    uint32_t _last_fence_update_ms;
 
-    // determine if BendyRuler should accept the new bearing or try and resist it. Returns true if bearing is not changed  
-    bool resist_bearing_change(const Location &destination, const Location &current_loc, bool active, float bearing_test, float lookahead_step1_dist, float margin, Location &prev_dest, float &prev_bearing, float &final_bearing, float &final_margin, bool proximity_only) const;    
-
-    // calculate minimum distance between a path and the circular fence (centered on home)
-    // on success returns true and updates margin
-    bool calc_margin_from_circular_fence(const Location &start, const Location &end, float &margin) const;
-
-    // calculate minimum distance between a path and the altitude fence
-    // on success returns true and updates margin
-    bool calc_margin_from_alt_fence(const Location &start, const Location &end, float &margin) const;
-
-    // calculate minimum distance between a path and all inclusion and exclusion polygons
-    // on success returns true and updates margin
-    bool calc_margin_from_inclusion_and_exclusion_polygons(const Location &start, const Location &end, float &margin, char *&label) const;
-
-    // calculate minimum distance between a path and all inclusion and exclusion circles
-    // on success returns true and updates margin
-    bool calc_margin_from_inclusion_and_exclusion_circles(const Location &start, const Location &end, float &margin, char *&label) const;
-
-    // calculate minimum distance between a path and proximity sensor obstacles
-    // on success returns true and updates margin
-    bool calc_margin_from_object_database(const Location &start, const Location &end, float &margin) const;
-
-    // calculate minimum distance between a path and MAVLink/AP_Avoidance obstacles
-    // on success returns true and updates margin
-    bool calc_margin_from_obstacle_database(const Location &start, const Location &end, float &margin) const;
-
-    // Display messages to the user that avoidance is happening
-    void display_avoidance_message(char * message);
-
-    // Logging function
-#if HAL_LOGGING_ENABLED
-    void Write_OABendyRuler(const uint8_t type, const bool active, const float target_yaw, const float target_pitch, const bool resist_chg, const float margin, const Location &final_dest, const Location &oa_dest) const;
-#else
-    void Write_OABendyRuler(const uint8_t type, const bool active, const float target_yaw, const float target_pitch, const bool resist_chg, const float margin, const Location &final_dest, const Location &oa_dest) const {}
-#endif
-
-    // OA common parameters
-    float _margin_max;              // object avoidance will ignore objects more than this many meters from vehicle
+    // Fence segment cache
+    struct OAFenceSegment {
+        Vector2f start;
+        Vector2f end;
+        uint8_t fence_type;
+        uint8_t fence_instance;
+    };
     
-    // BendyRuler parameters
-    AP_Float _lookahead;            // object avoidance will look this many meters ahead of vehicle
-    AP_Float _bendy_ratio;          // object avoidance will avoid major directional change if change in margin ratio is less than this param
-    AP_Int16 _bendy_angle;          // object avoidance will try avoiding change in direction over this much angle
-    AP_Int8  _bendy_type;           // Type of BendyRuler to run
-    AP_Int8  _bendy_noisy;          // Display messages (or not) for Bendy Ruler avoidance activities
-    
-    // internal variables used by background thread
-    float _current_lookahead;       // distance (in meters) ahead of the vehicle we are looking for obstacles
-    float _bearing_prev;            // stored bearing in degrees 
-    Location _destination_prev;     // previous destination, to check if there has been a change in destination
+    uint16_t _fence_segment_count;
+    OAFenceSegment _fence_segments[OA_MAX_FENCE_SEGMENTS];
 
-    // Values used by get_noisy() to display context of the avoidance
-    mutable char *_obstacle_label;
-    mutable char *_avoidance_label;
+    // Spatial hash for ray tracing
+    AP_OASpatialHash _spatial_hash;
+    bool _spatial_hash_initialized;
+    uint32_t _last_spatial_hash_update_ms;
 
-    // Keep track of time mostly to give messages to the user without spamming them
-    uint32_t _last_avoid_message_ms;
-    char *_last_avoid_message;
+    // Internal state
+    Vector2f _current_origin;
+    float _lookahead;
+    bool _have_current_loc;
+    float _margin_ratio;
+
+    // Methods
+    bool get_origin_and_direction(const Location& current_loc, const Vector2f &ground_speed_vec, Vector2f &origin, Vector2f &direction) WARN_IF_UNUSED;
+    bool _check_segment_with_raytrace(const Vector2f& start, const Vector2f& end, OABendyResult &result) WARN_IF_UNUSED;
+    bool _find_nearest_intersection(const Vector2f& start, const Vector2f& end, float& distance, OABendyType& obstacle_type) WARN_IF_UNUSED;
+    void _update_spatial_hash();
+    bool _load_fence_segments();
+    bool _ray_intersects_fence_segment(const Vector2f& start, const Vector2f& end, const OAFenceSegment& segment, Vector2f& intersection) const WARN_IF_UNUSED;
+    bool check_collision_with_fences(const Vector2f& start, const Vector2f& end, float& intersection_dist, uint32_t fence_mask[OA_BITMASK_SIZE]) WARN_IF_UNUSED;
+    bool location_to_vector(const Location& loc, Vector2f& pos) const;
 };
 
-#endif  // AP_OAPATHPLANNER_BENDYRULER_ENABLED
+namespace AP {
+    AP_OABendyRuler *ap_oabendyruler();
+};
