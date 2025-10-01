@@ -8,78 +8,45 @@
 
 AP_OABendyRuler *AP_OABendyRuler::_singleton = nullptr;
 
-const AP_Param::GroupInfo AP_OABendyRuler::var_info[] = {
-    // @Param: MARGIN_MAX
-    // @DisplayName: Object Avoidance Margin Max
-    // @Description: Object Avoidance Margin Max in meters
-    // @Units: m
-    // @Range: 0 10
-    // @Increment: 0.1
-    // @User: Standard
-    AP_GROUPINFO("MARGIN_MAX", 1, AP_OABendyRuler, _margin, 2.0f),
+// parameter defaults
+const float OA_BENDYRULER_LOOKAHEAD_DEFAULT = 15.0f;
+const float OA_BENDYRULER_RATIO_DEFAULT = 1.5f;
+const int16_t OA_BENDYRULER_ANGLE_DEFAULT = 75;
+const int16_t OA_BENDYRULER_TYPE_DEFAULT = 1;
 
-    // @Param: MIN_DIST
-    // @DisplayName: Object Avoidance Minimum Distance
-    // @Description: Object Avoidance Minimum Distance in meters
-    // @Units: m
-    // @Range: 0 10
-    // @Increment: 0.1
-    // @User: Standard
-    AP_GROUPINFO("MIN_DIST", 2, AP_OABendyRuler, _min_distance, 0.5f),
+const AP_Param::GroupInfo AP_OABendyRuler::var_info[] = {
 
     // @Param: LOOKAHEAD
-    // @DisplayName: Object Avoidance Look Ahead Time
-    // @Description: Object Avoidance Look Ahead Time in seconds
-    // @Units: s
-    // @Range: 0 10
-    // @Increment: 0.1
-    // @User: Standard
-    AP_GROUPINFO("LOOKAHEAD", 3, AP_OABendyRuler, _lookahead_time, 2.0f),
-
-    // @Param: LOOKAHEAD_MAX
-    // @DisplayName: Object Avoidance Look Ahead Max
-    // @Description: Object Avoidance Look Ahead Max in meters
+    // @DisplayName: Object Avoidance look ahead distance maximum
+    // @Description: Object Avoidance will look this many meters ahead of vehicle
     // @Units: m
-    // @Range: 0 100
-    // @Increment: 0.1
+    // @Range: 1 100
+    // @Increment: 1
     // @User: Standard
-    AP_GROUPINFO("LOOKAHEAD_MAX", 4, AP_OABendyRuler, _lookahead_max, 20.0f),
+    AP_GROUPINFO("LOOKAHEAD", 1, AP_OABendyRuler, _lookahead, OA_BENDYRULER_LOOKAHEAD_DEFAULT),
 
-    // @Param: SPEED_MAX
-    // @DisplayName: Object Avoidance Speed Max
-    // @Description: Object Avoidance Speed Max in m/s
-    // @Units: m/s
-    // @Range: 0 100
+    // @Param: CONT_RATIO
+    // @DisplayName: Obstacle Avoidance margin ratio for BendyRuler to change bearing significantly 
+    // @Description:  BendyRuler will avoid changing bearing unless ratio of previous margin from obstacle (or fence) to present calculated margin is atleast this much.
+    // @Range: 1.1 2
     // @Increment: 0.1
     // @User: Standard
-    AP_GROUPINFO("SPEED_MAX", 5, AP_OABendyRuler, _max_speed, 10.0f),
+    AP_GROUPINFO("CONT_RATIO", 2, AP_OABendyRuler, _bendy_ratio, OA_BENDYRULER_RATIO_DEFAULT),
 
-    // @Param: ACCEL_MAX
-    // @DisplayName: Object Avoidance Acceleration Max
-    // @Description: Object Avoidance Acceleration Max in m/s/s
-    // @Units: m/s/s
-    // @Range: 0 100
-    // @Increment: 0.1
+    // @Param: CONT_ANGLE
+    // @DisplayName: BendyRuler's bearing change resistance threshold angle   
+    // @Description:  BendyRuler will resist changing current bearing if the change in bearing is over this angle
+    // @Range: 20 180
+    // @Increment: 5
     // @User: Standard
-    AP_GROUPINFO("ACCEL_MAX", 6, AP_OABendyRuler, _max_accel, 5.0f),
+    AP_GROUPINFO("CONT_ANGLE", 3, AP_OABendyRuler, _bendy_angle, OA_BENDYRULER_ANGLE_DEFAULT),
 
-    // @Param: TURN_RATE_MAX
-    // @DisplayName: Object Avoidance Turn Rate Max
-    // @Description: Object Avoidance Turn Rate Max in rad/s
-    // @Units: rad/s
-    // @Range: 0 10
-    // @Increment: 0.1
+    // @Param{Copter}: TYPE
+    // @DisplayName: Type of BendyRuler
+    // @Description: BendyRuler will search for clear path along the direction defined by this parameter
+    // @Values: 1:Horizontal search, 2:Vertical search
     // @User: Standard
-    AP_GROUPINFO("TURN_RATE_MAX", 7, AP_OABendyRuler, _max_turn_rate, 1.0f),
-
-    // @Param: TURN_ANGLE_MAX
-    // @DisplayName: Object Avoidance Turn Angle Max
-    // @Description: Object Avoidance Turn Angle Max in radians
-    // @Units: rad
-    // @Range: 0 3.14
-    // @Increment: 0.1
-    // @User: Standard
-    AP_GROUPINFO("TURN_ANGLE_MAX", 8, AP_OABendyRuler, _max_turn_angle, 1.57f),
+    AP_GROUPINFO_FRAME("TYPE", 4, AP_OABendyRuler, _bendy_type, OA_BENDYRULER_TYPE_DEFAULT, AP_PARAM_FRAME_COPTER | AP_PARAM_FRAME_HELI | AP_PARAM_FRAME_TRICOPTER),
 
     AP_GROUPEND
 };
@@ -99,8 +66,6 @@ AP_OABendyRuler::AP_OABendyRuler()
     _spatial_hash_initialized = false;
     _last_spatial_hash_update_ms = 0;
     _fence_segment_count = 0;
-    _have_current_loc = false;
-    _margin_ratio = 0.1f; // 10% margin
 }
 
 void AP_OABendyRuler::init()
@@ -138,14 +103,12 @@ bool AP_OABendyRuler::get_origin_and_direction(const Location& current_loc, cons
     
     // Use ground speed vector for direction, or fallback to heading
     if (ground_speed_vec.length() > 0.1f) {
-        direction = ground_speed_vec.normalized() * _lookahead_max;
+        direction = ground_speed_vec.normalized() * _lookahead;
     } else {
         // Fallback to vehicle heading
         float yaw_rad = AP::ahrs().get_yaw();
-        direction = Vector2f(cosf(yaw_rad), sinf(yaw_rad)) * _lookahead_max;
+        direction = Vector2f(cosf(yaw_rad), sinf(yaw_rad)) * _lookahead;
     }
-    
-    _have_current_loc = true;
     return true;
 }
 
