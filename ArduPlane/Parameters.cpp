@@ -1268,12 +1268,6 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("CLIMB_SLOPE_HGT", 39, ParametersG2, waypoint_climb_slope_height_min, 25),
 
-#if AP_OAPATHPLANNER_ENABLED
-// @Group: OA_
-// @Path: ../libraries/AC_Avoidance/AP_OAPathPlanner.cpp
-AP_SUBGROUPINFO(oa, "OA_", 40, ParametersG2, AP_OAPathPlanner),
-#endif
-
     // @Param: GUIDED_TIMEOUT
     // @DisplayName: Timeout for external guided command.
     // @Description: If external guided command was not received by this timeout, the vehicle will revert to regular GUIDED mode.
@@ -1282,6 +1276,12 @@ AP_SUBGROUPINFO(oa, "OA_", 40, ParametersG2, AP_OAPathPlanner),
     // @Increment: 0.5
     // @User: Advanced
     AP_GROUPINFO("GUIDED_TIMEOUT", 40, ParametersG2, guided_timeout, 3.0f),
+
+    #if AP_OAPATHPLANNER_ENABLED
+    // @Group: OA_
+    // @Path: ../libraries/AC_Avoidance/AP_OAPathPlanner.cpp
+    AP_SUBGROUPINFO(oa, "OA_", 41, ParametersG2, AP_OAPathPlanner),
+    #endif
 
     AP_GROUPEND
 };

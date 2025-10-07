@@ -59,7 +59,7 @@ AP_Param *AP_Param::_singleton;
 #endif
 
 
-#define ENABLE_DEBUG 0
+#define ENABLE_DEBUG 1
 
 #if ENABLE_DEBUG
 # define FATAL(fmt, args ...) AP_HAL::panic(fmt, ## args);
