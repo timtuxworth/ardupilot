@@ -26,9 +26,10 @@
 #include <AP_Avoidance/AP_Avoidance.h>
 #include <GCS_MAVLink/GCS_MAVLink.h>    // MAVLink GCS definitions
 
+
 // parameter defaults
 #if APM_BUILD_TYPE(APM_BUILD_ArduPlane)
-float OA_BENDYRULER_LOOKAHEAD_DEFAULT = 500.0f;
+float OA_BENDYRULER_LOOKAHEAD_DEFAULT = 200.0f;
 #else
 float OA_BENDYRULER_LOOKAHEAD_DEFAULT = 15.0f;
 #endif
@@ -93,9 +94,6 @@ AP_OABendyRuler::AP_OABendyRuler()
 { 
     AP_Param::setup_object_defaults(this, var_info); 
     _bearing_prev = FLT_MAX;
-
-    // Initialize spatial hash with appropriate parameters
-    _spatial_hash.init(100.0f, 16); 
 }
 
 void AP_OABendyRuler::set_obstacle_label(char *label) const
@@ -493,14 +491,15 @@ float AP_OABendyRuler::calc_avoidance_margin_fast(const Location &start, const L
         return calc_avoidance_margin(start, end, proximity_only, second_stage);
     }
     
-    float smallest_margin = _margin_max;  // Start with maximum possible margin
-    
+    // float smallest_margin = _margin_max;  // Start with maximum possible margin
+    float smallest_margin = FLT_MAX;
+
     // Sample points along the path
     float sample_distance;
     if (second_stage) {
-        sample_distance = 5.0f; // Finer sampling for extended lookahead
+        sample_distance = 20.0f; // Finer sampling for extended lookahead
     } else {
-        sample_distance = 2.0f; // Coarser sampling for immediate path
+        sample_distance = 20.0f; // Coarser sampling for immediate path
     }
     const float path_length = start.get_distance(end);
     const uint8_t num_samples = MAX(1, (uint8_t)(path_length / sample_distance)); // 5m steps
@@ -520,7 +519,7 @@ float AP_OABendyRuler::calc_avoidance_margin_fast(const Location &start, const L
         }
     }
     float old_margin = calc_avoidance_margin(start, end, proximity_only, second_stage);
-    if( fabs(old_margin - smallest_margin) > 1.0f) {  // Compare actual values, not absolute values
+    if( smallest_margin < _margin_max && fabs(old_margin - smallest_margin) > 1.0f) {  // Compare actual values, not absolute values
         GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "margin diff old: %.2f new: %.2f path_len: %.1f", 
                      old_margin, smallest_margin, path_length);
     }
@@ -938,33 +937,207 @@ bool AP_OABendyRuler::calc_margin_from_object_database(const Location &start, co
     return false;
 }
 
-void AP_OABendyRuler::populate_spatial_hash(const Location &current_loc)
+bool AP_OABendyRuler::populate_spatial_hash(const Location &current_loc)
 {
     _spatial_hash.clear();
-    _spatial_hash_populated = false;
     
     const float search_radius = _current_lookahead * 1.5f;
-    const uint8_t num_rings = 5;
-    const uint8_t points_per_ring = 24;
-    
-    for (uint8_t ring = 1; ring <= num_rings; ring++) {
-        float radius = (search_radius * ring) / num_rings;
-        
-        for (uint8_t point = 0; point < points_per_ring; point++) {
-            Location test_point = current_loc;
-            float bearing = (360.0f * point) / points_per_ring;
-            test_point.offset_bearing(bearing, radius);
-            
-            float margin = calc_avoidance_margin(current_loc, test_point, false, true);
-            if (margin < _margin_max) {
-                _spatial_hash.insert(test_point, _avoidance_label, AP_HAL::millis(), bearing, margin);
-            }
+
+    // exit immediately if db is empty
+    AP_OADatabase *oaDb = AP::oadatabase();
+    if (oaDb == nullptr || !oaDb->healthy()) {
+        return false;
+    }
+
+    // convert start and end to offsets (in cm) from EKF origin
+    Vector3f current_NEU_m;
+    if (!current_loc.get_vector_from_origin_NEU_m(current_NEU_m)) {
+        return false;
+    }
+
+    // Insert database obstacles
+    for (uint16_t i = 0; i < oaDb->database_count(); i++) {
+        const AP_OADatabase::OA_DbItem& item = oaDb->get_item(i);
+        const float item_distance = (item.pos - current_NEU_m).length();
+        if (item_distance <= search_radius) {
+            /*
+            AP_OASpatialHash::Obstacle obstacle;
+            obstacle.type = AP_OASpatialHash::ObstacleType::OBSTACLE_DATABASE;
+            obstacle.pos = item.pos;
+            obstacle.radius = item.radius;
+            obstacle.timestamp_ms = item.timestamp_ms;
+            */
+            _spatial_hash.insert_database_obstacle(item.pos, item.radius, item.timestamp_ms);
         }
     }
 
-    _spatial_hash.debug_print_contents();
-    
-    _spatial_hash_populated = (_spatial_hash.get_num_items() > 0);
+    // Insert fences
+    AC_Fence *fence = AC_Fence::get_singleton();
+    if (fence != nullptr && fence->enabled()) {
+        _populate_fences(current_NEU_m, search_radius);
+    }
+
+    _spatial_hash_populated = true;
+    return true;
 }
 
+void AP_OABendyRuler::_populate_fences(const Vector3f &current_NEU_m, float search_radius_m)
+{
+    AC_Fence *fence = AC_Fence::get_singleton();
+    if (fence == nullptr || !fence->enabled()) {
+        return;
+    }
+
+    // Use the polyfence_loader() to access all fence types
+    _populate_fence_polygon_inclusion(current_NEU_m, search_radius_m);
+    _populate_fence_polygon_exclusion(current_NEU_m, search_radius_m);
+    _populate_fence_circle_inclusion(current_NEU_m, search_radius_m);
+    _populate_fence_circle_exclusion(current_NEU_m, search_radius_m);
+}
+
+void AP_OABendyRuler::_populate_fence_polygon_inclusion(const Vector3f &current_NEU_m, float search_radius)
+{
+    AC_Fence *fence = AC_Fence::get_singleton();
+    if (fence == nullptr) return;
+    
+    AC_PolyFence_loader& polyfence = fence->polyfence();
+    
+    // Get inclusion polygons using the correct API
+    uint16_t poly_count = polyfence.get_inclusion_polygon_count();
+    for (uint16_t i = 0; i < poly_count; i++) {
+        uint16_t point_count;
+        Vector2f* points = polyfence.get_inclusion_polygon(i, point_count);
+        
+        if (points != nullptr && point_count >= 2) {
+            // Sample each edge of the polygon
+            for (uint16_t j = 0; j < point_count; j++) {
+                Vector2f& point1_cm = points[j];
+                Vector2f& point2_cm = points[(j + 1) % point_count];
+                
+                // Convert polygon points from cm to meters NEU
+                Vector3f start_NEU_m, end_NEU_m;
+                start_NEU_m.x = point1_cm.x * 0.01f; // Convert cm to meters (North)
+                start_NEU_m.y = point1_cm.y * 0.01f; // Convert cm to meters (East)
+                start_NEU_m.z = 0; // Fence polygons are 2D
+                
+                end_NEU_m.x = point2_cm.x * 0.01f;
+                end_NEU_m.y = point2_cm.y * 0.01f;
+                end_NEU_m.z = 0;
+                
+                // Check if this edge is within search radius
+                float dist_to_start = Vector2f(current_NEU_m.x - start_NEU_m.x, 
+                                                current_NEU_m.y - start_NEU_m.y).length();
+                float dist_to_end = Vector2f(current_NEU_m.x - end_NEU_m.x, 
+                                                current_NEU_m.y - end_NEU_m.y).length();
+                
+                if (dist_to_start <= search_radius || dist_to_end <= search_radius) {
+                    _spatial_hash.insert_fence_inclusion_polygon(start_NEU_m, end_NEU_m);
+                }
+            }
+        }
+    }
+}
+
+void AP_OABendyRuler::_populate_fence_polygon_exclusion(const Vector3f &current_NEU_m, float search_radius)
+{
+    AC_Fence *fence = AC_Fence::get_singleton();
+    if (fence == nullptr) return;
+    
+    AC_PolyFence_loader& polyfence = fence->polyfence();
+    
+    // Get exclusion polygons using the correct API
+    uint16_t poly_count = polyfence.get_exclusion_polygon_count();
+    for (uint16_t i = 0; i < poly_count; i++) {
+        uint16_t point_count;
+        Vector2f* points = polyfence.get_exclusion_polygon(i, point_count);
+        
+        if (points != nullptr && point_count >= 2) {
+            // Sample each edge of the polygon
+            for (uint16_t j = 0; j < point_count; j++) {
+                Vector2f& point1_cm = points[j];
+                Vector2f& point2_cm = points[(j + 1) % point_count];
+                
+                // Convert polygon points from cm to meters NEU
+                Vector3f start_NEU_m, end_NEU_m;
+                start_NEU_m.x = point1_cm.x * 0.01f; // Convert cm to meters (North)
+                start_NEU_m.y = point1_cm.y * 0.01f; // Convert cm to meters (East)
+                start_NEU_m.z = 0; // Fence polygons are 2D
+                
+                end_NEU_m.x = point2_cm.x * 0.01f;
+                end_NEU_m.y = point2_cm.y * 0.01f;
+                end_NEU_m.z = 0;
+                
+                // Check if this edge is within search radius
+                float dist_to_start = Vector2f(current_NEU_m.x - start_NEU_m.x, 
+                                                current_NEU_m.y - start_NEU_m.y).length();
+                float dist_to_end = Vector2f(current_NEU_m.x - end_NEU_m.x, 
+                                                current_NEU_m.y - end_NEU_m.y).length();
+                
+                if (dist_to_start <= search_radius || dist_to_end <= search_radius) {
+                    _spatial_hash.insert_fence_exclusion_polygon(start_NEU_m, end_NEU_m);
+                }
+            }
+        }
+    }
+}
+
+void AP_OABendyRuler::_populate_fence_circle_inclusion(const Vector3f &current_NEU_m, float search_radius_m)
+{
+    AC_Fence *fence = AC_Fence::get_singleton();
+    if (fence == nullptr) return;
+    
+    AC_PolyFence_loader& polyfence = fence->polyfence();
+
+    uint16_t circle_count = polyfence.get_inclusion_circle_count();
+    for (uint16_t i = 0; i < circle_count; i++) {
+        Vector2f center_cm;
+        float radius_m;
+        if (polyfence.get_inclusion_circle(i, center_cm, radius_m)) {
+            // Convert fence center from cm to meters NEU
+            Vector3f center_NEU_m;
+            center_NEU_m.x = center_cm.x * 0.01f; // Convert cm to meters (North)
+            center_NEU_m.y = center_cm.y * 0.01f; // Convert cm to meters (East)
+            center_NEU_m.z = 0; // Fence circles are 2D
+            
+            // Calculate 2D distance in NEU coordinates (ignore altitude)
+            float distance_to_center_m = Vector2f(current_NEU_m.x - center_NEU_m.x, 
+                                                    current_NEU_m.y - center_NEU_m.y).length();
+            
+            // Check if circle is within search radius (including circle's own radius)
+            if (distance_to_center_m <= (search_radius_m + radius_m)) {
+               _spatial_hash.insert_fence_inclusion_circle(center_NEU_m, radius_m);
+            }
+        }
+    }
+}
+
+void AP_OABendyRuler::_populate_fence_circle_exclusion(const Vector3f &current_NEU_m, float search_radius_m)
+{
+    AC_Fence *fence = AC_Fence::get_singleton();
+    if (fence == nullptr) return;
+    
+    AC_PolyFence_loader& polyfence = fence->polyfence();
+    
+    uint16_t circle_count = polyfence.get_exclusion_circle_count();
+    for (uint16_t i = 0; i < circle_count; i++) {
+        Vector2f center_cm;
+        float radius_m;
+        if (polyfence.get_exclusion_circle(i, center_cm, radius_m)) {
+            // Convert fence center from cm to meters NEU
+            Vector3f center_NEU_m;
+            center_NEU_m.x = center_cm.x * 0.01f; // Convert cm to meters (North)
+            center_NEU_m.y = center_cm.y * 0.01f; // Convert cm to meters (East)
+            center_NEU_m.z = 0; // Fence circles are 2D
+            
+            // Calculate 2D distance in NEU coordinates (ignore altitude)
+            float distance_to_center = Vector2f(current_NEU_m.x - center_NEU_m.x, 
+                                              current_NEU_m.y - center_NEU_m.y).length();
+            
+            // Check if circle is within search radius (including circle's own radius)
+            if (distance_to_center <= (search_radius_m + radius_m)) {
+                _spatial_hash.insert_fence_exclusion_circle(center_NEU_m, radius_m);
+            }
+        }
+    }
+}
 #endif  // AP_OAPATHPLANNER_BENDYRULER_ENABLED

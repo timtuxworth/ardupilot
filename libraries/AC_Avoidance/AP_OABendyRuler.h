@@ -9,6 +9,12 @@
 #include <AP_Math/AP_Math.h>
 #include <AP_Logger/AP_Logger_config.h>
 #include <GCS_MAVLink/GCS_MAVLink.h>    // MAVLink GCS definitions
+#include <AC_Fence/AC_Fence.h>
+#include "AP_OASpatialHash.h"
+
+// Forward declarations to avoid include dependencies
+class AP_OADatabase;
+class AC_Fence;
 
 /*
  * BendyRuler avoidance algorithm for avoiding the polygon and circular fence and dynamic objects detected by the proximity sensor
@@ -42,6 +48,12 @@ public:
     char *get_obstacle_label() { return _obstacle_label; };
 
     static const struct AP_Param::GroupInfo var_info[];
+
+    bool check_avoidance(const Location &current_loc, const Location &destination,
+                        Location &origin_new, Location &destination_new);
+
+    void set_fence(AC_Fence *fence) { _fence = fence; }
+    void set_database(AP_OADatabase *database) { _oadatabase = database; }
 
 private:
 
@@ -87,6 +99,20 @@ private:
     // Display messages to the user that avoidance is happening
     void display_avoidance_message(char * message);
 
+    bool populate_spatial_hash(const Location &current_loc);
+
+    void _populate_fences(const Vector3f &current_NEU_m, float search_radius_m);
+    void _populate_fence_circle_inclusion(const Vector3f &current_NEU_m, float search_radius_m);
+    void _populate_fence_circle_exclusion(const Vector3f &current_NEU_m, float search_radius_m);
+    void _populate_fence_polygon_inclusion(const Vector3f &current_NEU_m, float search_radius_m);
+    void _populate_fence_polygon_exclusion(const Vector3f &current_NEU_m, float search_radius_m);
+
+    void _sample_circle_fence(const Location &center, float radius, bool inclusion);
+    void _sample_polygon_fence(uint16_t poly_index, uint16_t point_count, bool inclusion);
+
+
+    float calc_avoidance_margin_fast(const Location &start, const Location &end, bool proximity_only, bool second_stage) const;
+
     // Logging function
 #if HAL_LOGGING_ENABLED
     void Write_OABendyRuler(const uint8_t type, const bool active, const float target_yaw, const float target_pitch, const bool resist_chg, const float margin, const Location &final_dest, const Location &oa_dest) const;
@@ -116,6 +142,14 @@ private:
     // Keep track of time mostly to give messages to the user without spamming them
     uint32_t _last_avoid_message_ms;
     char *_last_avoid_message;
+
+    // improve efficiency of searches by using a spatial has index of fences and objects
+    AP_OADatabase *_oadatabase = nullptr;
+    AC_Fence *_fence = nullptr;
+        
+    // ADD spatial hash instance
+    AP_OASpatialHash _spatial_hash;
+    bool _spatial_hash_populated;
 };
 
 #endif  // AP_OAPATHPLANNER_BENDYRULER_ENABLED

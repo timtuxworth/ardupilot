@@ -1,178 +1,375 @@
 #include "AP_OASpatialHash.h"
-#include <AP_Math/AP_Math.h>
-#include <AP_Common/AP_Common.h>
-#include <string.h>
-#include <stdio.h>
+#include <AP_AHRS/AP_AHRS.h>
 
-AP_OASpatialHash::AP_OASpatialHash() :
-    _num_items(0),
-    _search_radius(0.0f),
-    _grid_cell_size(0.0f),
-    _grid_size(OA_SPATIAL_HASH_GRID_SIZE),
-    _pool(nullptr)
+AP_OASpatialHash::AP_OASpatialHash()
 {
-    memset(_buckets, 0, sizeof(_buckets));
-    _pool = (LocationItem*)calloc(OA_SPATIAL_HASH_POOL_SIZE, sizeof(LocationItem));
 }
 
-AP_OASpatialHash::~AP_OASpatialHash()
+/*void AP_OASpatialHash::set_origin(const Location &origin)
 {
-    clear();
-    if (_pool != nullptr) {
-        free(_pool);
-        _pool = nullptr;
-    }
-}
-
-void AP_OASpatialHash::init(float search_radius, uint16_t grid_size)
-{
-    _search_radius = search_radius;
-    _grid_size = grid_size;
-    _grid_cell_size = (2.0f * search_radius) / grid_size;
-    clear();
-}
+    _origin = origin;
+    _origin_set = true;
+}*/
 
 void AP_OASpatialHash::clear()
 {
-    for (uint16_t i = 0; i < OA_SPATIAL_HASH_BUCKETS; i++) {
-        LocationItem *item = _buckets[i];
-        while (item != nullptr) {
-            LocationItem *next = item->next;
-            _free_item(item);
-            item = next;
-        }
-        _buckets[i] = nullptr;
-    }
-    _num_items = 0;
+    _free_all_bucket_items();
+    _num_obstacles = 0;
 }
 
-bool AP_OASpatialHash::insert(const Location &loc, char *label, uint32_t update_time_ms, float bearing, float distance)
+/*Vector3f AP_OASpatialHash::_location_to_neu(const Location &loc) const
 {
-    if (loc.is_zero() || _pool == nullptr) {
-        return false;
+    if (!_origin_set) {
+        return Vector3f(0, 0, 0);
     }
     
-    LocationItem *new_item = _alloc_item();
+    Vector3f neu;
+    
+    // Calculate bearing and distance from origin to location
+    float bearing_deg = _origin.get_bearing_to(loc); // Returns degrees
+    float distance_cm = _origin.get_distance(loc);   // Returns centimeters
+    float distance_m = distance_cm * 0.01f;          // Convert cm to meters
+    
+    // Convert to NEU components (North-East-Up)
+    float bearing_rad = radians(bearing_deg);
+    neu.x = cosf(bearing_rad) * distance_m;  // North (meters)
+    neu.y = sinf(bearing_rad) * distance_m;  // East (meters)
+    neu.z = (loc.alt - _origin.alt) * 0.01f; // Up (meters), convert cm to m
+    
+    return neu;
+}*/
+
+AP_OASpatialHash::HashKey AP_OASpatialHash::_neu_to_grid_key(const Vector3f &neu) const
+{
+    HashKey key;
+    key.x = (int32_t)(neu.x / GRID_CELL_SIZE);
+    key.y = (int32_t)(neu.y / GRID_CELL_SIZE);
+    return key;
+}
+
+uint16_t AP_OASpatialHash::_grid_key_to_bucket(const HashKey &key) const
+{
+    // Simple hash function that distributes keys across buckets
+    uint32_t hash = (uint32_t)(key.x) * 73856093U ^ (uint32_t)(key.y) * 19349663U;
+    return hash % OA_SPATIAL_HASH_BUCKETS;
+}
+
+AP_OASpatialHash::BucketItem* AP_OASpatialHash::_alloc_bucket_item()
+{
+    if (_pool_used >= OA_SPATIAL_HASH_POOL_SIZE) {
+        return nullptr;
+    }
+    return &_pool[_pool_used++];
+}
+
+void AP_OASpatialHash::_free_all_bucket_items()
+{
+    for (uint16_t i = 0; i < OA_SPATIAL_HASH_BUCKETS; i++) {
+        _buckets[i] = nullptr;
+    }
+    _pool_used = 0;
+}
+
+bool AP_OASpatialHash::_insert_point_obstacle(const Location &center, float radius,  uint32_t timestamp_ms, ObstacleType type)
+{
+    Vector3f center_neu_m;
+    if (!center.get_vector_from_origin_NEU_m(center_neu_m)) {
+        return false;
+    }
+    return _insert_point_obstacle(center_neu_m, radius, timestamp_ms, type);
+}
+
+bool AP_OASpatialHash::_insert_point_obstacle(const Vector3f &neu_pos, float radius,  uint32_t timestamp_ms, ObstacleType type)
+{
+    HashKey key = _neu_to_grid_key(neu_pos);
+    uint16_t bucket = _grid_key_to_bucket(key);
+    
+    BucketItem* new_item = _alloc_bucket_item();
+    if (new_item == nullptr) {
+        return false; // Pool exhausted
+    }
+    
+    new_item->obstacle.type = type;
+    new_item->obstacle.pos = neu_pos;
+    new_item->obstacle.radius = radius;
+    new_item->obstacle.timestamp_ms = timestamp_ms;
+    new_item->next = _buckets[bucket];
+    _buckets[bucket] = new_item;
+    
+    _num_obstacles++;
+
+    return true;
+}
+
+bool AP_OASpatialHash::_insert_line_obstacle(const Vector3f &start_neu, const Vector3f &end_neu, ObstacleType type)
+{
+    // Insert both endpoints
+    _insert_point_obstacle(start_neu, 0.1f, 0, type);
+    _insert_point_obstacle(end_neu, 0.1f, 0, type);
+    
+    // Sample intermediate points for long lines
+    float distance = (end_neu - start_neu).xy().length();
+    if (distance > GRID_CELL_SIZE) {
+        uint8_t samples = MIN(8, (uint8_t)(distance / GRID_CELL_SIZE));
+        for (uint8_t i = 1; i < samples; i++) {
+            float ratio = (float)i / samples;
+            Vector3f intermediate = start_neu + (end_neu - start_neu) * ratio;
+            _insert_point_obstacle(intermediate, 0.1f, 0, type);
+        }
+    }
+    
+    // Store the line segment for accurate distance calculation
+    HashKey key = _neu_to_grid_key((start_neu + end_neu) * 0.5f);
+    uint16_t bucket = _grid_key_to_bucket(key);
+    
+    BucketItem* new_item = _alloc_bucket_item();
     if (new_item == nullptr) {
         return false;
     }
     
-    new_item->location          = loc;
-    new_item->label             = label;
-    new_item->update_time_ms    = update_time_ms;
-    new_item->bearing           = bearing;
-    new_item->distance          = distance;
+    new_item->obstacle.type = type;
+    new_item->obstacle.pos = start_neu;
+    new_item->obstacle.pos2 = end_neu;
+    new_item->obstacle.radius = 0.1f;
+    new_item->obstacle.timestamp_ms = 0;
+    new_item->next = _buckets[bucket];
+    _buckets[bucket] = new_item;
     
-    uint16_t bucket             = _calc_hash_bucket(loc);
-    new_item->next              = _buckets[bucket];
-    _buckets[bucket]            = new_item;
-    _num_items++;
-    
+    _num_obstacles++;
+
     return true;
 }
 
-// check_collision() Key Algorithm Notes
-
-// Spatial Partitioning: The spatial hash divides the world into a grid, so we only check obstacles in nearby cells instead of all obstacles
-// 3x3 Grid Check: We check the center cell plus all 8 surrounding cells to handle edge cases
-// Squared Distance: Using squared distance for comparison is much faster than using actual distance
-// Early Exit: Returns immediately when any collision is found
-// O(1) Lookup: In ideal cases, this is constant time vs O(n) for brute force
-// This method is the core of the spatial hash performance improvement - it reduces collision checks from checking every obstacle to only checking obstacles in the 9 closest grid cells.
-
-bool AP_OASpatialHash::check_collision(const Location &loc, float radius) const
+// Public insert methods
+bool AP_OASpatialHash::insert_database_obstacle(const Vector3f &neu_pos, float radius, uint32_t timestamp_ms)
 {
-    // Validate input location to ensure we're checking a valid position
-    if (loc.is_zero()) {
-        return false; // Invalid location, no collision possible
+    return _insert_point_obstacle(neu_pos, radius, timestamp_ms, OBSTACLE_DATABASE);
+}
+
+bool AP_OASpatialHash::_insert_line_obstacle(const Location &start, const Location &end, ObstacleType type)
+{
+    Vector3f start_neu_m, end_neu_m;
+    if (!start.get_vector_from_origin_NEU_m(start_neu_m)) {
+        return false;
+    }
+    if (!end.get_vector_from_origin_NEU_m(end_neu_m)) {
+        return false;
+    }
+    return _insert_line_obstacle(start_neu_m, end_neu_m, type);
+}
+
+bool AP_OASpatialHash::insert_fence_inclusion_circle(const Vector3f &center_NEU_m, float radius)
+{
+    if (radius <= GRID_CELL_SIZE * 2.0f) {
+        // Small circles: insert as a single point with radius
+        return _insert_point_obstacle(center_NEU_m, radius, 0, FENCE_INCLUSION_CIRCLE);
+    } else {
+        // Large inclusion circles: treat as boundary - insert multiple rings
+        return _insert_large_inclusion_circle(center_NEU_m, radius);
+    }
+}
+
+bool AP_OASpatialHash::insert_fence_exclusion_circle(const Vector3f &center_NEU_m, float radius)
+{
+    if (radius <= GRID_CELL_SIZE * 3.0f) {
+        // Small exclusion circles: insert as a single point with radius
+        // Use slightly larger threshold since these represent physical obstacles
+        return _insert_point_obstacle(center_NEU_m, radius, 0, FENCE_EXCLUSION_CIRCLE);
+    } else {
+        // Large exclusion circles: sample the boundary densely
+        return _insert_large_exclusion_circle(center_NEU_m, radius);
+    }
+}
+
+bool AP_OASpatialHash::_insert_large_inclusion_circle(const Vector3f &center, float radius)
+{
+    // For large inclusion circles (safe perimeters), we need to ensure
+    // the entire boundary is well-represented in the spatial hash
+    
+    // Calculate appropriate sampling based on circle size
+    float circumference = 2 * M_PI * radius;
+    uint16_t samples = MIN(48, MAX(24, (uint16_t)(circumference / GRID_CELL_SIZE)));
+    
+    // Sample the outer boundary
+    for (uint16_t i = 0; i < samples; i++) {
+        float angle_rad = (2 * M_PI * i) / samples;
+        Vector3f point = center;
+        point.x += cosf(angle_rad) * radius;
+        point.y += sinf(angle_rad) * radius;
+        if (!_insert_point_obstacle(point, 0.1f, 0, FENCE_INCLUSION_CIRCLE)) {
+            return false;
+        }
     }
     
-    // Convert the search location to grid coordinates
-    // This tells us which cell in our spatial grid contains the point we're checking    int16_t center_x, center_y;
-    int16_t center_x, center_y;
-    _location_to_grid(loc, center_x, center_y);
+    // For very large circles, also sample an inner ring to improve coverage
+    if (radius > GRID_CELL_SIZE * 10.0f) {
+        float inner_radius = radius - GRID_CELL_SIZE * 2.0f;
+        uint16_t inner_samples = samples / 2;
+        for (uint16_t i = 0; i < inner_samples; i++) {
+            float angle_rad = (2 * M_PI * i) / inner_samples;
+            Vector3f point = center;
+            point.x += cosf(angle_rad) * inner_radius;
+            point.y += sinf(angle_rad) * inner_radius;
+            if(!_insert_point_obstacle(point, 0.1f, 0, FENCE_INCLUSION_CIRCLE)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool AP_OASpatialHash::_insert_large_exclusion_circle(const Vector3f &center, float radius)
+{
+    // For large exclusion circles (airspace boundaries, etc.),
+    // we need dense sampling to ensure accurate avoidance
     
-    // Pre-calculate squared radius for efficient distance comparison
-    // Using squared distance avoids expensive square root operations
-    const float radius_sq = radius * radius;
-
-    // Check not only the center cell but also adjacent cells (3x3 grid area)
-    // This handles cases where obstacles are near cell boundaries
-    for (int16_t dx = -1; dx <= 1; dx++) {
-        for (int16_t dy = -1; dy <= 1; dy++) {
-            // Calculate coordinates of adjacent cell to check
-            int16_t grid_x = center_x + dx;
-            int16_t grid_y = center_y + dy;
-            
-            // Verify the adjacent cell coordinates are within our grid bounds
-            if (grid_x >= 0 && grid_x < (int16_t)_grid_size && 
-                grid_y >= 0 && grid_y < (int16_t)_grid_size) {
-                
-                // Convert 2D grid coordinates to 1D bucket index
-                // This maps our grid position to the corresponding hash bucket
-                uint16_t bucket = grid_y * _grid_size + grid_x;
-
-                // Safety check: ensure bucket index is within allocated array bounds
-                if (bucket >= OA_SPATIAL_HASH_BUCKETS) {
-                    continue;
-                }
-                
-                // Iterate through all obstacles stored in this grid cell's bucket
-                // Each bucket contains a linked list of LocationItem objects
-                LocationItem *item = _buckets[bucket];
-                while (item != nullptr) {
-                    // Calculate straight-line distance to this obstacle
-                    float dist = item->location.get_distance(loc);
-                    float dist_sq = dist * dist;
-                    // Check if obstacle is within the specified collision radius
-                    if (dist_sq <= radius_sq) {
-                        return true;
-                    }
-                    item = item->next;
+    float circumference = 2 * M_PI * radius;
+    uint16_t samples = MIN(64, MAX(32, (uint16_t)(circumference / (GRID_CELL_SIZE * 0.5f))));
+    
+    // Very dense sampling of the boundary
+    for (uint16_t i = 0; i < samples; i++) {
+        float angle_rad = (2 * M_PI * i) / samples;
+        Vector3f point = center;
+        point.x += cosf(angle_rad) * radius;
+        point.y += sinf(angle_rad) * radius;
+        if (!_insert_point_obstacle(point, 0.1f, 0, FENCE_EXCLUSION_CIRCLE)) {
+            return false;
+        }
+    }
+    
+    // For regulatory airspace boundaries, also consider adding intermediate rings
+    if (radius > GRID_CELL_SIZE * 20.0f) {
+        // Add two intermediate rings for very large airspace boundaries
+        for (uint8_t ring = 1; ring <= 2; ring++) {
+            float ring_radius = radius * (0.2f * ring); // 20% and 40% of radius
+            uint16_t ring_samples = samples / 2;
+            for (uint16_t i = 0; i < ring_samples; i++) {
+                float angle_rad = (2 * M_PI * i) / ring_samples;
+                Vector3f point = center;
+                point.x += cosf(angle_rad) * ring_radius;
+                point.y += sinf(angle_rad) * ring_radius;
+                if (!_insert_point_obstacle(point, 0.1f, 0, FENCE_EXCLUSION_CIRCLE)) {
+                    return false;
                 }
             }
         }
     }
+    return true;
+}
+
+// Distance calculation methods
+float AP_OASpatialHash::_distance_to_point(const Vector3f &neu_pos, const Obstacle &obstacle) const
+{
+    // Use 2D distance for horizontal avoidance (ignore altitude)
+    return Vector2f(neu_pos.x - obstacle.pos.x, neu_pos.y - obstacle.pos.y).length() - obstacle.radius;
+}
+
+float AP_OASpatialHash::_distance_to_line(const Vector3f &neu_pos, const Obstacle &obstacle) const
+{
+    // Convert to 2D for line distance (ignore altitude for fence lines)
+    Vector2f p(neu_pos.x, neu_pos.y);
+    Vector2f a(obstacle.pos.x, obstacle.pos.y);
+    Vector2f b(obstacle.pos2.x, obstacle.pos2.y);
     
-    return false;
+    Vector2f ab = b - a;
+    Vector2f ap = p - a;
+    
+    float ab_squared = ab.length_squared();
+    if (ab_squared < 1.0f) {
+        return ap.length(); // Very short line, treat as point
+    }
+    
+    // Project point onto line segment
+    float t = (ap * ab) / ab_squared;
+    t = constrain_float(t, 0.0f, 1.0f);
+    
+    // Find closest point on segment
+    Vector2f closest_point = a + ab * t;
+    
+    return (p - closest_point).length() - obstacle.radius;
+}
+
+uint8_t AP_OASpatialHash::_calculate_search_radius(float max_search_radius) const
+{
+    // Calculate desired radius with safety margin
+    // Example: For 250m max_search_radius with 40% safety margin:
+    // 250m × 140% = 350m
+    float desired_radius_m = (max_search_radius * SEARCH_SAFETY_MARGIN_PERCENT) / PERCENT_DIVISOR;
+    
+    // Convert to grid cells (floating point division)
+    // Example: 350m / 50m per cell = 7.0 cells
+    float desired_cells_float = desired_radius_m / GRID_CELL_SIZE;
+    
+    // Convert to integer with ceiling operation
+    // Example: ceil(7.0) = 7 cells, ceil(7.1) = 8 cells
+    uint8_t desired_cells = (uint8_t)desired_cells_float;
+    if (desired_cells_float > desired_cells) {
+        desired_cells++;
+    }
+    
+    // Apply minimum bound for basic obstacle awareness
+    // Even with small max_search_radius, we want at least 150m coverage (3 cells)
+    if (desired_cells < MIN_SEARCH_RADIUS_CELLS) {
+        return MIN_SEARCH_RADIUS_CELLS;
+    }
+    
+    // Apply maximum bound for computational performance
+    // Searching more than 500m (10 cells) would impact real-time performance
+    if (desired_cells > MAX_SEARCH_RADIUS_CELLS) {
+        return MAX_SEARCH_RADIUS_CELLS;
+    }
+    
+    return desired_cells;
 }
 
 float AP_OASpatialHash::find_closest_obstacle_distance(const Location &loc, float max_search_radius) const
 {
-    if (loc.is_zero()) {
+    /*if (!_origin_set) {
         return FLT_MAX;
-    }
+    }*/
+    
+    //Vector3f neu_pos = _location_to_neu(loc);
+    Vector3f loc_NEU_m;
+    loc.get_vector_from_origin_NEU_m(loc_NEU_m);
+    HashKey center_key = _neu_to_grid_key(loc_NEU_m);
     
     float closest_distance = FLT_MAX;
+    uint8_t search_radius = _calculate_search_radius(max_search_radius);
     
-    // Convert search location to grid coordinates
-    int16_t center_x, center_y;
-    _location_to_grid(loc, center_x, center_y);
-    
-    // Search in 3x3 grid area around the location
-    for (int16_t dx = -1; dx <= 1; dx++) {
-        for (int16_t dy = -1; dy <= 1; dy++) {
-            int16_t grid_x = center_x + dx;
-            int16_t grid_y = center_y + dy;
+    // Search in dynamic radius around the position
+    for (int32_t dx = -search_radius; dx <= search_radius; dx++) {
+        for (int32_t dy = -search_radius; dy <= search_radius; dy++) {
+            HashKey search_key = {center_key.x + dx, center_key.y + dy};
+            uint16_t bucket = _grid_key_to_bucket(search_key);
             
-            if (grid_x >= 0 && grid_x < (int16_t)_grid_size && 
-                grid_y >= 0 && grid_y < (int16_t)_grid_size) {
+            BucketItem* item = _buckets[bucket];
+            while (item != nullptr) {
+                float distance;
                 
-                uint16_t bucket = grid_y * _grid_size + grid_x;
-                if (bucket >= OA_SPATIAL_HASH_BUCKETS) {
-                    continue;
+                switch (item->obstacle.type) {
+                    case OBSTACLE_DATABASE:
+                        distance = _distance_to_point(loc_NEU_m, item->obstacle);
+                        break;
+                    case FENCE_INCLUSION_CIRCLE:
+                    case FENCE_EXCLUSION_CIRCLE:
+                        // For circles, use the actual circle distance formula
+                        // This handles both small circles (stored as center + radius)
+                        // and large circles (stored as boundary points)
+                        distance = _distance_to_circle(loc_NEU_m, item->obstacle);
+                        break;
+                    case FENCE_INCLUSION_POLYGON:
+                    case FENCE_EXCLUSION_POLYGON:
+                        distance = _distance_to_line(loc_NEU_m, item->obstacle);
+                        break;
+                    default:
+                        distance = FLT_MAX;
+                        break;
                 }
                 
-                // Check all obstacles in this bucket
-                LocationItem *item = _buckets[bucket];
-                while (item != nullptr) {
-                    float dist = item->location.get_distance(loc);
-                    if (dist < closest_distance && dist <= max_search_radius) {
-                        closest_distance = dist;
-                        // printf("found %s dist %.0f\n", item->label, closest_distance);
-                    }
-                    item = item->next;
+                if (distance < closest_distance && distance <= max_search_radius) {
+                    closest_distance = distance;
                 }
+                item = item->next;
             }
         }
     }
@@ -180,71 +377,19 @@ float AP_OASpatialHash::find_closest_obstacle_distance(const Location &loc, floa
     return closest_distance;
 }
 
-uint16_t AP_OASpatialHash::_calc_hash_bucket(const Location &loc) const
+float AP_OASpatialHash::_distance_to_circle(const Vector3f &neu_pos, const Obstacle &obstacle) const
 {
-    int16_t grid_x, grid_y;
-    _location_to_grid(loc, grid_x, grid_y);
-    return (grid_y * _grid_size + grid_x) % OA_SPATIAL_HASH_BUCKETS;
-}
-
-void AP_OASpatialHash::_location_to_grid(const Location &loc, int16_t &grid_x, int16_t &grid_y) const
-{
-   // Use the lower bits of lat/lng for grid distribution
-    grid_x = (loc.lat & 0xFFFF) % _grid_size;
-    grid_y = (loc.lng & 0xFFFF) % _grid_size;
-}
-
-AP_OASpatialHash::LocationItem* AP_OASpatialHash::_alloc_item()
-{
-    for (uint16_t i = 0; i < OA_SPATIAL_HASH_POOL_SIZE; i++) {
-        if (_pool[i].update_time_ms == 0) {
-            return &_pool[i];
-        }
-    }
-    return nullptr;
-}
-
-void AP_OASpatialHash::_free_item(LocationItem *item)
-{
-    if (item != nullptr) {
-        item->label          = (char *)"";
-        item->update_time_ms = 0;
-    }
-}
-
-void AP_OASpatialHash::debug_print_contents() const
-{
-    ::printf("OA Spatial Hash: %u items in %u buckets\n", _num_items, OA_SPATIAL_HASH_BUCKETS);
+    // Calculate distance to circle center
+    float dist_to_center = Vector2f(neu_pos.x - obstacle.pos.x, neu_pos.y - obstacle.pos.y).length();
     
-    for (uint16_t bucket = 0; bucket < OA_SPATIAL_HASH_BUCKETS; bucket++) {
-        LocationItem *item = _buckets[bucket];
-        if (item != nullptr) {
-            ::printf("Bucket[%3u]: ", bucket);
-            uint16_t count = 0;
-            while (item != nullptr && count < 5) { // Limit to 5 items per bucket
-                ::printf("(%s %.4f,%.4f deg %.0f dst %.0f) ", item->label,
-                        item->location.lat / 10000000.0f,
-                        item->location.lng / 10000000.0f,
-                        item->bearing, item->distance);
-                item = item->next;
-                count++;
-            }
-            if (item != nullptr) {
-                ::printf("... (+%u more)", _count_items_in_bucket(bucket) - 5);
-            }
-            ::printf("\n");
-        }
+    // If this is a small circle stored as center + radius
+    if (obstacle.radius > 0.1f) { // Threshold to distinguish from boundary points
+        return dist_to_center - obstacle.radius;
     }
-}
-
-// Helper method to count items in a bucket
-uint16_t AP_OASpatialHash::_count_items_in_bucket(uint16_t bucket) const
-{
-    uint16_t count = 0;
-    LocationItem *item = _buckets[bucket];
-    while (item != nullptr) {
-        count++;
-        item = item->next;
-    }
-    return count;
+    
+    // For large circles stored as boundary points, the "radius" is small (0.1m)
+    // but we need to calculate distance to the actual circle boundary
+    // Since we've sampled the boundary densely, the closest point should give us
+    // a good approximation of the distance to the circle
+    return dist_to_center - 0.1f;
 }
