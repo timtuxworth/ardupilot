@@ -145,4 +145,4 @@ MAV1_OPTIONS = 4
 MAV1_POSITION = 10
 MAV1_EXTRA1 = 10
 
-Ideally the connection is direct plane-to-plane and not routed via a Ground Control Station. This has been tested with 2x HolyBro SiK telemetry radios, one in each plane. RFD900 radios might work and LTE or other IP radio based connections will probably work well, but haven't been tested. Some users have reported using ESP32 WiFi modules configured with one of the radios set to be in station mode. Fast telemetry updates from the target to the following plane will give the best results.
+Ideally the connection is direct plane-to-plane and not routed via a Ground Control Station. This has been tested with 2x HolyBro SiK telemetry radios, one in each plane. RFD900 radios might work and LTE or other IP radio based such as Doodle Labs radios have been tested and work well. Some users have reported using ESP32 WiFi modules configured with one of the radios set to be in station mode. Fast telemetry updates from the target to the following plane will give the best results.
