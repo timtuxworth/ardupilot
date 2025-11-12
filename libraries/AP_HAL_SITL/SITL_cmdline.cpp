@@ -222,6 +222,7 @@ void SITL_State::_set_signal_handlers(void) const
     sigemptyset(&sa_pipe.sa_mask);
     sa_pipe.sa_handler = SIG_IGN; /* No-op SIGPIPE handler */
     sigaction(SIGPIPE, &sa_pipe, nullptr);
+    signal(SIGPIPE, SIG_IGN);
 
     struct sigaction sa_segv = {};
     sigemptyset(&sa_segv.sa_mask);
