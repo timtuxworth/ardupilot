@@ -99,7 +99,7 @@ private:
     // Display messages to the user that avoidance is happening
     void display_avoidance_message(char * message);
 
-    bool populate_spatial_hash(const Location &current_loc);
+    bool populate_spatial_hash(const Location &current_loc, const float search_radius);
 
     void _populate_fences(const Vector3f &current_NEU_m, float search_radius_m);
     void _populate_fence_circle_inclusion(const Vector3f &current_NEU_m, float search_radius_m);
@@ -112,6 +112,10 @@ private:
 
 
     float calc_avoidance_margin_fast(const Location &start, const Location &end, bool proximity_only, bool second_stage) const;
+
+    void update_old_timer(u_int32_t elapsed_ms);
+    void update_new_timer(u_int32_t elapsed_ms);
+    void update_last_timer(u_int32_t now_ms);
 
     // Logging function
 #if HAL_LOGGING_ENABLED
@@ -150,6 +154,11 @@ private:
     // ADD spatial hash instance
     AP_OASpatialHash _spatial_hash;
     bool _spatial_hash_populated;
+
+    u_int32_t _old_time_taken_ms;
+    u_int32_t _new_time_taken_ms;
+    u_int32_t _last_time_ms;
+
 };
 
 #endif  // AP_OAPATHPLANNER_BENDYRULER_ENABLED

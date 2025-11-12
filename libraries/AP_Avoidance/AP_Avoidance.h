@@ -126,7 +126,7 @@ public:
     int32_t get_obstacle_timestamp(uint8_t instance) const {
         return _obstacles[instance].timestamp_ms;
     }
-
+    
 
     // for holding parameters
     static const struct AP_Param::GroupInfo var_info[];

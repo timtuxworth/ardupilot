@@ -631,8 +631,8 @@ void Plane::avoid_obstacles()
             _avoidance.avoid_WP_backup = oa_destination_new;
 
             _avoidance.oa_state = oa_retstate;
-            /*
-            if(plane.update_target_location(_avoidance.avoid_WP_backup, oa_destination_new)) {
+            
+            /*if(plane.update_target_location(_avoidance.avoid_WP_backup, oa_destination_new)) {
                 // GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: update target GOOD");
                 //GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: prev alt: %d/%d", avoidance.prev_WP_backup.alt, avoidance.prev_WP_backup.get_alt_frame());
                 //GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: set alt: %d/%d", oa_destination_new.alt, oa_destination_new.get_alt_frame());
@@ -647,8 +647,8 @@ void Plane::avoid_obstacles()
                 // at the beginning of the loop.
                 _avoidance.oa_state = AP_OAPathPlanner::OA_NOT_REQUIRED;
                 GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: update target FAILED");
-            }
-            */
+            }*/
+            
             return;
         }
 
