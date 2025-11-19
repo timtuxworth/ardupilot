@@ -567,8 +567,8 @@ void Plane::avoid_obstacles()
         break;
 
     case AP_OAPathPlanner::OA_ERROR:
-        _avoidance.oa_state = oa_retstate;
-        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: ERROR - stop? Loiter?");
+        //_avoidance.oa_state = oa_retstate;
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: ERROR - probably timeout");
         // during processing or in case of error stop the vehicle
         // by setting the oa_destination to a stopping point
         // calculate stopping point
@@ -581,7 +581,18 @@ void Plane::avoid_obstacles()
             _oa_state = oa_retstate;
         }
         */
-        break;
+
+        // Temp workaround, just switch back to previous state TODO (fix this maybe pass back to navigation somewhow to deal with)
+        if (_avoidance.mode_backup == Mode::Number::AUTO || _avoidance.mode_backup == Mode::Number::RTL || 
+            _avoidance.mode_backup == Mode::Number::GUIDED || _avoidance.mode_backup == Mode::Number::AVOID_ADSB ) {
+            // Need to deal with guided "heading" submode. 
+            plane.set_guided_WP(_avoidance.next_WP_backup);
+            _avoidance.avoid_WP_backup = _avoidance.next_WP_backup;
+        }
+        _avoidance.oa_state = AP_OAPathPlanner::OA_NOT_REQUIRED;
+        plane.set_mode_by_number(_avoidance.mode_backup, ModeReason::AVOIDANCE);
+
+        return;
 
     case AP_OAPathPlanner::OA_SUCCESS:
         //GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: SUCCESS");

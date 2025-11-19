@@ -88,6 +88,11 @@ private:
     // on success returns true and updates margin
     bool calc_margin_from_inclusion_and_exclusion_circles(const Location &start, const Location &end, float &margin, char *&label) const;
 
+    // calculate the minimum distance between a path and all inclusion polygons
+    bool calc_margin_from_inclusion_polygons(const Location &start, const Location &end, float &margin) const;
+    // calculate the minimum distance between a path and all inclusion circles
+    bool calc_margin_from_inclusion_circles(const Location &start, const Location &end, float &margin) const;
+
     // calculate minimum distance between a path and proximity sensor obstacles
     // on success returns true and updates margin
     bool calc_margin_from_object_database(const Location &start, const Location &end, float &margin) const;
@@ -101,17 +106,21 @@ private:
 
     bool populate_spatial_hash(const Location &current_loc, const float search_radius);
 
-    void _populate_fences(const Vector3f &current_NEU_m, float search_radius_m);
-    void _populate_fence_circle_inclusion(const Vector3f &current_NEU_m, float search_radius_m);
-    void _populate_fence_circle_exclusion(const Vector3f &current_NEU_m, float search_radius_m);
-    void _populate_fence_polygon_inclusion(const Vector3f &current_NEU_m, float search_radius_m);
-    void _populate_fence_polygon_exclusion(const Vector3f &current_NEU_m, float search_radius_m);
+    void _populate_fences(const Vector3f &current_NEU_m, const float search_radius_m);
+    void _populate_fence_circle_inclusion(const Vector3f &current_NEU_m, const AC_Fence *fence, const float search_radius_m);
+    void _populate_fence_circle_exclusion(const Vector3f &current_NEU_m, const AC_Fence *fence, const float search_radius_m);
+    void _populate_fence_polygon_inclusion(const Vector3f &current_NEU_m, const AC_Fence *fence, const float search_radius_m);
+    void _populate_fence_polygon_exclusion(const Vector3f &current_NEU_m, const AC_Fence *fence, const float search_radius_m);
 
     void _sample_circle_fence(const Location &center, float radius, bool inclusion);
     void _sample_polygon_fence(uint16_t poly_index, uint16_t point_count, bool inclusion);
 
+    // Helper function for fence filtering
+    float _point_to_line_segment_distance_sq(const Vector3f& start, const Vector3f& end, const Vector3f& point) const;
 
-    float calc_avoidance_margin_fast(const Location &start, const Location &end, bool proximity_only, bool second_stage) const;
+    // Spatial Hash enabled distance calculation
+    float find_closest_nonhashed_obstacle_to_line(const Location &start, const Location &end, float latest_martin) const;
+    float calc_avoidance_margin_fast(const Location &start, const Location &end, bool proximity_only, float lookahead, bool second_stage) const;
 
     void update_old_timer(u_int32_t elapsed_ms);
     void update_new_timer(u_int32_t elapsed_ms);
@@ -158,6 +167,8 @@ private:
     u_int32_t _old_time_taken_ms;
     u_int32_t _new_time_taken_ms;
     u_int32_t _last_time_ms;
+
+    uint32_t _spatial_hash_populated_ms;
 
 };
 

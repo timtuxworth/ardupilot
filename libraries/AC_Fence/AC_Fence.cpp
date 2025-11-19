@@ -737,7 +737,7 @@ bool AC_Fence::calculate_fence_distance_path_to_polygon_include(const Location &
 // Returns negative if teh location on the "bad" side of the fence (inside an exclusion fence or outside a inclusion fence)
 bool AC_Fence::calculate_fence_distance_path_to_polygon_exclude(const Location &start, const Location &end, float &margin_m) const
 {
-    float margin_min_m = FLT_MAX;
+    //float margin_min_m = FLT_MAX;
 
     const uint8_t num_exclusion_polygons = _poly_loader.get_exclusion_polygon_count();
     if ((num_exclusion_polygons == 0)) {
@@ -773,11 +773,11 @@ bool AC_Fence::calculate_fence_distance_path_to_polygon_exclude(const Location &
 
     return margin_updated;
 
-    if(margin_updated) {
+    /*if(margin_updated) {
         margin_m = margin_min_m;
         return true;
     }
-    return false;
+    return false;*/
 }
 
 

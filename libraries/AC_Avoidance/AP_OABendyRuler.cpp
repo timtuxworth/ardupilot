@@ -150,8 +150,8 @@ bool AP_OABendyRuler::update(const Location& current_loc, const Location& destin
         _spatial_hash.set_current_position(current_NEU_m);
     }
 
-    Vector3f vehicle_pos;
-    current_loc.get_vector_from_origin_NEU_m(vehicle_pos);
+    //Vector3f vehicle_pos;
+    //if(current_loc.get_vector_from_origin_NEU_m(vehicle_pos);
 
     bool ret;
     switch (get_type()) {
@@ -186,7 +186,7 @@ void AP_OABendyRuler::display_avoidance_message(char *message)
         // if a message has been displayed and it was more than 10 seconds ago its "cleared"
         if(_last_avoid_message_ms != 0 && (now_ms - _last_avoid_message_ms > 10000)) {
             _last_avoid_message_ms = 0;
-            GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "BR: AVOID cleared");
+            GCS_SEND_TEXT(MAV_SEVERITY_INFO, "BR: AVOID cleared");
         }
     }
     else {
@@ -212,7 +212,7 @@ bool AP_OABendyRuler::search_xy_path(const Location& current_loc, const Location
 
     u_int32_t now_ms = AP_HAL::micros();
 
-    populate_spatial_hash(current_loc, (lookahead_step1_dist + lookahead_step2_dist) * OA_BENDYRULER_RATIO_DEFAULT);
+    populate_spatial_hash(current_loc, (lookahead_step1_dist + lookahead_step2_dist));
 
     u_int32_t new_now_ms = AP_HAL::micros();
     const_cast<AP_OABendyRuler*>(this)->update_new_timer(new_now_ms - now_ms);
@@ -246,7 +246,7 @@ bool AP_OABendyRuler::search_xy_path(const Location& current_loc, const Location
             test_loc.offset_bearing(bearing_test, lookahead_step1_dist);
 
             // calculate margin from obstacles for this scenario
-            float margin = calc_avoidance_margin_fast(current_loc, test_loc, proximity_only, false);
+            float margin = calc_avoidance_margin_fast(current_loc, test_loc, proximity_only, lookahead_step1_dist, false);
             // Lua Plane version
             // local margin, _ = calc_avoidance_margin_fast(projected_loc, loc_test, our_velocity, avoid_sec1)
             if (margin > best_margin) {
@@ -277,7 +277,7 @@ bool AP_OABendyRuler::search_xy_path(const Location& current_loc, const Location
                     test_loc2.offset_bearing(bearing_test2, distance2);
 
                     // calculate minimum margin to fence and obstacles for this scenario
-                    float margin2 = calc_avoidance_margin_fast(test_loc, test_loc2, proximity_only, true);
+                    float margin2 = calc_avoidance_margin_fast(test_loc, test_loc2, proximity_only, distance2, true);
                     if (margin2 > _margin_max) {
                         // if the chosen direction is directly towards the destination avoidance can be turned off
                         // i == 0 && j == 0 implies no deviation from bearing to destination 
@@ -308,7 +308,7 @@ bool AP_OABendyRuler::search_xy_path(const Location& current_loc, const Location
 
     float chosen_bearing;
     float chosen_distance;
-    if (have_best_bearing) {
+    if ( have_best_bearing) {
         // none of the directions tested were OK for 2-step checks. Choose the direction
         // that was best for the first step
         chosen_bearing = best_bearing;
@@ -358,7 +358,7 @@ bool AP_OABendyRuler::search_vertical_path(const Location &current_loc, const Lo
             test_loc.offset_bearing_and_pitch(bearing_to_dest, pitch_delta, lookahead_step1_dist);
 
             // calculate margin from obstacles for this scenario
-            float margin = calc_avoidance_margin_fast(current_loc, test_loc, proximity_only, false);
+            float margin = calc_avoidance_margin_fast(current_loc, test_loc, proximity_only, lookahead_step1_dist, false);
 
             if (margin > best_margin) {
                 best_margin_pitch = pitch_delta;
@@ -386,7 +386,7 @@ bool AP_OABendyRuler::search_vertical_path(const Location &current_loc, const Lo
                     test_loc2.offset_bearing_and_pitch(bearing_to_dest2, bearing_test2, distance2);
 
                     // calculate minimum margin to fence and obstacles for this scenario
-                    float margin2 = calc_avoidance_margin_fast(test_loc, test_loc2, proximity_only, false);
+                    float margin2 = calc_avoidance_margin_fast(test_loc, test_loc2, proximity_only, distance2, false);
                     if (margin2 > _margin_max) {
                         // if the chosen direction is directly towards the destination we might turn off avoidance
                         // i == 0 && j == 0 implies no deviation from bearing to destination 
@@ -397,7 +397,7 @@ bool AP_OABendyRuler::search_vertical_path(const Location &current_loc, const Lo
                             for (uint8_t k = 0; k < ARRAY_SIZE(sub_test_pitch_step2); k++) {
                                 Location test_loc_sub_test = test_loc;
                                 test_loc_sub_test.offset_bearing_and_pitch(bearing_to_dest2, sub_test_pitch_step2[k], _margin_max);
-                                float margin_sub_test = calc_avoidance_margin_fast(test_loc, test_loc_sub_test, true, false);
+                                float margin_sub_test = calc_avoidance_margin_fast(test_loc, test_loc_sub_test, true, distance2, false);
                                 if (margin_sub_test < _margin_max) {
                                     // BendyRuler will remain active
                                     active = true;
@@ -482,7 +482,7 @@ bool AP_OABendyRuler::resist_bearing_change(const Location &destination, const L
             // check margin in last bearing's direction
             Location test_loc_previous_bearing = current_loc;
             test_loc_previous_bearing.offset_bearing(wrap_180(prev_bearing), lookahead_step1_dist);
-            float previous_bearing_margin = calc_avoidance_margin_fast(current_loc,test_loc_previous_bearing, proximity_only, false);
+            float previous_bearing_margin = calc_avoidance_margin_fast(current_loc,test_loc_previous_bearing, proximity_only, lookahead_step1_dist, false);
 
             if (margin < (_bendy_ratio * previous_bearing_margin)) {
                 // don't change direction abruptly. If margin difference is not significant, follow the last direction
@@ -518,9 +518,37 @@ void AP_OABendyRuler::update_last_timer(u_int32_t now_ms)
     _last_time_ms = now_ms;
 }
 
+float AP_OABendyRuler::find_closest_nonhashed_obstacle_to_line(const Location &start, const Location &end, float margin_min) const
+{
+    float latest_margin;
 
+    // Now do any objects that are not stored in the spatial hash, specifically circular (tincan) fences, and inclusion circles and polygons
+    if (calc_margin_from_circular_fence(start, end, latest_margin)) {
+        margin_min = MIN(margin_min, latest_margin);
+    }
+    
+    #if VERTICAL_ENABLED 
+    // alt fence only is only needed in vertical avoidance
+    if (get_type() == OABendyType::OA_BENDY_VERTICAL) {
+        if (calc_margin_from_alt_fence(start, end, latest_margin)) {
+            margin_min = MIN(margin_min, latest_margin);
+        }
+    }
+    #endif
 
-float AP_OABendyRuler::calc_avoidance_margin_fast(const Location &start, const Location &end, bool proximity_only, bool second_stage) const
+    if (calc_margin_from_inclusion_polygons(start, end, latest_margin)) {
+        margin_min = MIN(margin_min, latest_margin);
+    }
+
+    if (calc_margin_from_inclusion_circles(start, end, latest_margin)) {
+        margin_min = MIN(margin_min, latest_margin);
+    }
+
+    // return smallest margin from any obstacle
+    return margin_min;
+}
+
+float AP_OABendyRuler::calc_avoidance_margin_fast(const Location &start, const Location &end, bool proximity_only, float lookahead_m, bool second_stage) const
 {
     if (!_spatial_hash_populated) {
         return calc_avoidance_margin(start, end, proximity_only, second_stage);
@@ -529,31 +557,6 @@ float AP_OABendyRuler::calc_avoidance_margin_fast(const Location &start, const L
     // float smallest_margin = _margin_max;  // Start with maximum possible margin
     float smallest_margin = FLT_MAX;
 
-    /*
-    // Sample points along the path
-    float sample_distance;
-    if (second_stage) {
-        sample_distance = 25.0f; // Finer sampling for extended lookahead
-    } else {
-        sample_distance = 20.0f; // Coarser sampling for immediate path
-    }
-    const float path_length = start.get_distance(end);
-    const uint8_t num_samples = MAX(1, (uint8_t)(path_length / sample_distance)); // 5m steps
-    
-    for (uint8_t i = 0; i <= num_samples; i++) {
-        Location test_point = start;
-        float distance_along_path = (path_length * i) / num_samples;
-        test_point.offset_bearing(start.get_bearing_to(end), distance_along_path);
-        
-        float closest_obstacle_dist = _spatial_hash.find_closest_obstacle_distance(test_point, _margin_max * 3.0f);
-        if (closest_obstacle_dist < smallest_margin) {
-            smallest_margin = closest_obstacle_dist;
-            worst_obstacle_dist = closest_obstacle_dist;
-            worst_test_point = test_point;
-        }
-
-    }
-    */
     u_int32_t now_ms = AP_HAL::micros();
 
     float old_margin = calc_avoidance_margin(start, end, proximity_only, second_stage);
@@ -561,25 +564,27 @@ float AP_OABendyRuler::calc_avoidance_margin_fast(const Location &start, const L
     u_int32_t old_now_ms = AP_HAL::micros();
     const_cast<AP_OABendyRuler*>(this)->update_old_timer(old_now_ms - now_ms);
 
-    float closest_obstacle_dist = _spatial_hash.find_closest_obstacle_to_line(start, end, _margin_max * 1.2f);
+    float new_margin = _spatial_hash.find_closest_obstacle_to_line(start, end, lookahead_m);
+    new_margin = find_closest_nonhashed_obstacle_to_line(start, end, new_margin);
+    float closest_obstacle_dist = new_margin;
 
     const u_int32_t new_now_ms = AP_HAL::micros();
 
     const_cast<AP_OABendyRuler*>(this)->update_new_timer(new_now_ms - old_now_ms);
 
     // closest_obstacle_dist = old_margin;
-    if (closest_obstacle_dist < smallest_margin) {
+    if (closest_obstacle_dist < lookahead_m) {
         smallest_margin = closest_obstacle_dist;
     }
 
-    if( smallest_margin < _margin_max && fabs(old_margin - smallest_margin) > 5.0f) {  // Compare actual values, not absolute values
-    //if( fabs(old_margin - smallest_margin) > 2.0f) {  // Compare actual values, not absolute values
+    if( smallest_margin < _margin_max && fabs(old_margin - new_margin) > 5.0f) {  // Compare actual values, not absolute values
+    //if( fabs(old_margin - new_margin) > 2.0f) {  // Compare actual values, not absolute values
         char *stage = (char *)"FIRST";
         if(second_stage) {
             stage = (char *)"SECOND";
         }
-        GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "margin diff old: %.2f new: %.2f %s", 
-                     old_margin, smallest_margin, stage);
+            GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "margin diff old: %.2f new: %.2f %s", 
+                    old_margin, new_margin, stage);
     }
 
     if(now_ms - _last_time_ms > 5000000) {
@@ -622,7 +627,6 @@ float AP_OABendyRuler::calc_avoidance_margin(const Location &start, const Locati
         }
         margin_min = MIN(margin_min, latest_margin);
     }
-    
 
     if (calc_margin_from_circular_fence(start, end, latest_margin)) {
         if(set_labels && latest_margin < margin_min) {
@@ -727,6 +731,33 @@ bool AP_OABendyRuler::calc_margin_from_alt_fence(const Location &start, const Lo
 #endif // AP_FENCE_ENABLED
 }
 
+bool AP_OABendyRuler::calc_margin_from_inclusion_polygons(const Location &start, const Location &end, float &margin) const
+{
+#if AP_FENCE_ENABLED
+
+    const AC_Fence *fence = AC_Fence::get_singleton();
+    if (fence == nullptr) {
+        return false;
+    }
+
+    // exclusion polygons enabled along with polygon fences
+    if ((fence->get_enabled_fences() & AC_FENCE_TYPE_POLYGON) == 0) {
+        return false;
+    }
+
+    bool margin_updated = false;
+    float margin_new_m;
+    bool found_fence = fence->calculate_fence_distance_path_to_polygon_include(start, end, margin_new_m);
+    if (found_fence && margin_new_m < margin) {
+        margin = margin_new_m;
+        margin_updated = true;
+    }
+    return margin_updated;
+#else
+    return false;
+#endif
+}
+
 // calculate minimum distance between a path and all inclusion and exclusion polygons
 // on success returns true and updates margin
 bool AP_OABendyRuler::calc_margin_from_inclusion_and_exclusion_polygons(const Location &start, const Location &end, float &margin, char *&label) const
@@ -812,6 +843,66 @@ bool AP_OABendyRuler::calc_margin_from_inclusion_and_exclusion_polygons(const Lo
 
     return margin_updated;
 */
+#else
+    return false;
+#endif // AP_FENCE_ENABLED
+}
+
+// calculate minimum distance between a path and all inclusion circles
+// on success returns true and updates margin
+bool AP_OABendyRuler::calc_margin_from_inclusion_circles(const Location &start, const Location &end, float &margin) const
+{
+#if AP_FENCE_ENABLED
+    // exit immediately if fence is not enabled
+    const AC_Fence *fence = AC_Fence::get_singleton();
+    if (fence == nullptr) {
+        return false;
+    }
+
+    // inclusion/exclusion circles enabled along with polygon fences (a circle is a type of polygon fence)
+    if ((fence->get_enabled_fences() & AC_FENCE_TYPE_POLYGON) == 0) {
+        return false;
+    }
+
+    // return immediately if no inclusion nor exclusion circles
+    const uint8_t num_inclusion_circles = fence->polyfence().get_inclusion_circle_count();
+    if (num_inclusion_circles == 0) {
+        return false;
+    }
+
+    // convert start and end to offsets from EKF origin
+    Vector2f start_NE, end_NE;
+    if (!start.get_vector_xy_from_origin_NE_cm(start_NE) ||
+        !end.get_vector_xy_from_origin_NE_cm(end_NE)) {
+        return false;
+    }
+
+    // get fence margin
+    const float fence_margin = fence->get_horizontal_margin();
+
+    // iterate through inclusion circles and calculate minimum margin
+    bool margin_updated = false;
+    for (uint8_t i = 0; i < num_inclusion_circles; i++) {
+        Vector2f center_pos_cm;
+        float radius;
+        if (fence->polyfence().get_inclusion_circle(i, center_pos_cm, radius)) {
+
+            // calculate start and ends distance from the center of the circle
+            const float start_dist_sq = (start_NE - center_pos_cm).length_squared();
+            const float end_dist_sq = (end_NE - center_pos_cm).length_squared();
+
+            // margin is fence radius minus the longer of start or end distance
+            const float margin_new = (radius + fence_margin) - (sqrtf(MAX(start_dist_sq, end_dist_sq)) * 0.01f);
+
+            // update margin with lowest value so far
+            if (!margin_updated || (margin_new < margin)) {
+                margin_updated = true;
+                margin = margin_new;
+            }
+        }
+    }
+
+    return true;
 #else
     return false;
 #endif // AP_FENCE_ENABLED
@@ -922,7 +1013,6 @@ bool AP_OABendyRuler::calc_margin_from_obstacle_database(const Location &start, 
         return false;
     }
 
-    //GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: obstacles: %d",avoid->num_obstacles() );
     for(uint8_t i = 0; i < avoid->num_obstacles(); i++) {
         const uint32_t obstacle_id = avoid->get_obstacle_id(i);
         const Location obstacle_loc = avoid->get_obstacle_loc(i);
@@ -972,22 +1062,26 @@ bool AP_OABendyRuler::calc_margin_from_object_database(const Location &start, co
     }
 
     // convert start and end to offsets (in cm) from EKF origin
-    Vector3f start_NEU,end_NEU;
-    if (!start.get_vector_from_origin_NEU_cm(start_NEU) ||
-        !end.get_vector_from_origin_NEU_cm(end_NEU)) {
+    Vector3f start_NEU_cm,end_NEU_cm;
+    if (!start.get_vector_from_origin_NEU_cm(start_NEU_cm) ||
+        !end.get_vector_from_origin_NEU_cm(end_NEU_cm)) {
         return false;
     }
-    if (start_NEU == end_NEU) {
+    if (start_NEU_cm == end_NEU_cm) {
         return false;
     }
 
     // check each obstacle's distance from segment
     float smallest_margin = FLT_MAX;
+
+    //uint16_t obstacle_count = oaDb->database_count();
+    //GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "OLD obstacles %d", obstacle_count);
+
     for (uint16_t i=0; i<oaDb->database_count(); i++) {
         const AP_OADatabase::OA_DbItem& item = oaDb->get_item(i);
         const Vector3f point_cm = item.pos * 100.0f;
         // margin is distance between line segment and obstacle minus obstacle's radius
-        const float m = Vector3f::closest_distance_between_line_and_point(start_NEU, end_NEU, point_cm) * 0.01f - item.radius;
+        const float m = Vector3f::closest_distance_between_line_and_point(start_NEU_cm, end_NEU_cm, point_cm) * 0.01f - item.radius;
         if (m < smallest_margin) {
             smallest_margin = m;
         }
@@ -1004,15 +1098,11 @@ bool AP_OABendyRuler::calc_margin_from_object_database(const Location &start, co
 
 bool AP_OABendyRuler::populate_spatial_hash(const Location &current_loc, const float search_radius_m)
 {
-    _spatial_hash.clear();
-    
-    //const float search_radius = _current_lookahead * 1.5f;
-
-    // exit immediately if db is empty
-    AP_OADatabase *oaDb = AP::oadatabase();
-    if (oaDb == nullptr || !oaDb->healthy()) {
-        return false;
+    const u_int32_t now_ms = AP_HAL::millis();
+    if(now_ms - _spatial_hash_populated_ms < 2000) {
+        return true;
     }
+    _spatial_hash_populated_ms = now_ms;
 
     // convert start and end to offsets (in cm) from EKF origin
     Vector3f current_NEU_m;
@@ -1020,142 +1110,104 @@ bool AP_OABendyRuler::populate_spatial_hash(const Location &current_loc, const f
         return false;
     }
 
-    // Insert database obstacles
-    for (uint16_t i = 0; i < oaDb->database_count(); i++) {
-        const AP_OADatabase::OA_DbItem& item = oaDb->get_item(i);
-        const float item_distance = (item.pos - current_NEU_m).length();
-        if (item_distance <= search_radius_m) {
-            /*
-            AP_OASpatialHash::Obstacle obstacle;
-            obstacle.type = AP_OASpatialHash::ObstacleType::OBSTACLE_DATABASE;
-            obstacle.pos = item.pos;
-            obstacle.radius = item.radius;
-            obstacle.timestamp_ms = item.timestamp_ms;
-            */
-           // Obstacles radius includes the margin.
-            _spatial_hash.insert_database_obstacle(item.pos, item.radius, 0, item.timestamp_ms);
+    _spatial_hash.clear();
+    _spatial_hash_populated = false;
+    _spatial_hash.set_current_position(current_NEU_m);
+
+    //GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "BR: PRE Avoid Pool %d", _spatial_hash.get_pool_used());
+    // This is the OA (Avoid) database of obstacles, different from the oaDb (ADS-B) database
+    float search_radius_squared = search_radius_m * search_radius_m;
+    AP_Avoidance *avoid = AP_Avoidance::get_singleton();
+    if(avoid != nullptr) {
+        for(uint8_t i = 0; i < avoid->num_obstacles(); i++) {
+            uint32_t obstacle_id = avoid->get_obstacle_id(i);
+            Location obstacle_loc = avoid->get_obstacle_loc(i);
+            float obstacle_radius_m = avoid->get_obstacle_radius_m(obstacle_id);
+            Vector3f obstacle_NEU_m;
+            if( obstacle_loc.get_vector_from_origin_NEU_m(obstacle_NEU_m) ) {
+                const float sq_distance = (obstacle_NEU_m - current_NEU_m).length_squared();
+                if (sq_distance <= search_radius_squared) {
+                    uint32_t obstacle_timestamp_ms = avoid->get_obstacle_timestamp(obstacle_id);
+                    char *obstacle_label = avoid->get_obstacle_label(obstacle_id);
+                    _spatial_hash.insert_database_obstacle(current_NEU_m, obstacle_NEU_m, obstacle_radius_m, 0, obstacle_timestamp_ms, obstacle_label);
+                }
+            }
         }
     }
+    //GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "BR: Avoid Pool %d", _spatial_hash.get_pool_used());
+
+
+    // Insert database obstacles
+    AP_OADatabase *oaDb = AP::oadatabase();
+    if (oaDb != nullptr && !oaDb->healthy()) {
+        for (uint16_t i = 0; i < oaDb->database_count(); i++) {
+            const AP_OADatabase::OA_DbItem& item = oaDb->get_item(i);
+            const float item_distance_squared = (item.pos - current_NEU_m).length_squared();
+            if (item_distance_squared <= search_radius_squared) {
+                // Obstacles radius includes the margin.
+                _spatial_hash.insert_database_obstacle(current_NEU_m, item.pos, item.radius, 0, item.timestamp_ms, (char *)"ADS-B");
+            }
+        }
+    }
+    // GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "BR: OA Pool %d", _spatial_hash.get_pool_used());
 
     // Insert fences
-    AC_Fence *fence = AC_Fence::get_singleton();
-    if (fence != nullptr && fence->enabled()) {
-        _populate_fences(current_NEU_m, search_radius_m);
-    }
+    _populate_fences(current_NEU_m, search_radius_m);
+    //GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "BR: Fence Pool %d", _spatial_hash.get_pool_used());
 
     _spatial_hash_populated = true;
     return true;
 }
 
-void AP_OABendyRuler::_populate_fences(const Vector3f &current_NEU_m, float search_radius_m)
+void AP_OABendyRuler::_populate_fences(const Vector3f &current_NEU_m, const float search_radius_m)
 {
-    AC_Fence *fence = AC_Fence::get_singleton();
+    const AC_Fence *fence = AC_Fence::get_singleton();
     if (fence == nullptr || !fence->enabled()) {
         return;
     }
 
-    // Use the polyfence_loader() to access all fence types
-    _populate_fence_polygon_inclusion(current_NEU_m, search_radius_m);
-    _populate_fence_polygon_exclusion(current_NEU_m, search_radius_m);
-    _populate_fence_circle_inclusion(current_NEU_m, search_radius_m);
-    _populate_fence_circle_exclusion(current_NEU_m, search_radius_m);
+    // Use the polyfence_loader() to access all fence types - don't do exclusion fences since they are just not worth the cost.
+    //_populate_fence_polygon_inclusion(current_NEU_m, fence, search_radius_m);
+    _populate_fence_polygon_exclusion(current_NEU_m, fence, search_radius_m);
+    //_populate_fence_circle_inclusion(current_NEU_m, fence, search_radius_m);
+    _populate_fence_circle_exclusion(current_NEU_m, fence, search_radius_m);
 }
 
-void AP_OABendyRuler::_populate_fence_polygon_inclusion(const Vector3f &current_NEU_m, float search_radius)
+void AP_OABendyRuler::_populate_fence_polygon_inclusion(const Vector3f &current_NEU_m, const AC_Fence *fence, const float search_radius_m)
 {
-    AC_Fence *fence = AC_Fence::get_singleton();
-    if (fence == nullptr) return;
-    
     float margin_m = fence->get_margin();
-    AC_PolyFence_loader& polyfence = fence->polyfence();
-    
-    // Get inclusion polygons using the correct API
-    uint16_t poly_count = polyfence.get_inclusion_polygon_count();
-    for (uint16_t i = 0; i < poly_count; i++) {
+    const AC_PolyFence_loader& polyfence = fence->polyfence();
+
+    const uint16_t num_inclusion_polygons = polyfence.get_inclusion_polygon_count();
+    for (uint16_t i = 0; i < num_inclusion_polygons; i++) {
         uint16_t point_count;
-        Vector2f* points = polyfence.get_inclusion_polygon(i, point_count);
-        
-        if (points != nullptr && point_count >= 2) {
-            // Sample each edge of the polygon
-            for (uint16_t j = 0; j < point_count; j++) {
-                Vector2f& point1_cm = points[j];
-                Vector2f& point2_cm = points[(j + 1) % point_count];
-                
-                // Convert polygon points from cm to meters NEU
-                Vector3f start_NEU_m, end_NEU_m;
-                start_NEU_m.x = point1_cm.x * 0.01f; // Convert cm to meters (North)
-                start_NEU_m.y = point1_cm.y * 0.01f; // Convert cm to meters (East)
-                start_NEU_m.z = 0; // Fence polygons are 2D
-                
-                end_NEU_m.x = point2_cm.x * 0.01f;
-                end_NEU_m.y = point2_cm.y * 0.01f;
-                end_NEU_m.z = 0;
-                
-                // Check if this edge is within search radius
-                float dist_to_start = Vector2f(current_NEU_m.x - start_NEU_m.x, 
-                                                current_NEU_m.y - start_NEU_m.y).length();
-                float dist_to_end = Vector2f(current_NEU_m.x - end_NEU_m.x, 
-                                                current_NEU_m.y - end_NEU_m.y).length();
-                
-                if (dist_to_start <= search_radius || dist_to_end <= search_radius) {
-                    _spatial_hash.insert_fence_inclusion_polygon(start_NEU_m, end_NEU_m, margin_m);
-                }
-            }
+        const Vector2f* points = polyfence.get_inclusion_polygon(i, point_count);
+        if (points != nullptr && point_count >= 3) {
+            _spatial_hash.insert_fence_inclusion_polygon(current_NEU_m, points, point_count, margin_m);
         }
     }
 }
 
-void AP_OABendyRuler::_populate_fence_polygon_exclusion(const Vector3f &current_NEU_m, float search_radius)
+void AP_OABendyRuler::_populate_fence_polygon_exclusion(const Vector3f &current_NEU_m, const AC_Fence *fence, const float search_radius_m)
 {
-    AC_Fence *fence = AC_Fence::get_singleton();
-    if (fence == nullptr) return;
-    
     float margin_m = fence->get_margin();
-    AC_PolyFence_loader& polyfence = fence->polyfence();
+    const AC_PolyFence_loader& polyfence = fence->polyfence();
+    //const float search_radius_sq = search_radius_m * search_radius_m;
     
-    // Get exclusion polygons using the correct API
-    uint16_t poly_count = polyfence.get_exclusion_polygon_count();
-    for (uint16_t i = 0; i < poly_count; i++) {
+    const uint16_t num_exclusion_polygons = polyfence.get_exclusion_polygon_count();
+    for (uint16_t i = 0; i < num_exclusion_polygons; i++) {
         uint16_t point_count;
-        Vector2f* points = polyfence.get_exclusion_polygon(i, point_count);
-        
-        if (points != nullptr && point_count >= 2) {
-            // Sample each edge of the polygon
-            for (uint16_t j = 0; j < point_count; j++) {
-                Vector2f& point1_cm = points[j];
-                Vector2f& point2_cm = points[(j + 1) % point_count];
-                
-                // Convert polygon points from cm to meters NEU
-                Vector3f start_NEU_m, end_NEU_m;
-                start_NEU_m.x = point1_cm.x * 0.01f; // Convert cm to meters (North)
-                start_NEU_m.y = point1_cm.y * 0.01f; // Convert cm to meters (East)
-                start_NEU_m.z = 0; // Fence polygons are 2D
-                
-                end_NEU_m.x = point2_cm.x * 0.01f;
-                end_NEU_m.y = point2_cm.y * 0.01f;
-                end_NEU_m.z = 0;
-                
-                // Check if this edge is within search radius
-                float dist_to_start = Vector2f(current_NEU_m.x - start_NEU_m.x, 
-                                                current_NEU_m.y - start_NEU_m.y).length();
-                float dist_to_end = Vector2f(current_NEU_m.x - end_NEU_m.x, 
-                                                current_NEU_m.y - end_NEU_m.y).length();
-                
-                if (dist_to_start <= search_radius || dist_to_end <= search_radius) {
-                    _spatial_hash.insert_fence_exclusion_polygon(start_NEU_m, end_NEU_m, margin_m);
-                }
-            }
+        const Vector2f* points = polyfence.get_exclusion_polygon(i, point_count);
+        if (points != nullptr && point_count >= 3) {
+            _spatial_hash.insert_fence_exclusion_polygon(current_NEU_m, points, point_count, margin_m);
         }
     }
 }
 
-void AP_OABendyRuler::_populate_fence_circle_inclusion(const Vector3f &current_NEU_m, float search_radius_m)
+void AP_OABendyRuler::_populate_fence_circle_inclusion(const Vector3f &current_NEU_m, const AC_Fence *fence, const float search_radius_m)
 {
-    AC_Fence *fence = AC_Fence::get_singleton();
-    if (fence == nullptr) return;
-    
     float margin_m = fence->get_margin();
-    AC_PolyFence_loader& polyfence = fence->polyfence();
+    const AC_PolyFence_loader& polyfence = fence->polyfence();
 
     uint16_t circle_count = polyfence.get_inclusion_circle_count();
     for (uint16_t i = 0; i < circle_count; i++) {
@@ -1185,13 +1237,10 @@ void AP_OABendyRuler::_populate_fence_circle_inclusion(const Vector3f &current_N
     }
 }
 
-void AP_OABendyRuler::_populate_fence_circle_exclusion(const Vector3f &current_NEU_m, float search_radius_m)
+void AP_OABendyRuler::_populate_fence_circle_exclusion(const Vector3f &current_NEU_m, const AC_Fence *fence, const float search_radius_m)
 {
-    AC_Fence *fence = AC_Fence::get_singleton();
-    if (fence == nullptr) return;
-    
     float margin_m = fence->get_margin();
-    AC_PolyFence_loader& polyfence = fence->polyfence();
+    const AC_PolyFence_loader& polyfence = fence->polyfence();
     
     uint16_t circle_count = polyfence.get_exclusion_circle_count();
     for (uint16_t i = 0; i < circle_count; i++) {
@@ -1222,4 +1271,22 @@ void AP_OABendyRuler::_populate_fence_circle_exclusion(const Vector3f &current_N
         }
     }
 }
+
+// Fast squared distance from point to line segment
+float AP_OABendyRuler::_point_to_line_segment_distance_sq(const Vector3f& start, const Vector3f& end, const Vector3f& point) const
+{
+    Vector3f segment = end - start;
+    Vector3f to_point = point - start;
+    
+    // Project point onto segment
+    float t = to_point.dot(segment) / segment.length_squared();
+    t = constrain_float(t, 0.0f, 1.0f);
+    
+    // Find closest point on segment
+    Vector3f projection = start + segment * t;
+    
+    // Return squared distance
+    return (point - projection).length_squared();
+}
+
 #endif  // AP_OAPATHPLANNER_BENDYRULER_ENABLED

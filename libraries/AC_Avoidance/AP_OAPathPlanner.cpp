@@ -244,6 +244,9 @@ AP_OAPathPlanner::OA_RetState AP_OAPathPlanner::mission_avoidance(const Location
 
     // check results have not timed out
     const bool timed_out = (now - avoidance_result.result_time_ms > OA_TIMEOUT_MS) && (now - _activated_ms > OA_TIMEOUT_MS);
+    if(timed_out) {
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "OA: timed out: %d %d", now - avoidance_result.result_time_ms, now - _activated_ms );
+    }
 
     // return results from background thread's latest checks
     if (destination_matches && next_destination_matches && !timed_out) {
