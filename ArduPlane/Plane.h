@@ -704,6 +704,13 @@ private:
     AP_Avoidance_Plane avoidance_adsb{adsb};
 #endif  // AP_ADSB_AVOIDANCE_ENABLED
 
+#if AP_AVOIDANCE_ENABLED
+#if AP_SCRIPTING_ENABLED
+    // enabled scripted Object Avoidance
+    AP_OAScripting oascripting;
+#endif
+#endif
+
     // Outback Challenge Failsafe Support
 #if AP_ADVANCEDFAILSAFE_ENABLED
     AP_AdvancedFailsafe_Plane afs;

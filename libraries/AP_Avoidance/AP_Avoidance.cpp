@@ -616,6 +616,73 @@ void AP_Avoidance::handle_msg(const mavlink_message_t &msg)
                  vel_ned_ms);
 }
 
+// get the avoidance radius in meters of a given obstacle type
+// TODO should be parameterized
+float AP_Avoidance::get_obstacle_radius_m(int32_t obstacle_id) const
+{
+    if (obstacle_id < 256) {
+        // it's some form of UAV (because this will be a MAV_SYSID), 100m radius 
+        return 100.0f;
+    }
+    else if (obstacle_id < 20000) {
+        // fixed wing, 300m radius
+        return 500.0f;
+    }
+    else if (obstacle_id < 30000) {
+        // weather, radius 150 at ground, 300m at 3000m, 173m at 1500ft
+        return 173.0f;
+    }
+    else if (obstacle_id < 40000) {
+        // migratory bird, 100m
+        return 50.0f;
+    }
+    else if (obstacle_id < 50000) {
+        // bird of prey, 200m
+        return 100.0f;
+    }
+    //default to 300, which is worst case
+    return 400.0f;
+}
+
+// For AP_AOScripting to check for obstacles and return the closest one
+float AP_Avoidance::distance_to_obstacle(const Vector3f &start_NED_m, const Vector3f &end_NED_m, 
+                                                    // return values
+                                                    Obstacle &avoid_obstacle
+                                                ) const
+{
+    float distance_new_m = FLT_MAX;
+
+    for(uint8_t i = 0; i < _obstacle_count; i++) {
+        const Obstacle obstacle         = _obstacles[i];
+        const uint32_t src_id           = _obstacles[i].src_id;
+        const Location obstacle_loc     = _obstacles[i]._location;
+        const float obstacle_radius_m   = get_obstacle_radius_m(src_id);
+
+        Vector2f start_NE_m(start_NED_m.x, start_NED_m.y);
+        Vector2f end_NE_m(end_NED_m.x, end_NED_m.y);
+        Vector2f obstacle_NE_m;
+        if (obstacle_loc.get_vector_xy_from_origin_NE_m(obstacle_NE_m) ) {
+            
+            // TIM: This is fairly simplistic for now, needs to deal with altitude
+            // as per the Lua version in obstacle_avoidance_margin() in Tridge's script
+
+            // margin is distance between line segment and obstacle minus obstacle's radius
+            // float m = Vector3f::closest_distance_between_line_and_point(start_NED_cm, end_NED_cm, obstacle_NED_cm) * 0.01f;
+            float distance_m = Vector2f::closest_distance_between_line_and_point(start_NE_m, end_NE_m, obstacle_NE_m);
+            distance_m = distance_m - obstacle_radius_m;
+            if (distance_m < distance_new_m) {
+                distance_new_m  = distance_m;
+                avoid_obstacle  = obstacle;
+                //obstacle_id     = obstacle.src_id;
+                //location        = obstacle._location;
+                //velocity_ms     = obstacle._velocity_ned_ms;
+            }
+        }
+    }
+
+    return distance_new_m;
+}
+
 // get unit vector away from the nearest obstacle
 bool AP_Avoidance::get_vector_perpendicular(const AP_Avoidance::Obstacle *obstacle, Vector3f &vec_neu_unit) const
 {
