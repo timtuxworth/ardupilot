@@ -28,6 +28,7 @@ userdata Location method get_alt_frame uint8_t
 userdata Location method change_alt_frame boolean Location::AltFrame'enum Location::AltFrame::ABSOLUTE Location::AltFrame::ABOVE_TERRAIN
 userdata Location method copy Location
 userdata Location method set_alt_m void float'skip_check Location::AltFrame'enum Location::AltFrame::ABSOLUTE Location::AltFrame::ABOVE_TERRAIN
+userdata Location method copy_alt_from void Location 
 
 include AP_AHRS/AP_AHRS.h
 
@@ -1193,3 +1194,14 @@ singleton AP_OSD_Backend method draw_screen void
 singleton AP_OSD_Backend method get_aspect_ratio_correction float
 singleton AP_OSD_Backend method get_screen uint8_t
 singleton AP_OSD_Backend method display_disabled boolean
+
+-- ---- AP_OAScripting - scripted avoidance Library ----
+include AC_Avoidance/AP_OAScripting.h 
+singleton AP_OAScripting depends AP_AVOIDANCE_ENABLED
+singleton AP_OAScripting rename OAScripting
+singleton AP_OAScripting method find_closest_obstacle boolean Location Location float'skip_check float'Null uint16_t'Null string'Null uint32_t'Null Location'Null Vector3f'Null Vector3f'Null
+-- singleton AP_OAScripting method distance_obstacle_test boolean Location Location float'skip_check float'Null Location'Null
+-- singleton AP_OAScripting method distance_obstacle_test2 boolean float'skip_check float'Ref
+-- singleton AP_OAScripting method find_closest_obstacle_stash boolean Location Location
+-- singleton AP_OAScripting method find_closest_obstacle boolean float'Null uint16_t'Null string'Null uint32_t'Null Location'Null Vector3f'Null Vector3f'Null
+

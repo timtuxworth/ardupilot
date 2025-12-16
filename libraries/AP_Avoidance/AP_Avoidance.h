@@ -105,8 +105,17 @@ public:
     // add obstacles into the Avoidance system from MAVLink messages
     void handle_msg(const mavlink_message_t &msg);
 
+#ifdef AP_SCRIPTING_ENABLED
+    // For AP_AOScripting to check for obstacles
+    float get_obstacle_radius_m(int32_t obstacle_id) const;
+    float distance_to_obstacle(const Vector3f &start_NED_cm, const Vector3f &end_NED_cm, 
+                                Obstacle &avoid_obstacle
+                                ) const;
+#endif 
+
     // for holding parameters
     static const struct AP_Param::GroupInfo var_info[];
+
 
 protected:
 
