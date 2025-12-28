@@ -948,14 +948,15 @@ DAA = {
         -- check for collisions, yes we don't actually do anything with this, just report it (if warn_action == 1)
         -- have_collided(current_loc)
         if alert_target_loc ~= nil and obstacle ~= nil then
-            if obstacle.label ~= previous_label then
+                    gcs:send_text(MAV_SEVERITY.WARNING, " ALERT: " .. obstacle.label)
+            --if obstacle.label ~= previous_label then
                 if (obstacle.distance_m or 0) > 9 then
                     gcs:send_text(MAV_SEVERITY.WARNING, " ALERT: " .. obstacle.label .. " distance: " .. obstacle.distance_m .. " m ")
                 else
                     gcs:send_text(MAV_SEVERITY.WARNING, " ALERT: " .. obstacle.label)
                 end
                 previous_label = obstacle_avoiding.label
-            end
+            --end
         else
             previous_label = ""
         end
@@ -995,15 +996,15 @@ DAA = {
 
     local function avoid_obstacle(new_target_loc, obstacle)
         if obstacle == nil then -- no obstacle, so clear any specific avoidance we might have been doing
-            if current_state == STATE. loitering then
+            if current_state == STATE.loitering then
                 loiteralt.stop()
             end
             current_state = STATE.monitoring
             -- reset the target back to the original target
             new_target_loc = nil
         elseif obstacle.type == OBSTACLE_TYPE.GENERAL_AVIATION and false then
-        -- depending on the obstacle we might do different things. Specifically if the obstacle is a crude aircraft
-        -- in Canada we want to do a "Right 2" circuit descending to XXX altitude
+            -- depending on the obstacle we might do different things. Specifically if the obstacle is a crude aircraft
+            -- in Canada we want to do a "Right 2" circuit descending to XXX altitude
         
             -- TODO make the target altitude a parameter
             new_target_loc = loiteralt.start(50.0, true, groundspeed_ms)
