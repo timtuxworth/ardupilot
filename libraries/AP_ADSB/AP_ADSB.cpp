@@ -561,7 +561,7 @@ void AP_ADSB::handle_adsb_vehicle(const adsb_vehicle_t &vehicle)
     } else if (in_state.vehicle_count < in_state.list_size_allocated) {
 
         // not found and there's room, add it to the end of the list
-        set_vehicle(in_state.vehicle_count, vehicle);
+            set_vehicle(in_state.vehicle_count, vehicle);
         in_state.vehicle_count++;
 
     } else {

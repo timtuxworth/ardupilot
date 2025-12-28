@@ -295,6 +295,10 @@ private:
     AP_OSD osd;
 #endif
 
+#if AP_AVOIDANCE_ENABLED && AP_SCRIPTING_ENABLED
+    AP_OAScripting aoscripting;
+#endif 
+
     ModeCircle mode_circle;
     ModeStabilize mode_stabilize;
     ModeTraining mode_training;
@@ -703,13 +707,6 @@ private:
     // avoidance of adsb enabled vehicles (normally manned vehicles)
     AP_Avoidance_Plane avoidance_adsb{adsb};
 #endif  // AP_ADSB_AVOIDANCE_ENABLED
-
-#if AP_AVOIDANCE_ENABLED
-#if AP_SCRIPTING_ENABLED
-    // enabled scripted Object Avoidance
-    AP_OAScripting oascripting;
-#endif
-#endif
 
     // Outback Challenge Failsafe Support
 #if AP_ADVANCEDFAILSAFE_ENABLED

@@ -30,6 +30,7 @@
 #if AP_ADSB_AVOIDANCE_ENABLED
 
 #include <AP_ADSB/AP_ADSB.h>
+#include <AP_ADSB/GDL90_protocol/GDL90_Message_Structs.h>
 
 #define AP_AVOIDANCE_STATE_RECOVERY_TIME_MS                 2000    // we will not downgrade state any faster than this (2 seconds)
 
@@ -64,6 +65,7 @@ public:
         uint32_t src_id;
         uint32_t timestamp_ms;
 
+        uint8_t  emitter_type;
         Location _location;
         Vector3f _velocity_ned_ms;
 
@@ -82,7 +84,8 @@ public:
                       const MAV_COLLISION_SRC src,
                       uint32_t src_id,
                       const Location &loc,
-                      const Vector3f &vel_ned_ms);
+                      const Vector3f &vel_ned_ms,
+                      const uint8_t emitter_type);
 
     void add_obstacle(uint32_t obstacle_timestamp_ms,
                       const MAV_COLLISION_SRC src,
@@ -90,7 +93,8 @@ public:
                       const Location &loc,
                       float cog,
                       float hspeed,
-                      float vspeed);
+                      float vspeed,
+                      uint8_t emitter_type);
 
     // update should be called at 10hz or higher
     void update();
@@ -107,10 +111,21 @@ public:
 
 #ifdef AP_SCRIPTING_ENABLED
     // For AP_AOScripting to check for obstacles
-    float get_obstacle_radius_m(int32_t obstacle_id) const;
+    float get_obstacle_radius_m(uint8_t emitter_type) const;
+    float get_obstacle_height_m(uint8_t emitter_type) const;
     float distance_to_obstacle(const Vector3f &start_NED_cm, const Vector3f &end_NED_cm, 
+                                Obstacle &avoid_obstacle,
+                                Obstacle &closest_aircraft
+                                ) const;
+    float distance_to_aircraft(const Vector3f &vehicle_NED_m, const float lookahead_m,
+                                // return values
                                 Obstacle &avoid_obstacle
                                 ) const;
+
+    // utility functions for classifying ADSB emmitter_type values
+    static bool is_adsb_aircraft(uint8_t emitter_type);
+    static bool is_adsb_uav(uint8_t emitter_type);
+
 #endif 
 
     // for holding parameters
@@ -218,6 +233,10 @@ private:
     AP_Float    _warn_distance_ne_m;
     AP_Float    _warn_distance_d_m;
 
+#ifdef AP_SCRIPTING_ENABLED
+    AP_Float    _well_clear_xy;
+    AP_Float    _well_clear_z;
+#endif
     // multi-thread support for avoidance
     HAL_Semaphore _rsem;
 

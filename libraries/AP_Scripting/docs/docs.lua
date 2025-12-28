@@ -1211,6 +1211,18 @@ function Location_ud:get_distance(loc) end
 ---@param loc Location_ud -- location to use as the source altitude/frame
 function Location_ud:copy_alt_from(loc) end
 
+--get altitude (in cm) in the desired frame
+-- does not modify ret_alt_cm unless true is returned
+-- returns false on failure to get altitude in the desired frame which can only happen if the original frame or desired frame is:
+---@param loc Location_ud -- location to get the altitude from
+---@param frame integer -- altitude frame
+---| '0' # ABSOLUTE
+---| '1' # ABOVE_HOME
+---| '2' # ABOVE_ORIGIN
+---| '3' # ABOVE_TERRAIN
+---@return number -- altitude in specified frame
+function Location_ud:get_alt_m(frame) end
+
 -- desc
 ---@class (exact) AP_EFI_Backend_ud
 local AP_EFI_Backend_ud = {}
@@ -4584,4 +4596,62 @@ OAScipting {}
 ---@return Vector3f_ud|nil velocity_ms -- velocity of the obstacle in ms NED from the origin
 function OAScripting:distance_to_obstacle(start_loc, end_loc, lookahead_m) end
 
+-- find the aircraft closest to a Location
+---@param vehicle_loc Location -- Location to search for aircraft
+---@param lookahead_m float -- the furthest distance out from the line to check
+---@return number|nil distance_min_m -- the return value of the closest distance object found
+---@return integer|nil type -- the AP_OAAvoidance::ObstacleType of the type of object found 
+---@return string|nil label -- label of the obstacle for display to the user. for GA vehicles will be an ICAO code
+---@return integer|nil src_id -- the MAV_SYDID of the obstacle if relevant. For MAVLink this will be the MAV_SYSID of the vehice
+---@return Location_ud|nil location -- Location of the obstacle found
+---@return Vector3f_ud|nil pos_NED_m -- position of the obstacle found in m NED from the origin
+---@return Vector3f_ud|nil velocity_ms -- velocity of the obstacle in ms NED from the origin
+function OAScripting:distance_to_aircraft(start_loc, end_loc, lookahead_m) end
+
+-- OAObstacle is a userdata object that holds obstacle information managed by OAScripting
+-- it is returned by calls to OAScripting methods, it can't be created or manipulated in Lua
+---@class (exact) OAObstacle_ud
+local OAObstacle_ud = {}
+
+-- Create location object
+---@return OAObstacle_ud
+function OAObstacle() end
+
+-- Copy this OAObstacle returning a new userdata object
+---@return OAObstacle_ud -- a copy of this OAObstacle
+function OAObstacle_ud:copy() end
+
+-- get type - returns the obstacle type of this obstacle
+---@return integer -- obstacle type 
+---| '0'  # GENERAL
+---| '1'  # MAV_SYSID
+---| '2'  # GENERAL_AVIATION
+---| '3'  # WEATHER
+---| '4'  # BIRD_MIGRATORY
+---| '5'  # BIRD_OF_PREY
+---| '6'  # FENCE_HOME
+---| '7'  # FENCE_CIRCLE_INCLUSION
+---| '8'  # FENCE_CIRCLE_EXCLUSION
+---| '9'  # FENCE_POLYGON_INCLUSION
+---| '10' # FENCE_POLYGON_EXCLUSION
+---| '11' # FENCE_LUA
+---| '12' # PROXIMITY                   
+---| '13' # AIS                         
+function OAObstacle_ud:get_type() end
+
+-- get the location of this obstacle
+---@return Location_ud -- location of this obstacle
+function OAObstacle_ud:get_location() end
+
+-- get the location of this obstacle
+---@return Location_ud -- location of this obstacle
+function OAObstacle_ud:get_location() end
+
+-- get the position of this obstacle
+---@return Vector3f_ud -- position of this obstacle NED in meters from origin
+function OAObstacle_ud:get_position_NED_m() end
+
+-- get the velocity of this obstacle
+---@return Vector3f_ud -- vellcity of this obstacle in meters/second NED from origin
+function OAObstacle_ud:get_velocity_NED_ms() end
 
