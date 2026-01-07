@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME = "Plane DAA"
 SCRIPT_NAME_SHORT = "PlaneDAA"
-SCRIPT_VERSION = "4.7.0-001"
+SCRIPT_VERSION = "4.7.0-002"
 
 STARTUP_DELAY = 25  -- wait this many seconds for the FC to come up before starting the script
 
@@ -1244,6 +1244,8 @@ DAA = {
         end
         ::continue::
 
+        -- we need to independanty detect aircraft because even if an aircraft may not be the closest obstacle found by bendy ruler, we may still need to deal with it
+        -- in other words, sometimes aircraft have higher priority than any other obstacles
         detect_aircraft()
 
         if obstacle_avoiding == nil then
@@ -1270,10 +1272,10 @@ DAA = {
         -- check for collisions, yes we don't actually do anything with this, just report it (if warn_action == 1)
         if alert_target_loc ~= nil and obstacle_avoiding ~= nil then
             if obstacle_avoiding.label ~= previous_label and obstacle_avoiding.distance_m < lookahead_param then
-                if (obstacle_avoiding.distance_m or 0) > 9 then
+                if (math.abs(obstacle_avoiding.distance_m or 0)) > 9 then
                     gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" ALERT: %s distance: %.0f m", obstacle_avoiding.label, obstacle_avoiding.distance_m ))
                 else
-                    gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. " ALERT: " .. obstacle_avoiding.label)
+                    gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " ALERT: " .. obstacle_avoiding.label .. " COLLISION")
                 end
                 previous_label = obstacle_avoiding.label
             end
