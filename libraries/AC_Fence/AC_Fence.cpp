@@ -1317,6 +1317,14 @@ bool AC_Fence::sys_status_present() const { return false; }
 bool AC_Fence::sys_status_enabled() const { return false; }
 bool AC_Fence::sys_status_failed() const { return false; }
 
+// methods used by scripted avoidance to detect distances from various fences
+// each method returns true if it finds a fence and false if no related fence is found
+float distance_line_to_home_inclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) { return false; };
+float distance_line_to_circle_inclusion(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm) { return false; };
+float distance_line_to_circle_exclusion(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm) { return false; };
+float distance_line_to_polygon_inclusion(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm) { return false; };
+float distance_line_to_polygon_exclusion(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm) { return false; };
+
 AC_PolyFence_loader &AC_Fence::polyfence()
 {
     return _poly_loader;
