@@ -1201,8 +1201,9 @@ include AC_Avoidance/AP_OAScripting.h
 
 -- depends (defined(AP_AVOIDANCE_ENABLED) && defined(AP_SCRIPTING_ENABLED))
 
--- userdata OAObstacle epends (defined(AP_AVOIDANCE_ENABLED) && defined(AP_SCRIPTING_ENABLED))
+-- userdata OAObstacle epends (defined(AP_AVOIDANCE_ENABLED) && defined(AP_SCRIPTING_ENABLED) && defined(AP_ADSB_AVOIDANCE_ENABLED))
 userdata OAObstacle rename OAObstacle
+userdata OAObstacle depends (defined(AP_AVOIDANCE_ENABLED) && defined(AP_SCRIPTING_ENABLED) && defined(AP_ADSB_AVOIDANCE_ENABLED))
 userdata OAObstacle field timestamp_ms int32_t read write 0 2147483647
 userdata OAObstacle field src_id int32_t read write -1 2147483647
 userdata OAObstacle field icao_code int32_t read write 0 0xFFFFFF
@@ -1215,8 +1216,9 @@ userdata OAObstacle field location Location read
 userdata OAObstacle field position_NED_m Vector3f read
 userdata OAObstacle field velocity_NED_ms Vector3f read
 
--- singleton AP_OAScripting depends (defined(AP_AVOIDANCE_ENABLED) && defined(AP_SCRIPTING_ENABLED))
+-- singleton AP_OAScripting depends (defined(AP_AVOIDANCE_ENABLED) && defined(AP_SCRIPTING_ENABLED) && defined(AP_ADSB_AVOIDANCE_ENABLED))
 singleton AP_OAScripting rename OAScripting
+singleton AP_OAScripting depends (defined(AP_AVOIDANCE_ENABLED) && defined(AP_SCRIPTING_ENABLED) && defined(AP_ADSB_AVOIDANCE_ENABLED))
 singleton AP_OAScripting method find_threats boolean Location Location float'skip_check float'Null OAObstacle'Null OAObstacle'Null OAObstacle'Null OAObstacle'Null
 singleton AP_OAScripting method find_aircraft boolean Location float'skip_check float'Null OAObstacle'Null 
 singleton AP_OAScripting method find_closest_obstacle boolean Location Location float'skip_check float'Null uint16_t'Null string'Null uint32_t'Null Location'Null Vector3f'Null Vector3f'Null
