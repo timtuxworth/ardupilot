@@ -1,7 +1,8 @@
 #pragma once
 
-//#ifdef AP_ADSB_AVOIDANCE_ENABLED
 #ifdef AP_SCRIPTING_ENABLED
+#ifdef AP_AVOIDANCE_ENABLED
+//#ifdef AP_ADSB_AVOIDANCE_ENABLED
 
 #include "AC_Avoidance_config.h"
 #include "AP_OADatabase.h"
@@ -137,5 +138,7 @@ struct OAObstacle {
     Vector3f                    position_NED_m;
 };
 
-#endif
+//#endif // AP_ADSB_AVOIDANCE_ENABLED
+#endif // AP_AVOIDANCE_ENABLED
+#endif // AP_SCRIPTING_ENABLED
 //#endif
