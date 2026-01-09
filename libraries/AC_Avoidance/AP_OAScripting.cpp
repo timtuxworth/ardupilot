@@ -17,6 +17,8 @@
 
 //#ifdef AP_ADSB_AVOIDANCE_ENABLED
 #ifdef AP_SCRIPTING_ENABLED
+#ifdef AP_AVOIDANCE_ENABLED
+//#ifdef AP_ADSB_AVOIDANCE_ENABLED
 
 #include "AP_OAScripting.h"
 
@@ -483,6 +485,7 @@ float AP_OAScripting::_distance_to_aircraft(const Vector3f &vehicle_NED_cm, cons
     return distance_m;
 }
 
-
+//#endif //AP_ADSB_AVOIDANCE_ENABLED
+#endif // AP_AVOIDANCE_ENABLED
 #endif // AP_SCRIPTING_ENABLED
 //#endif // AP_ADSB_AVOIDANCE_ENABLED
