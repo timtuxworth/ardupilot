@@ -120,6 +120,9 @@
 #include "Parameters.h"
 #if AP_ADSB_AVOIDANCE_ENABLED
 #include "avoidance_adsb.h"
+#if AP_SCRIPTING_ENABLED
+#include <AC_Avoidance/AP_OAScripting.h>
+#endif  // AP_SCRIPTING_ENABLED
 #endif  // AP_ADSB_AVOIDANCE_ENABLED
 #include "AP_Arming_Plane.h"
 #include "pullup.h"
@@ -295,6 +298,7 @@ private:
     AP_OSD osd;
 #endif
 
+//#if defined(AP_AVOIDANCE_ENABLED) && defined(AP_SCRIPTING_ENABLED) && defined(AP_ADSB_AVOIDANCE_ENABLED)
 #if AP_AVOIDANCE_ENABLED && AP_SCRIPTING_ENABLED
     AP_OAScripting aoscripting;
 #endif 
