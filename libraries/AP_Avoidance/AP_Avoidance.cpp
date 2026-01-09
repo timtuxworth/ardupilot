@@ -638,6 +638,7 @@ void AP_Avoidance::handle_msg(const mavlink_message_t &msg)
                  static_cast<uint8_t>(ADSB_EMITTER_TYPE_UAV));
 }
 
+#ifdef AP_SCRIPTING_ENABLED
 // get the avoidance radius in meters of a given obstacle type
 // the definition of "Well Clear" (2000ft = 609.6m) is from ASTM F3442M-23 
 // TODO should be parameterized but it would be a LOT of parameters
@@ -906,6 +907,7 @@ float AP_Avoidance::distance_to_aircraft(const Vector3f &vehicle_NED_m, const fl
     // we need to do one square root here at the end. But by using squared above we avoid lots of them
     return safe_sqrt(distance_new_msq);
 }
+#endif // AP_SCRIPTING_ENABLED
 
 
 // get unit vector away from the nearest obstacle

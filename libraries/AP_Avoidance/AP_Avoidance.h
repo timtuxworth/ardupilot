@@ -125,7 +125,6 @@ public:
     // utility functions for classifying ADSB emmitter_type values
     static bool is_adsb_aircraft(uint8_t emitter_type);
     static bool is_adsb_uav(uint8_t emitter_type);
-
 #endif 
 
     // for holding parameters
