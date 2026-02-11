@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME = "Plane DAA"
 SCRIPT_NAME_SHORT = "PlaneDAA"
-SCRIPT_VERSION = "4.7.0-002"
+SCRIPT_VERSION = "4.7.0-003"
 
 STARTUP_DELAY = 25  -- wait this many seconds for the FC to come up before starting the script
 
@@ -1036,9 +1036,9 @@ DAA = {
             local distance_previous_m, _ = find_closest_obstacle(current_loc, test_loc_previous_bearing, avoid_step1_m)
             if (distance_previous_m < (bendy_ratio * distance_found)) then
                 -- don't change direction abruptly. If margin difference is not significant, follow the last direction
+            	-- gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. " RESIST: was " .. bearing_test .. " now " .. bearing_orig .. "found: " .. distance_found .. " ratio: " .. (bendy_ratio * distance_found))
                 bearing_test = bearing_orig
                 distance_found  = distance_previous_m
-            	--gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. " RESIST: was " .. bearing_test .. " now " .. bearing_orig)
             end
         end
 
@@ -1138,6 +1138,7 @@ DAA = {
         ---@cast margin number
         if distance_found_m == nil then
             gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. "closest returned NIL ")
+            return FLT_MAX, bearing_deg, nil -- no avoidance required
         end
         if distance_found_m > current_lookahead then
             -- This direction avoids all obstacles for one step. Check if it leads to a clear path for a longer distance.
@@ -1151,8 +1152,8 @@ DAA = {
                 -- we've found at least one direction where there is no obstacle at least for 2 steps out
                 distance_found_m = distance_found_m + distance2_m
             end
-            -- distance_found_m, bearing_test_deg = resist_bearing_change(bearing_deg, avoid_step1_m, bearing_test_deg, distance_found_m)
         end
+        distance_found_m, bearing_test_deg = resist_bearing_change(bearing_deg, avoid_step1_m, bearing_test_deg, distance_found_m)
 
         return distance_found_m, bearing_test_deg, obstacle_found
     end
@@ -1181,7 +1182,7 @@ DAA = {
         obstacle.post_NED_m,
         obstacle.velocity       
     --]]
-        
+
         local distance_m, aircraft_obstacle = OAScripting:find_aircraft(current_loc, margin_aircraft)
 
         if distance_m == nil then
@@ -1272,10 +1273,10 @@ DAA = {
         -- check for collisions, yes we don't actually do anything with this, just report it (if warn_action == 1)
         if alert_target_loc ~= nil and obstacle_avoiding ~= nil then
             if obstacle_avoiding.label ~= previous_label and obstacle_avoiding.distance_m < lookahead_param then
-                if (math.abs(obstacle_avoiding.distance_m or 0)) > 9 then
-                    gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" ALERT: %s distance: %.0f m", obstacle_avoiding.label, obstacle_avoiding.distance_m ))
+                if (obstacle_avoiding.distance_m or 0) < 0 then
+                    gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" ALERT: %s distance: %.0f m", obstacle_avoiding.label, math.abs(obstacle_avoiding.distance_m )))
                 else
-                    gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " ALERT: " .. obstacle_avoiding.label .. " COLLISION")
+                    gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " ALERT: " .. obstacle_avoiding.label .. " COLLISION:" .. obstacle_avoiding.distance_m)
                 end
                 previous_label = obstacle_avoiding.label
             end
@@ -1365,7 +1366,7 @@ DAA = {
                 end
 
                 -- gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s deviation: %.1f alt: %.0f m/%d", obstacle.label, avoid_dist, new_target_loc:alt() / 100.0, new_target_loc:get_alt_frame()))
-                gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s distance %.0f m", obstacle.label, obstacle_distance))
+                gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s distance %.0f m", obstacle.label, math.abs(obstacle_distance)))
                 avoiding_label = obstacle.label
                 now_avoiding_ms = now_ms
             end
