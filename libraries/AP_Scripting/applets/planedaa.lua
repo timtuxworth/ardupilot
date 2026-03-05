@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME = "Plane DAA"
 SCRIPT_NAME_SHORT = "PlaneDAA"
-SCRIPT_VERSION = "4.7.0-003"
+SCRIPT_VERSION = "4.7.0-005"
 
 STARTUP_DELAY = 25  -- wait this many seconds for the FC to come up before starting the script
 
@@ -816,7 +816,7 @@ local loiteralt = {
         --local new_target_loc, direction = start_loiter(loiteralt.target_alt_agl_m, direction_right, groundspeed_ms)
         gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": LOITER %s to %.0f/%.0f(%.0f) alt radius %.0f m",
                 direction, target_alt_m, target_alt_frame, mavlink_wrappers.alt_frame_to_mavlink(target_alt_frame), radius_m ))
-
+        
         previous_mode = vehicle:get_mode()
         vehicle:set_mode(PLANE_MODE.GUIDED)
 
@@ -862,6 +862,8 @@ local loiteralt = {
         if previous_mode > 0 and previous_mode ~= PLANE_MODE.GUIDED then
             vehicle:set_mode(previous_mode)
             gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": Loiter Done set mode: %s", get_mode_string(previous_mode) ))
+            gcs:send_named_string("DAA-AVOID", "")
+            gcs:send_named_float("DAA-LOITER", 0.0)
         end
         previous_mode = -1
         loiteralt.active = false
@@ -1279,7 +1281,10 @@ DAA = {
                     gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " ALERT: " .. obstacle_avoiding.label .. " COLLISION:" .. obstacle_avoiding.distance_m)
                 end
                 previous_label = obstacle_avoiding.label
-            end
+                gcs:send_named_string("DAA-ALERT", "obstacle")
+                gcs:send_named_string("DAA-OBSTCL", obstacle_avoiding.label)
+                gcs:send_named_float("DAA-DIST", obstacle_avoiding.distance_m)
+             end
         else
             previous_label = ""
         end
@@ -1287,6 +1292,9 @@ DAA = {
         if aircraft_avoiding ~= nil then
             if (now_ms - now_aircraft_ms) > 5000 then
                 gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" ALERT AIRCRAFT: %s distance: %.0f m", aircraft_avoiding.label, aircraft_avoiding.distance_m ))
+                gcs:send_named_string("DAA-ALERT", "aircraft")
+                gcs:send_named_string("DAA-ARCRFT", aircraft_avoiding.label)
+                gcs:send_named_float("DAA-DIST", aircraft_avoiding.distance_m)
                 now_aircraft_ms = now_ms
             end
         end
@@ -1347,9 +1355,13 @@ DAA = {
                 return
             end
 
-            -- TODO make the target altitude/frame a parameter and switch to using Location::Frame
             loiteralt.start(ga_avoid_alt, ga_avoid_alt_frame, true, airspeed_ms)
             current_state = STATE.loitering
+
+            gcs:send_named_string("DAA-AVOID", "loiter")
+            gcs:send_named_string("DAA-ARCRFT", aircraft_avoiding.label)
+            gcs:send_named_float("DAA-LOITER", ga_avoid_alt)
+
             return
         end
         -- if we have a new target - update it if it's different from our current target otherwise revert to the original target
@@ -1358,7 +1370,6 @@ DAA = {
         end
         if set_avoid_location(new_target_loc) and navigation_target_loc ~= nil then
             local avoid_dist = navigation_target_loc:get_distance(new_target_loc)
-            gcs:send_named_float("AVOIDING-DIST", avoid_dist)
             if (now_ms - now_avoiding_ms) > 5000 and obstacle ~= nil and avoid_dist > 5 then
                 local obstacle_distance = obstacle.distance_m
                 if obstacle.location ~= nil then
@@ -1368,11 +1379,17 @@ DAA = {
                 -- gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s deviation: %.1f alt: %.0f m/%d", obstacle.label, avoid_dist, new_target_loc:alt() / 100.0, new_target_loc:get_alt_frame()))
                 gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s distance %.0f m", obstacle.label, math.abs(obstacle_distance)))
                 avoiding_label = obstacle.label
+                gcs:send_named_string("DAA-AVOID", "obstacle")
+                gcs:send_named_string("DAA-OBSTCL", avoiding_label)
+                gcs:send_named_float("DAA-DIST", avoid_dist)
                 now_avoiding_ms = now_ms
             end
         else
             if avoiding_label ~= "" then
                 gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s done", avoiding_label))
+                gcs:send_named_string("DAA-AVOID", "")
+                gcs:send_named_string("DAA-OBSTCL", "")
+                gcs:send_named_float("DAA-DIST", 0.0)
                 avoiding_label = ""
             end
         end
@@ -1409,6 +1426,12 @@ DAA = {
             gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITER AIRCRAFT: %s", aircraft_avoiding.label))
             loiteralt.start(ga_avoid_alt, ga_avoid_alt_frame, true, airspeed_ms)
             current_state = STATE.loitering
+
+            gcs:send_named_string("DAA-AVOID", "LOITER")
+            gcs:send_named_float("DAA-LOITER", ga_avoid_alt)
+            gcs:send_named_string("DAA-ARCRFT", aircraft_avoiding.label)
+            gcs:send_named_float("DAA-DIST", aircraft_avoiding.distance_m)
+
             return
         else
             current_state = STATE.monitoring
