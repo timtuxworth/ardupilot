@@ -129,17 +129,32 @@ const AP_Param::GroupInfo AP_Avoidance::var_info[] = {
 #if AP_SCRIPTING_ENABLED
     // @Param: WCLR_XY
     // @DisplayName: Well Clear horizontal
-    // @Description: The ASTM/F3442 Well Clear horizontal distance for crude aircraft is 2000'"
+    // @Description: The ASTM/F3442M-23 Well Clear horizontal distance for crude aircraft is 2000'"
     // @Units: m
     // @User: Advanced
     AP_GROUPINFO("WCLR_XY",    13, AP_Avoidance, _well_clear_xy, 609.6),
 
     // @Param: WCLR_Z
     // @DisplayName: Well Clear vertical
-    // @Description: The ASTM/F3442 Well Clear vertical distance for crude aircraft is 250'"
+    // @Description: The ASTM/F3442M-23 Well Clear vertical distance for crude aircraft is 250'"
     // @Units: m
     // @User: Advanced
     AP_GROUPINFO("WCLR_Z",    14, AP_Avoidance, _well_clear_z, 76.2),
+
+    // @Param: NMAC_XY
+    // @DisplayName: Near Miss Horizontal
+    // @Description: Zero for N/A. The FAA Near Miss horizontal distance for crude aircraft is 500'. CAR does not define NMAC so use the FAA Number."
+    // @Units: m
+    // @User: Advanced
+    AP_GROUPINFO("NMAC_XY",    15, AP_Avoidance, _near_miss_xy, 152.4),
+
+    // @Param: NMAC_Z
+    // @DisplayName: Near Miss Vertical
+    // @Description: Zero for N/A. The FAA Well Clear horizontal distance for crude aircraft is 500'. CAR does not define NMAC so use the TCAS MOPS RTCA DO-396 number."
+    // @Units: m
+    // @User: Advanced
+    AP_GROUPINFO("NMAC_Z",    16, AP_Avoidance, _near_miss_z, 30.48),
+
 
 #endif
 
