@@ -125,20 +125,25 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
         distance_new_m = fence->distance_line_to_home_inclusion(start_NE_cm, end_NE_cm);
         if (distance_new_m < distance_m) {
             _populate_fence_obstacle(obstacle, ObstacleType::FENCE_HOME);
-            fence_obstacle  = obstacle;
-            distance_m      = distance_new_m;
+            distance_m          = distance_new_m;
+            obstacle.radius_m   = fence->get_radius_m();
+            obstacle.margin_m   = fence->get_margin_ne_m();
         }
         distance_new_m = fence->distance_line_to_circle_inclusion(start_NE_cm, end_NE_cm);
         if (distance_new_m < distance_m) {
             _populate_fence_obstacle(obstacle, ObstacleType::FENCE_CIRCLE_INCLUSION);
-            fence_obstacle  = obstacle;
-            distance_m      = distance_new_m;
+            fence_obstacle      = obstacle;
+            distance_m          = distance_new_m;
+            obstacle.radius_m   = fence->get_radius_m();
+            obstacle.margin_m   = fence->get_margin_ne_m();
         }
         distance_new_m = fence->distance_line_to_circle_exclusion(start_NE_cm, end_NE_cm);
         if (distance_new_m < distance_m) {
             _populate_fence_obstacle(obstacle, ObstacleType::FENCE_CIRCLE_EXCLUSION);
-            fence_obstacle  = obstacle;
-            distance_m      = distance_new_m;
+            fence_obstacle      = obstacle;
+            distance_m          = distance_new_m;
+            obstacle.radius_m   = fence->get_radius_m();
+            obstacle.margin_m   = fence->get_margin_ne_m();
         }
         distance_new_m = fence->distance_line_to_polygon_inclusion(start_NE_cm, end_NE_cm);
         if (distance_new_m < distance_m) {
