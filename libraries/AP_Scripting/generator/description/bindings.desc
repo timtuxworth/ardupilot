@@ -1215,6 +1215,8 @@ userdata OAObstacle field is_drone boolean read
 userdata OAObstacle field location Location read
 userdata OAObstacle field position_NED_m Vector3f read
 userdata OAObstacle field velocity_NED_ms Vector3f read
+userdata OAObstacle field radius_m float read
+userdata OAObstacle field margin_m float read
 
 -- singleton AP_OAScripting depends (defined(AP_AVOIDANCE_ENABLED) && defined(AP_SCRIPTING_ENABLED) && defined(AP_ADSB_AVOIDANCE_ENABLED))
 singleton AP_OAScripting rename OAScripting
