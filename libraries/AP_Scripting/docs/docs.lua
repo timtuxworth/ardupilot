@@ -4655,3 +4655,11 @@ function OAObstacle_ud:get_position_NED_m() end
 ---@return Vector3f_ud -- vellcity of this obstacle in meters/second NED from origin
 function OAObstacle_ud:get_velocity_NED_ms() end
 
+-- get the radius of this obstacle if it's a fence
+---@return float -- radius of this fence obstacle in meters
+function OAObstacle_ud:get_radius_m() end
+
+-- get the margin of this obstacle if it's a fence
+---@return float -- margion of this fence obstacle in meters
+function OAObstacle_ud:get_margin_m() end
+
