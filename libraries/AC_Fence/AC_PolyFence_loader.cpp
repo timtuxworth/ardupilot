@@ -369,7 +369,7 @@ float AC_PolyFence_loader::distance_line_to_circle_exclusion(const Vector2f& sta
     return distance_new_m;
 }
 
-// returns distance_new_m the closest distance from (start_NE_cm, end_NE_cm) and any polygon exclusion fence. 
+// returns distance_new_m the closest distance from (start_NE_cm, end_NE_cm) and any polygon inclusion fence.
 // distance_new_m will be positive if we are outside the exclusion, or -ve if we have already breached 
 // result is true if a fence is found or false if no fence is found
 float AC_PolyFence_loader::distance_line_to_polygon_inclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const
