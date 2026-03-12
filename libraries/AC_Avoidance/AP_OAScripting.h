@@ -136,6 +136,9 @@ struct OAObstacle {
     Vector3f                    velocity_NED_ms;
     Location                    location;
     Vector3f                    position_NED_m;
+
+    float                       margin_m;       // only for fences
+    float                       radius_m;       // only for circular fences
 };
 
 //#endif // AP_ADSB_AVOIDANCE_ENABLED
