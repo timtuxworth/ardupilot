@@ -837,24 +837,35 @@ const AP_Param::Info Plane::var_info[] = {
 
     // @Group: SCHED_
     // @Path: ../libraries/AP_Scheduler/AP_Scheduler.cpp
-    GOBJECT(scheduler, "SCHED_", AP_Scheduler),
+    GOBJECT(scheduler,              "SCHED_",   AP_Scheduler),
 
+#if AC_AVOID_ENABLED == ENABLED
     // @Group: AVOID_
     // @Path: ../libraries/AC_Avoidance/AC_Avoid.cpp
-#if AC_AVOID_ENABLED == ENABLED
-    GOBJECT(avoid,      "AVOID_",   AC_Avoid),
+    GOBJECT(avoid,                  "AVOID_",   AC_Avoid),
 
     // @Group: WPNAV_
     // @Path: ../libraries/AC_WPNav/AC_WPNav.cpp
-    GOBJECTPTR(wp_nav, "WPNAV_",       AC_WPNav),
+    GOBJECTPTR(wp_nav,              "WPNAV_",   AC_WPNav),
 
     // @Group: ATC_
     // @Path: ../libraries/AC_AttitudeControl/AC_AttitudeControl.cpp,../libraries/AC_AttitudeControl/AC_AttitudeControl_Multi.cpp,../libraries/AC_AttitudeControl/AC_AttitudeControl_Heli.cpp
-    GOBJECTPTR(attitude_control, "ATC_", AC_AttitudeControl),
+    GOBJECTPTR(attitude_control,    "ATC_",     AC_AttitudeControl),
 
     // @Group: PSC
     // @Path: ../libraries/AC_AttitudeControl/AC_PosControl.cpp
-    GOBJECTPTR(pos_control, "PSC", AC_PosControl),
+    GOBJECTPTR(pos_control,         "PSC",      AC_PosControl),
+
+    // @Param: ANGLE_MAX
+    // @DisplayName: Angle Max
+    // @Description: Maximum lean angle in all VTOL flight modes - required in plane to support AC_AttitudeControl for Object Avoidance
+    // @Units: cdeg
+    // @Increment: 10
+    // @Range: 1000 8000
+    // @User: Advanced
+    // AP_GROUPINFO("ANGLE_MAX", 10, Plane, avoidance_aparm.angle_max, 3000),
+    // GOBJECTVARPTR(angle_max, "ANGLE_MAX",        &plane.avoidance_aparm.angle_max),
+
 #endif
 
     // @Group: RCMAP_

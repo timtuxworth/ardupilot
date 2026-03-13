@@ -361,6 +361,7 @@ public:
         k_param_circle_nav,
         k_param_loiter_nav,     
         k_param_custom_control,
+        k_param_angle_max,          // Required for Object Avoidance in Plane
 
     };
 

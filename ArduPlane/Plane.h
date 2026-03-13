@@ -111,6 +111,8 @@
 #if AC_OAPATHPLANNER_ENABLED == ENABLED
  #include <AC_WPNav/AC_WPNav_OA.h>
  #include <AC_Avoidance/AP_OAPathPlanner.h>
+ #include "AC_AttitudeControl/AC_AttitudeControl_TS.h"
+ #include "AP_Motors/AP_Motors_Class.h"
 #endif
 
 #include "RC_Channel.h"     // RC Channel Library
@@ -1223,6 +1225,23 @@ protected:
     
 #if AC_OAPATHPLANNER_ENABLED == ENABLED
     // TIM AC_OAWPNav needs pos_control and _altitude_control - we probably need it here too for path planning
+    // PosControl needs to know about motors
+
+    AP_MotorsMulticopter *motors = nullptr;
+    const struct AP_Param::GroupInfo *motors_var_info;
+
+    // This is a bit of a hack, AC_Attitude_Control requires it, doing this was easier than creating an AP_AttitudeControl
+    // It's important that its not named "aparm" as that overloads the existing Plane.aparm
+    AP_Vehicle::MultiCopter avoidance_aparm;
+
+    // Inertial Navigation
+    AP_InertialNav      inertial_nav;
+    // Inertial Navigation EKF - different viewpoint
+    AP_AHRS_View       *ahrs_view;
+
+    // Attitude, Position and Waypoint navigation objects
+    // To-Do: move inertial nav up or other navigation variables down here
+    AC_Loiter           *loiter_nav;
     AC_PosControl       *pos_control;
     AC_AttitudeControl  *attitude_control;
     // update_oanav takes the previous destination (A) and next destination (B) and attempts to make a path from A to B 
