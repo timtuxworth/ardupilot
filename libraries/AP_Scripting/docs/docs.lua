@@ -2237,6 +2237,16 @@ function quadplane:in_vtol_land_descent() end
 ---@return boolean
 function quadplane:abort_landing() end
 
+-- Add these at the top level of docs.lua
+MAV_VTOL_STATE_UNDEFINED = 0
+MAV_VTOL_STATE_TRANSITION_TO_FW = 1
+MAV_VTOL_STATE_TRANSITION_TO_MC = 2
+MAV_VTOL_STATE_MC = 3
+MAV_VTOL_STATE_FW = 4
+
+-- Return the current VTOL state of the aircraft as a MAV_VTOL_STATE enum
+---@return integer
+function quadplane:get_mav_vtol_state() end
 
 -- desc
 LED = {}
