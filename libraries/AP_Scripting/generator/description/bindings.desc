@@ -611,6 +611,7 @@ singleton QuadPlane method in_vtol_mode boolean
 singleton QuadPlane method in_assisted_flight boolean
 singleton QuadPlane method abort_landing boolean
 singleton QuadPlane method in_vtol_land_descent boolean
+singleton QuadPlane method get_mav_vtol_state uint16_t
 
 include ../ArduSub/Sub.h depends APM_BUILD_TYPE(APM_BUILD_ArduSub)
 singleton Sub rename sub
