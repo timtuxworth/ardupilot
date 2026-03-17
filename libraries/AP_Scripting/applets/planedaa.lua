@@ -35,9 +35,9 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
             being implemented as Lua.            
 --]]
 
-SCRIPT_NAME = "Plane DAA"
-SCRIPT_NAME_SHORT = "PlaneDAA"
-SCRIPT_VERSION = "4.7.0-005"
+SCRIPT_NAME         = "Plane DAA"
+SCRIPT_NAME_SHORT   = "PlaneDAA"
+SCRIPT_VERSION      = "4.8.0-009"
 
 STARTUP_DELAY = 25  -- wait this many seconds for the FC to come up before starting the script
 
@@ -51,6 +51,8 @@ MAV_CMD_INT = { DO_SET_MODE = 176, DO_CHANGE_SPEED = 178, DO_REPOSITION = 192,
                   GUIDED_CHANGE_SPEED = 43000, GUIDED_CHANGE_ALTITUDE = 43001, GUIDED_CHANGE_HEADING = 43002 }
 MAV_SPEED_TYPE = { AIRSPEED = 0, GROUNDSPEED = 1, CLIMB_SPEED = 2, DESCENT_SPEED = 3 }
 MAV_HEADING_TYPE = { COG = 0, HEADING = 1} -- COG = Course over Ground, i.e. where you want to go, HEADING = which way the vehicle points 
+
+MAV_VTOL_STATE = {UNDEFINED = 0, TRANSITION_TO_FW = 1, TRANSITION_TO_MC = 2, MC = 3, FW = 4 }
 
 -- MAV_COLLISION_THREAT_LEVEL
 MAV_COLLISION_THREAT_LEVEL = {
@@ -221,10 +223,10 @@ DAA_HEIGHT_USE  = bind_add_param('HEIGHT_USE', 9, 0)
 --[[
   // @Param: DAA_MARGIN_GA
   // @DisplayName: Margin for General Aviation
-  // @Description: Avoidance margin for Fixed Wing aircraft/General Aviation (Helicopters? eVTOL?)
-  // @Units: m
+  // @Description: Avoidance margin for Fixed Wing aircraft/General Aviation (Helicopters? eVTOL?) over and above the Well Clear margin AVD_WCLR_XY
+ß  // @Units: m
 --]]
-DAA_MARGIN_GA  = bind_add_param('MARGIN_GA', 10, 609.6)
+DAA_MARGIN_GA  = bind_add_param('MARGIN_GA', 10, 50)
 
 --[[
   // @Param: DAA_MARGIN_WTHR
@@ -305,14 +307,14 @@ DAA_BR_ANGLE = bind_add_param('BR_ANGLE', 18, 75)
 DAA_AVD_ALT = bind_add_param('AVD_ALT', 19, 50)
 
 --[[
-    // @Param: AVD_ALT_FR
+    // @Param: AVD_ALT_TP
     // @DisplayName: The frame of the DAA_AVD_ALT  
     // @Description:  DAA will loiter and descent to DAA_AVD_ALT in this frame. 0: Absolute, 1: Above Home, 2: Above Origin, 3: Above Terrain (default)
     // @Range: 20 5000
     // @Increment: 5
     // @User: Standard
 --]]
-DAA_AVD_ALT_FR = bind_add_param('AVD_ALT_FR', 20, 3)
+DAA_AVD_ALT_TP = bind_add_param('AVD_ALT_TP', 20, 3)
 
 --[[
     // @Param: AVD_ALERT
@@ -335,6 +337,10 @@ DAA_AVD_ACTION = bind_add_param('AVD_ACTION', 22, 1)
 WARN_DIST_XY                = bind_param("AVD_W_DIST_XY")
 WARN_ACTION                 = bind_param("AVD_W_ACTION")
 AVD_ENABLE                  = bind_param("AVD_ENABLE")
+AVD_WCLR_XY                 = bind_param("AVD_WCLR_XY")
+AVD_WCLR_Z                  = bind_param("AVD_WCLR_Z")
+AVD_NMAC_XY                 = bind_param("AVD_NMAC_XY")
+AVD_NMAC_Z                  = bind_param("AVD_NMAC_Z")
 ROLL_LIMIT_DEG              = bind_param("ROLL_LIMIT_DEG")
 WP_LOITER_RAD               = bind_param("WP_LOITER_RAD")
 
@@ -353,9 +359,13 @@ local bendy_ratio           = DAA_BR_RATIO:get()
 local bendy_angle           = DAA_BR_ANGLE:get()
 local wp_loiter_rad         = WP_LOITER_RAD:get()
 local ga_avoid_alt          = DAA_AVD_ALT:get()
-local ga_avoid_alt_frame    = DAA_AVD_ALT_FR:get()
+local ga_avoid_alt_frame    = DAA_AVD_ALT_TP:get()
 local daa_alert             = DAA_AVD_ALERT:get()
 local daa_action            = DAA_AVD_ACTION:get()
+local well_clear_xy         = AVD_WCLR_XY:get()
+local well_clear_z          = AVD_WCLR_Z:get()
+local near_miss_xy          = AVD_NMAC_XY:get()
+local near_miss_z           = AVD_NMAC_Z:get()
 
 GRAVITY_MSS = 9.80665
 LOCATION_SCALING_FACTOR_INV = 89.83204953368922
@@ -375,11 +385,13 @@ FLT_MAX = 3.402823466e+38
 local current_loc           = ahrs:get_position()
 local current_heading_deg   = math.deg(ahrs:get_yaw_rad())
 local current_mode          = vehicle:get_mode()
+local current_state         = quadplane:get_mav_vtol_state()
 
 local now_ms                = millis()
 local now_params_ms         = now_ms
 local now_debug_ms          = now_ms
 local now_avoiding_ms       = now_ms
+local now_obstacle_ms       = now_ms
 local now_aircraft_ms       = now_ms
 local now_loitering_ms      = now_ms
 local aircraft_seen_now_ms  = now_ms
@@ -444,9 +456,10 @@ end
 -- keep local copies of parameter values that the user might change so update ever 5 seconds
 local function get_vehicle_state()
 
-    current_loc = ahrs:get_position()
+    current_loc         = ahrs:get_position()
     current_heading_deg = math.deg(ahrs:get_yaw_rad())
-    current_mode = vehicle:get_mode()
+    current_mode        = vehicle:get_mode()
+    current_state       = quadplane:get_mav_vtol_state()
 
     now_ms = millis()
 
@@ -468,9 +481,14 @@ local function get_vehicle_state()
         bendy_angle         = DAA_BR_ANGLE:get()
         wp_loiter_rad       = WP_LOITER_RAD:get()
         ga_avoid_alt        = DAA_AVD_ALT:get()
-        ga_avoid_alt_frame  = DAA_AVD_ALT_FR:get()
+        ga_avoid_alt_frame  = DAA_AVD_ALT_TP:get()
         daa_alert           = DAA_AVD_ALERT:get()
         daa_action          = DAA_AVD_ACTION:get()
+
+        well_clear_xy        = AVD_WCLR_XY:get()
+        well_clear_z         = AVD_WCLR_Z:get()
+        near_miss_xy         = AVD_NMAC_XY:get()
+        near_miss_z          = AVD_NMAC_Z:get()
 
         now_params_ms       = now_ms
     end
@@ -648,7 +666,7 @@ end
 
 local function populate_obstacle(distance_m, any_obstacle)
     local obstacle = {}
-    obstacle.distance_m   = distance_m
+    obstacle.distance_m   = distance_m                      -- this is the Projected distance based on lookahead
     obstacle.sysid        = any_obstacle:src_id()
     obstacle.icao_code    = any_obstacle:icao_code()
     obstacle.type         = any_obstacle:obstacle_type()
@@ -656,6 +674,22 @@ local function populate_obstacle(distance_m, any_obstacle)
     obstacle.location     = any_obstacle:location()
     obstacle.pos_NED_m    = any_obstacle:position_NED_m()
     obstacle.vel_NED_ms   = any_obstacle:velocity_NED_ms()
+    -- these are the actual distances based on current location with no lookahead
+    -- note that for polygons there is no "location", so it's not easy to find the simple distance, so we just use the OA distance
+    if obstacle.location == nil then
+        obstacle.distance_xy = obstacle.distance_m
+        obstacle.distance_z  = 0
+    else
+        obstacle.distance_xy  = obstacle.location:get_distance(current_loc)
+        obstacle.distance_z   = math.abs(obstacle.location:get_distance_NED(current_loc):z())
+        if obstacle.type == OBSTACLE_TYPE.FENCE_CIRCLE_EXCLUSION then
+            obstacle.distance_xy = obstacle.distance_xy - any_obstacle:radius_m() - any_obstacle:margin_m()
+        elseif obstacle.type == OBSTACLE_TYPE.FENCE_CIRCLE_INCLUSION then
+            -- not too sure about the math here
+            obstacle.distance_xy = any_obstacle:radius_m() - obstacle.distance_xy - any_obstacle:margin_m()
+        end
+    end
+
     return obstacle
 end
 
@@ -704,7 +738,9 @@ local function find_closest_obstacle(loc1, loc2, lookahead_m)
         obstacle_margin = margin_weather
     else
     --]]
-    if any_obstacle.obstacle_type == OBSTACLE_TYPE.AIS then
+    if any_obstacle.obstacle_type == OBSTACLE_TYPE.GENERAL_AVIATION then
+        obstacle_marget = margin_aircraft
+    elseif any_obstacle.obstacle_type == OBSTACLE_TYPE.AIS then
         obstacle_margin = margin_ais
     elseif any_obstacle.obstacle_type == OBSTACLE_TYPE.PROXIMITY then
         obstacle_margin = margin_proximity
@@ -932,6 +968,10 @@ DAA = {
     local previous_aircraft = ""
     local STATE             = {monitoring = 1, avoiding = 2, loitering = 3, hovering = 4, landing  = 5}
     local current_state     = STATE.monitoring
+    local LoWC_active       = false
+    local LoWC_label        = ""
+    local NMAC_active       = false
+    local NMAC_label        = ""
 
     local update_target_location_save_loc = nil                 -- this is the saved current_target for use by update_target_location ONLY
     local navigation_target_loc = nil                           -- this is where the vehicle is trying to get to (i.e. next waypoint if no avoidance)
@@ -1193,9 +1233,12 @@ DAA = {
         end
 
         local obstacle = populate_obstacle(distance_m, aircraft_obstacle)
-        -- gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" FOUND AIRCRAFT: %s dist: %.0f m alt: %.0f m", obstacle.label, obstacle.distance_m, obstacle.location:alt() * 0.01 ))
+        --gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" FOUND AIRCRAFT: %s dist: %.0f m alt: %.0f m", obstacle.label, obstacle.distance_m, obstacle.location:alt() * 0.01 ))
 
         aircraft_avoiding = obstacle
+
+        --gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(" DETECTED AIRCRAFT: xy %.0f z %.0f", aircraft_avoiding.distance_xy,aircraft_avoiding.distance_z) )
+ 
     end
 
 
@@ -1247,7 +1290,7 @@ DAA = {
         end
         ::continue::
 
-        -- we need to independanty detect aircraft because even if an aircraft may not be the closest obstacle found by bendy ruler, we may still need to deal with it
+        -- we need to independenty detect aircraft because even if an aircraft may not be the closest obstacle found by bendy ruler, we may still need to deal with it
         -- in other words, sometimes aircraft have higher priority than any other obstacles
         detect_aircraft()
 
@@ -1267,37 +1310,100 @@ DAA = {
         return location_project(current_loc, best_bearing_deg, distance_to_target_m, target_loc)
     end
 
-    -- alert the pilot about any obstacles found
+    local function alert_obstacle(alert_target_loc)
+        if obstacle_avoiding == nil or alert_target_loc == nil  or obstacle_avoiding.distance_xy > lookahead_param then
+            previous_label = ""
+            return
+        end
+        if obstacle_avoiding.label == previous_label then
+            -- still near the same object, no need to spam the user
+            return
+        end
+
+        if (now_ms - now_obstacle_ms) > 5000 then
+            gcs:send_named_string("DAA-ALERT", "obstacle")
+            gcs:send_named_string("DAA-OBSTCL", obstacle_avoiding.label)
+            gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(" ALERT: %s %.0f m",
+                                obstacle_avoiding.label, obstacle_avoiding.distance_xy))
+            gcs:send_named_float("DAA-DISTXY", obstacle_avoiding.distance_xy)
+            gcs:send_named_float("DAA-DISTZ", obstacle_avoiding.distance_z)
+            previous_label  = obstacle_avoiding.label
+            now_obstacle_ms = now_ms
+        end
+    end
+
+    local function NMAC_triggered(nmac_obstacle)
+        NMAC_active = true
+        NMAC_label  = nmac_obstacle.label
+        gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. string.format(" ALERT AIRCRAFT: %s Near Miss: %.0fm/%.0fm ", 
+                        nmac_obstacle.label, nmac_obstacle.distance_xy, nmac_obstacle.distance_z ))
+        gcs:send_named_string("DAA-NMAC", "aircraft")
+    end
+
+    local function NMAC_cleared()
+        if not NMAC_active then
+            return
+        end
+        gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(" ALERT AIRCRAFT: %s Near Miss CLEAR",
+                        NMAC_label ))
+        gcs:send_named_string("DAA-NMACOK", "aircraft")
+        NMAC_active = false
+        NMAC_label  = ""
+    end
+
+    local function LoWC_triggered(lowc_obstacle)
+        LoWC_active = true
+        LoWC_label  = lowc_obstacle.label
+        gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" ALERT AIRCRAFT: %s Loss of Well Clear: %.0f/%.0f m", 
+                    lowc_obstacle.label, lowc_obstacle.distance_xy, lowc_obstacle.distance_z ))
+        gcs:send_named_string("DAA-LOWC", "aircraft")
+    end
+
+    local function LoWC_cleared()
+        if not LoWC_active then
+            return
+        end
+        gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(" ALERT AIRCRAFT: %s Well Clear", LoWC_label) )
+        gcs:send_named_string("DAA-LOWC", "aircraft")
+        LoWC_active = false
+        LoWC_label  = ""
+    end
+
+    local function notify_aircraft_nearby(aircraft_obstacle)
+        gcs:send_named_string("DAA-NEARBY", aircraft_obstacle.label)
+        gcs:send_named_float("DAA-DISTXY", aircraft_obstacle.distance_xy)
+        gcs:send_named_float("DAA-DISTZ", aircraft_obstacle.distance_z)
+    end
+
+    local function alert_aircraft()
+        if aircraft_avoiding == nil then
+            NMAC_cleared()
+            LoWC_cleared()
+            return
+        end
+        if (now_ms - now_aircraft_ms) > 5000 then
+            --gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(" ALERT AIRCRAFT: xy %.0f z %.0f", aircraft_avoiding.distance_xy,aircraft_avoiding.distance_z) )
+            if aircraft_avoiding.distance_xy < near_miss_xy and aircraft_avoiding.distance_z < near_miss_z then
+                NMAC_triggered(aircraft_avoiding)
+            elseif aircraft_avoiding.distance_xy < well_clear_xy and aircraft_avoiding.distance_z < well_clear_z then
+                LoWC_triggered(aircraft_avoiding)
+            else
+                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" ALERT AIRCRAFT: %s %.0f m", 
+                                aircraft_avoiding.label, aircraft_avoiding.distance_xy ))
+                gcs:send_named_string("DAA-ALERT", "aircraft")
+            end
+            notify_aircraft_nearby(aircraft_avoiding)
+            now_aircraft_ms = now_ms
+        end
+    end
+
+    -- alert the pilot about any obstacles found, alert_target_loc is the suggested new target location (if applicable)
     function DAA.alert(alert_target_loc)
         if daa_alert == 0 then
             return  -- parameter DAA_ALERT can be used to turn off alerting
         end
-        -- check for collisions, yes we don't actually do anything with this, just report it (if warn_action == 1)
-        if alert_target_loc ~= nil and obstacle_avoiding ~= nil then
-            if obstacle_avoiding.label ~= previous_label and obstacle_avoiding.distance_m < lookahead_param then
-                if (obstacle_avoiding.distance_m or 0) < 0 then
-                    gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" ALERT: %s distance: %.0f m", obstacle_avoiding.label, math.abs(obstacle_avoiding.distance_m )))
-                else
-                    gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " ALERT: " .. obstacle_avoiding.label .. " COLLISION:" .. obstacle_avoiding.distance_m)
-                end
-                previous_label = obstacle_avoiding.label
-                gcs:send_named_string("DAA-ALERT", "obstacle")
-                gcs:send_named_string("DAA-OBSTCL", obstacle_avoiding.label)
-                gcs:send_named_float("DAA-DIST", obstacle_avoiding.distance_m)
-             end
-        else
-            previous_label = ""
-        end
-
-        if aircraft_avoiding ~= nil then
-            if (now_ms - now_aircraft_ms) > 5000 then
-                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" ALERT AIRCRAFT: %s distance: %.0f m", aircraft_avoiding.label, aircraft_avoiding.distance_m ))
-                gcs:send_named_string("DAA-ALERT", "aircraft")
-                gcs:send_named_string("DAA-ARCRFT", aircraft_avoiding.label)
-                gcs:send_named_float("DAA-DIST", aircraft_avoiding.distance_m)
-                now_aircraft_ms = now_ms
-            end
-        end
+        alert_obstacle(alert_target_loc)
+        alert_aircraft()
     end
 
     -- a wrapper around vehicle:update_target_location()
@@ -1349,7 +1455,7 @@ DAA = {
             -- depending on the obstacle we might do different things. Specifically if the obstacle is a crude aircraft
             -- in Canada we want to do a "Right 2" circuit descending to XXX altitude
             -- which for now we are doing by simply doing a loiter to alt in guided mode
-        
+
             -- we might already be doing a loiter because of this aircraft. As long as it's far enough away, thats all we need to do
             if obstacle == aircraft_avoiding then
                 return
@@ -1376,21 +1482,21 @@ DAA = {
                     navigation_target_loc:get_distance(obstacle.location)
                 end
 
-                -- gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s deviation: %.1f alt: %.0f m/%d", obstacle.label, avoid_dist, new_target_loc:alt() / 100.0, new_target_loc:get_alt_frame()))
                 gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s distance %.0f m", obstacle.label, math.abs(obstacle_distance)))
                 avoiding_label = obstacle.label
                 gcs:send_named_string("DAA-AVOID", "obstacle")
                 gcs:send_named_string("DAA-OBSTCL", avoiding_label)
                 gcs:send_named_float("DAA-DIST", avoid_dist)
                 now_avoiding_ms = now_ms
+                current_state = STATE.avoiding
             end
         else
             if avoiding_label ~= "" then
-                gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s done", avoiding_label))
+                gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s done", avoiding_label))
                 gcs:send_named_string("DAA-AVOID", "")
                 gcs:send_named_string("DAA-OBSTCL", "")
-                gcs:send_named_float("DAA-DIST", 0.0)
                 avoiding_label = ""
+                current_state = STATE.monitoring
             end
         end
     end
@@ -1449,6 +1555,7 @@ local no_DAA_displayed  = false
 local function update()
     get_vehicle_state()
 
+
     local switch_function = DAA_ACT_FN:get()
     if switch_function == nil then
         if ~no_DAA_displayed then
@@ -1472,7 +1579,10 @@ local function update()
     if DAA.isactive() then
         local suggested_target_loc = DAA.detect()
         DAA.alert(suggested_target_loc)
-        DAA.avoid(suggested_target_loc)
+        -- currently we only do avoidance in FW mode
+        if current_state ~= MAV_VTOL_STATE.FW then
+            DAA.avoid(suggested_target_loc)
+        end
     end
 end
 
