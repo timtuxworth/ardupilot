@@ -9,10 +9,12 @@ the required data to Lua and then allows the Lua to implement most of the Alert 
 in order to allow for the maximum implementation flexibility in the face of varying regulatory
 environments across the globe.
 
+This script requires the AC_AVOID library to be available. This requires a custom build.
+
 ## Parameters
 
 The script adds the following parameters to control it's behaviour. It uses
-the existing FOLL parameters that are used for the Copter FOLLOW mode. In addition
+the existing AVD parameters that are used for the Copter FOLLOW mode. In addition
 the following "FOLLP" parameters are added.
 
 ## FOLLP_FAIL_MODE
