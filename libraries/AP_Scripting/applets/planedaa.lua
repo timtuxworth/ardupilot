@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "PlaneDAA"
-SCRIPT_VERSION      = "4.8.0-009"
+SCRIPT_VERSION      = "4.8.0-012"
 
 STARTUP_DELAY = 25  -- wait this many seconds for the FC to come up before starting the script
 
@@ -131,7 +131,7 @@ ADSB_EMITTER = {
 
 local DAA_active = true;
 
-local PARAM_TABLE_KEY = 106
+local PARAM_TABLE_KEY = 125
 local PARAM_TABLE_PREFIX = "DAA_"
 
 -- bind a parameter to a variable
@@ -145,8 +145,8 @@ function bind_add_param(name, idx, default_value)
     return bind_param(PARAM_TABLE_PREFIX .. name)
 end
 
--- setup follow mode specific parameters need 2wo tables because there are > 10 parameters
-assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 30), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX)
+-- setup follow mode specific parameters
+assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 30), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
 
 --[[
     // @Param: DAA_ACT_FN
@@ -154,7 +154,7 @@ assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 30), SCRIPT_NAME_SHO
     // @Description: Disable the DAA capability or turn it off (defaults to on)
     // @Range: 300 307
 --]]
-DAA_ACT_FN = bind_add_param("ACT_FN", 1, 306)
+DAA_ACT_FN = bind_add_param("ACT_FN", 1, 308)
 
 --[[
   // @Param: DAA_MARGIN_FENCE
@@ -739,9 +739,9 @@ local function find_closest_obstacle(loc1, loc2, lookahead_m)
     else
     --]]
     if any_obstacle.obstacle_type == OBSTACLE_TYPE.GENERAL_AVIATION then
-        obstacle_marget = margin_aircraft
+        obstacle_marget = well_clear_xy + margin_aircraft
     elseif any_obstacle.obstacle_type == OBSTACLE_TYPE.AIS then
-        obstacle_margin = margin_ais
+        obstacle_margin = well_clear_xy + margin_ais
     elseif any_obstacle.obstacle_type == OBSTACLE_TYPE.PROXIMITY then
         obstacle_margin = margin_proximity
     elseif any_obstacle.obstacle_type == OBSTACLE_TYPE.FENCE_CIRCLE_EXCLUSION
@@ -988,7 +988,93 @@ DAA = {
         wind_2d:y(wind_3d:y())
 
         return  wind_2d:length(), wind_2d:angle()
-    end 
+    end
+
+    -- methods to log DAA results DAAD = Detect, DAAA = Alert, DAAV = aVoid
+    local function log_detect_result(obstacle_found, distance_found_m, distance_to_target_m, best_bearing_deg, target_loc)
+        --    log_detect_result(false, distance_found_m, distance_to_target_m, best_bearing_deg, target_loc)
+        if target_loc == nil or distance_found_m == nil or distance_to_target_m == nil or best_bearing_deg == nil then
+            -- we can't be avoiding if no target, so no loggin required
+            return
+        end
+        --print(distance_found_m)
+        --print(distance_to_target_m)
+        --print(target_loc:lat())
+        --print(target_loc:lng())
+        --print(target_loc:alt())
+
+        --logger:write('DAAD',                -- D for Detect
+        local status, err = pcall(logger.write, logger, "DAAD",
+            'Obs,DstF,DstT,HdgB,Tfnd,TLat,TLng,TAlt,TFra',
+            'BffffLLfB',                    -- Formats (L for Lat/Lng, f for Alt)
+            '-mmmdDUm-',                    -- Units (D=lat deg, U=lng deg, m=meter)
+            '-----GG--',                    -- Multipliers (G=1e-7 for L types)
+            (obstacle_found and 1 or 0),    -- Obs - Obstacle found true/false
+            distance_found_m,               -- DstF - Distance to found obstacle in meters
+            distance_to_target_m,           -- DstT - Distance to proposed new target to avoid the obstacle
+            best_bearing_deg,               -- HdgB - Best bearing found to avoid obstacles
+            (has_target and 1 or 0),        -- TFnd - Target found
+            target_loc:lat(),               -- TLat - Latitude of proposed new target in degrees
+            target_loc:lng(),               -- TLng - Longitude of proposed new target in degrees
+            target_loc:alt() * 0.01,        -- TAlt - Alitude of proposed new target in meters
+            target_loc:get_alt_frame())     -- TFrm - Frame of the ALtitlde: 0: AMSL, 1: Home Relative, 3: Terrain Relative
+
+        if not status then
+            gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " log detect:" .. tostring(err) )
+        end
+    end
+
+    local function log_detect_aircraft(aircraft)
+        if aircraft == nil then
+            return
+        end
+
+        --logger:write('DAAG',                    -- G for GA = General Aviation
+        local status, err = pcall(logger.write, logger, "DAAG",
+            'DstF,TLat,TLng,TAlt,TFra,DstH,DstZ,ICAO',
+            'fLLfBffI',                          -- Formats (L for Lat/Lng, f for Alt)
+            'mDUm-mmh',                          -- Units (D=lat deg, U=lng deg, m=meter)
+            '-GG-----',                          -- Multipliers (G=1e-7 for L types)
+            aircraft.distance_m,                -- DstF - Distance to found aircraft in meters
+            aircraft.location:lat(),            -- TLat - Latitude of proposed new target in degrees
+            aircraft.location:lng(),            -- TLng - Longitude of proposed new target in degrees
+            aircraft.location:alt() * 0.01,     -- TAlt - Alitude of proposed new target in meters
+            aircraft.location:get_alt_frame(),  -- TFrm - Frame of the ALtitlde: 0: AMSL, 1: Home Relative, 3: Terrain Relative
+            aircraft.distance_xy,               -- DstH - Horizontal distance to the aircraft
+            aircraft.distance_z,                -- DstZ - Vertical distance to the aircraft (+ve is up)
+            aircraft.icao_code                  -- ICAO - the integer value of the ICAO code of the aircraft if available
+        )
+        if not status then
+            gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " log aircraft:" .. tostring(err) )
+        end
+    end
+
+    local function log_alert()
+    end
+
+    local function log_avoid(obstacle, target_loc)
+        if target_loc == nil then
+            return
+        end
+        local status, err = pcall(logger.write, logger, "DAAV",
+        --logger:write('DAAV',                        -- V for aVoid
+            'DstO,TLat,TLng,TAlt,TFra,DstH,DstZ,TypO',
+            'fLLfBffB',                             -- Formats (L for Lat/Lng, f for Alt)
+            'mDUm-mm-',                             -- Units (D=lat deg, U=lng deg, m=meter)
+            '-GG-----',                             -- Multipliers (G=1e-7 for L types)
+            obstacle.distance_m,                    -- DstO - Distance to found obstacle in meters
+            target_loc:lat(),                       -- TLat - Latitude of DAA target in degrees
+            target_loc:lng(),                       -- TLng - Longitude of DAA target in degrees
+            target_loc:alt() * 0.01,       -- TAlt - Alitude of proposed new target in meters
+            target_loc:get_alt_frame(),    -- TFrm - Frame of the ALtitlde: 0: AMSL, 1: Home Relative, 3: Terrain Relative
+            obstacle.distance_xy,                   -- DstH - Horizontal distance to the obstacle
+            obstacle.distance_z,                    -- DstZ - Vertical distance to the aircraft (+ve is up),
+            obstacle.type                           -- ObsT - the type of the obstacle as an OBSTACLE_TYPE
+        )
+        if not status then
+            gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " log avoid:" .. tostring(err) )
+        end
+    end
 
     function DAA.disable()
         DAA.enabled = false
@@ -1237,6 +1323,7 @@ DAA = {
 
         aircraft_avoiding = obstacle
 
+        log_detect_aircraft(aircraft_avoiding)
         --gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(" DETECTED AIRCRAFT: xy %.0f z %.0f", aircraft_avoiding.distance_xy,aircraft_avoiding.distance_z) )
  
     end
@@ -1259,7 +1346,10 @@ DAA = {
         --gcs:send_text(0, "got current lookahead")
 
         -- local bearing_cd = math.deg(current_loc:get_bearing(target_loc))*100
-        local bearing_deg = math.deg(current_loc:get_bearing(target_loc))
+        local bearing_deg       = math.deg(current_loc:get_bearing(target_loc))
+        local best_bearing_deg  = bearing_deg
+        local best_distance_m   = -FLT_MAX
+
         -- get the current ground course
         -- gcs:send_text(0, string.format("bearing_deg : %.2f",bearing_deg ))
 
@@ -1267,11 +1357,9 @@ DAA = {
         local distance_to_target_m = limit_distance(current_loc, target_loc, bearing_deg)
         -- If the full distance is less than 20m, no avoidance is needed
         if distance_to_target_m < 20 then
+            log_detect_result(false, distance_to_target_m, distance_to_target_m, best_bearing_deg, target_loc)
             return nil
         end
-
-        local best_bearing_deg = bearing_deg
-        local best_distance_m = -FLT_MAX
 
         -- Try 5 degree increments around a circle, alternating left and right. Check each one to see if flying in that direction would avoid all obstacles.
         for i = 0, (360 / bearing_inc_deg) do
@@ -1296,6 +1384,7 @@ DAA = {
 
         if obstacle_avoiding == nil then
             --gcs:send_text(MAV_SEVERITY.ERROR, "NO OBSTACLE")
+            log_detect_result(false, obstacle_distance_m, distance_to_target_m, best_bearing_deg, target_loc)
             return nil -- no avoidance required
         else
             --gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. "step1 dist: " .. obstacle_avoiding.distance_m .. " src: " .. obstacle_avoiding.label .. " bearing: " .. best_bearing_deg)
@@ -1307,7 +1396,9 @@ DAA = {
         end
 
         -- calculate the new target location based on the best bearing we found. target_loc is passed for altitude only
-        return location_project(current_loc, best_bearing_deg, distance_to_target_m, target_loc)
+        local new_target_loc = location_project(current_loc, best_bearing_deg, distance_to_target_m, target_loc)
+        log_detect_result(true, obstacle_distance_m, distance_to_target_m, best_bearing_deg, new_target_loc)
+        return new_target_loc
     end
 
     local function alert_obstacle(alert_target_loc)
@@ -1479,7 +1570,7 @@ DAA = {
             if (now_ms - now_avoiding_ms) > 5000 and obstacle ~= nil and avoid_dist > 5 then
                 local obstacle_distance = obstacle.distance_m
                 if obstacle.location ~= nil then
-                    navigation_target_loc:get_distance(obstacle.location)
+                    avoid_dist = navigation_target_loc:get_distance(obstacle.location)
                 end
 
                 gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s distance %.0f m", obstacle.label, math.abs(obstacle_distance)))
@@ -1499,6 +1590,7 @@ DAA = {
                 current_state = STATE.monitoring
             end
         end
+        log_avoid(obstacle, daa_target_loc)
     end
 
     local function do_loitering()
@@ -1569,7 +1661,7 @@ local function update()
 	    -- gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " switch:"..switch_state)
         if switch_state == 0 then -- switch Low to disarm - so defaults to on
             DAA.enable()
-        elseif switch_state == 2 then -- switch High to turn off
+        elseif switch_state == 1 then -- switch High to turn off
             DAA.disable()
         end
         last_switch_state = switch_state
@@ -1580,7 +1672,7 @@ local function update()
         local suggested_target_loc = DAA.detect()
         DAA.alert(suggested_target_loc)
         -- currently we only do avoidance in FW mode
-        if current_state ~= MAV_VTOL_STATE.FW then
+        if current_state == MAV_VTOL_STATE.FW then
             DAA.avoid(suggested_target_loc)
         end
     end
