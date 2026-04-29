@@ -37,53 +37,55 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "PlaneDAA"
-SCRIPT_VERSION      = "4.8.0-012"
+SCRIPT_VERSION      = "4.8.0-013"
 
 STARTUP_DELAY = 25  -- wait this many seconds for the FC to come up before starting the script
 
-PLANE_MODE = {CIRCLE = 1, STABILIZE = 2, TRAINING = 3, ACRO = 4, FBWA = 4, FBWB = 6, CRUISE = 7, AUTOTUNE = 8, AUTO=10, RTL=11, LOITER=12, TAKEOFF = 13, AVOID_ADSB = 14, GUIDED=15, 
-                QSTABILIZE = 17,  QHOVER=18, QLOITER=19, QLAND = 20, QRTL=21, QAUTOTUNE = 22, QACRO = 23, THERMAL = 24, LOITER_ALT_QLAND = 25, AUTOLAND = 26}
+PLANE_MODE          = {CIRCLE = 1, STABILIZE = 2, TRAINING = 3, ACRO = 4, FBWA = 4, FBWB = 6, CRUISE = 7, 
+                        AUTOTUNE = 8, AUTO=10, RTL=11, LOITER=12, TAKEOFF = 13, AVOID_ADSB = 14, GUIDED=15, 
+                        QSTABILIZE = 17,  QHOVER=18, QLOITER=19, QLAND = 20, QRTL=21, QAUTOTUNE = 22, QACRO = 23, 
+                        THERMAL = 24, LOITER_ALT_QLAND = 25, AUTOLAND = 26}
 
-ALT_FRAME = { GLOBAL = 0, RELATIVE = 1, ORIGIN = 2, TERRAIN = 3}
+ALT_FRAME           = {GLOBAL = 0, RELATIVE = 1, ORIGIN = 2, TERRAIN = 3}
 
-MAV_SEVERITY = {EMERGENCY=0, ALERT=1, CRITICAL=2, ERROR=3, WARNING=4, NOTICE=5, INFO=6, DEBUG=7}
-MAV_CMD_INT = { DO_SET_MODE = 176, DO_CHANGE_SPEED = 178, DO_REPOSITION = 192, 
-                  GUIDED_CHANGE_SPEED = 43000, GUIDED_CHANGE_ALTITUDE = 43001, GUIDED_CHANGE_HEADING = 43002 }
-MAV_SPEED_TYPE = { AIRSPEED = 0, GROUNDSPEED = 1, CLIMB_SPEED = 2, DESCENT_SPEED = 3 }
-MAV_HEADING_TYPE = { COG = 0, HEADING = 1} -- COG = Course over Ground, i.e. where you want to go, HEADING = which way the vehicle points 
+MAV_SEVERITY        = {EMERGENCY=0, ALERT=1, CRITICAL=2, ERROR=3, WARNING=4, NOTICE=5, INFO=6, DEBUG=7}
+MAV_CMD_INT         = {DO_SET_MODE = 176, DO_CHANGE_SPEED = 178, DO_REPOSITION = 192, 
+                        GUIDED_CHANGE_SPEED = 43000, GUIDED_CHANGE_ALTITUDE = 43001, GUIDED_CHANGE_HEADING = 43002}
+MAV_SPEED_TYPE      = {AIRSPEED = 0, GROUNDSPEED = 1, CLIMB_SPEED = 2, DESCENT_SPEED = 3}
+MAV_HEADING_TYPE    = {COG = 0, HEADING = 1} -- COG = Course over Ground, i.e. where you want to go, HEADING = which way the vehicle points 
 
-MAV_VTOL_STATE = {UNDEFINED = 0, TRANSITION_TO_FW = 1, TRANSITION_TO_MC = 2, MC = 3, FW = 4 }
+MAV_VTOL_STATE      = {UNDEFINED = 0, TRANSITION_TO_FW = 1, TRANSITION_TO_MC = 2, MC = 3, FW = 4 }
 
 -- MAV_COLLISION_THREAT_LEVEL
 MAV_COLLISION_THREAT_LEVEL = {
-    NONE = 0,         -- Not a threat
-    LOW = 1,          -- Mild concern about this threat
-    HIGH = 2,         -- Craft is panicking and may take action to avoid
-    ENUM_END = 3      -- End of enum
+    NONE                        = 0,    -- Not a threat
+    LOW                         = 1,    -- Mild concern about this threat
+    HIGH                        = 2,    -- Craft is panicking and may take action to avoid
+    ENUM_END                    = 3     -- End of enum
 }
 -- MAV_COLLISION_SRC
 MAV_COLLISION_SRC = {
-    ADSB = 0,                         -- Source is ADSB_VEHICLE packets
-    MAVLINK_GPS_GLOBAL_INT = 1,       -- Source is MAVLink GPS_GLOBAL_INT
-    ENUM_END = 2                      -- End of enum
+    ADSB                        = 0,    -- Source is ADSB_VEHICLE packets
+    MAVLINK_GPS_GLOBAL_INT      = 1,    -- Source is MAVLink GPS_GLOBAL_INT
+    ENUM_END                    = 2     -- End of enum
 }
 
 MAV_COLLISION_ACTION = {
-    NONE                        = 0, -- Ignore any potential collisions 
-    REPORT                      = 1, -- Report potential collision 
-    ASCEND_OR_DESCEND           = 2, -- Ascend or Descend to avoid threat 
-    MOVE_HORIZONTALLY           = 3, -- Move horizontally to avoid threat 
-    MOVE_PERPENDICULAR          = 4, -- Aircraft to move perpendicular to the collision's velocity vector 
-    RTL                         = 5, -- Aircraft to fly directly back to its launch point 
-    HOVER                       = 6, -- Aircraft to stop in place 
-    LOITERTURN                  = 7, -- Aircraft to do a loiter turn left or right to lose altitude
+    NONE                        = 0,    -- Ignore any potential collisions 
+    REPORT                      = 1,    -- Report potential collision 
+    ASCEND_OR_DESCEND           = 2,    -- Ascend or Descend to avoid threat 
+    MOVE_HORIZONTALLY           = 3,    -- Move horizontally to avoid threat 
+    MOVE_PERPENDICULAR          = 4,    -- Aircraft to move perpendicular to the collision's velocity vector 
+    RTL                         = 5,    -- Aircraft to fly directly back to its launch point 
+    HOVER                       = 6,    -- Aircraft to stop in place 
+    LOITERTURN                  = 7,    -- Aircraft to do a loiter turn left or right to lose altitude
 }
 
 OBSTACLE_TYPE = {
     GENERAL                     = 0,    -- generic obstacle, we don't really know what it is
     MAV_SYSID                   = 1,    -- another MAVLINK drone with a MAV_SYSID
     GENERAL_AVIATION            = 2,    -- crude aircraft, usually with an ICAO ADSB identifier
-    WEATHER                     = 3,    
+    WEATHER                     = 3,
     BIRD_MIGRATORY              = 4,    -- typically one or more Canada Geese
     BIRD_OF_PREY                = 5,    -- a bird that might attack the vehicle
     FENCE_HOME                  = 6,    -- all fixed/unmovable fences
@@ -98,33 +100,32 @@ OBSTACLE_TYPE = {
 
 -- ADSB Emitter types
 ADSB_EMITTER = {
-    NO_INFO           = 0,
-    LIGHT             = 1,
-    SMALL             = 2,
-    LARGE             = 3,
-    HIGH_VORTEX_LARGE = 4,
-    HEAVY             = 5,
-    HIGHLY_MANUV      = 6,
-    ROTOCRAFT         = 7,  -- this is Helicopter
+    NO_INFO                     = 0,
+    LIGHT                       = 1,
+    SMALL                       = 2,
+    LARGE                       = 3,
+    HIGH_VORTEX_LARGE           = 4,
+    HEAVY                       = 5,
+    HIGHLY_MANUV                = 6,
+    ROTOCRAFT                   = 7,    -- this is Helicopter
     -- 8 Unassigned
-    GLIDER            = 9,
-    LIGHTER_AIR       = 10,
-    PARACHUTE         = 11,
-    ULTRA_LIGHT       = 12,
-    AIRCRAFT_HIGH     = 13,
-    -- 13 Unassigned
-    UAV               = 14, -- this is drones
-    SPACE             = 15, -- this is rockets
+    GLIDER                      = 9,
+    LIGHTER_AIR                 = 10,
+    PARACHUTE                   = 11,
+    ULTRA_LIGHT                 = 12,
+    AIRCRAFT_HIGH               = 13,
+    UAV                         = 14,   -- this is drones
+    SPACE                       = 15,   -- this is rockets
     --16 Unassigned
 
     -- Surface types
-    EMERGENCY_SURFACE = 17,
-    SERVICE_SURFACE   = 18,
+    EMERGENCY_SURFACE           = 17,
+    SERVICE_SURFACE             = 18,
 
     -- Obstacle types
-    POINT_OBSTACLE    = 19,
-    CLUSTER_OBSTACLE  = 20,
-    LINE_OBSTACLE     = 21,
+    POINT_OBSTACLE              = 19,
+    CLUSTER_OBSTACLE            = 20,
+    LINE_OBSTACLE               = 21,
     -- 22 - 39 Reserved
 
 }
@@ -627,12 +628,12 @@ local function pretty_label(script_obstacle)
 
     -- this will typically be an GLOBAL_POSITION_INT (or FOLLOW_TARGET?) message
     if script_obstacle:is_drone() == true or emitter_type == ADSB_EMITTER.UAV then
-        return string.format("MAV:%d", script_obstacle:src_id())
+        return string.format("SYSID:%d", script_obstacle:src_id())
 
     -- this will have arrived as an ADSB_VEHICLE
     elseif script_obstacle:is_aircraft() == true or emitter_type == 100
             or (emitter_type >= ADSB_EMITTER.LIGHT and emitter_type <= ADSB_EMITTER.AIRCRAFT_HIGH) then
-        return string.format("ADS-B:%06X", script_obstacle:icao_code())
+        return string.format("%06X", script_obstacle:icao_code())
 
     -- fake generated obstacles from mavproxy_genobstacles have these special case "emitters" for SITL/testing
     elseif emitter_type == 99 then
@@ -1156,18 +1157,24 @@ DAA = {
     We return true if we have resisted the change and will follow the last calculated bearing. 
     --]]
     local function resist_bearing_change(bearing_orig, avoid_step1_m, bearing_test, distance_found)
-       if math.abs(wrap_180(bearing_orig - bearing_test)) > bendy_angle then
-            -- check margin in last bearing's direction
-            local test_loc_previous_bearing = current_loc:copy()
-            test_loc_previous_bearing:offset_bearing(wrap_180(bearing_orig), avoid_step1_m)
+        if distance_found ==  0 then
+            return distance_found, bearing_test
+        end
+	    if math.abs(wrap_180(bearing_orig - bearing_test)) < bendy_angle then
+            return distance_found, bearing_test
+        end
+        -- gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. 
+    -- " RESIST: bearing orig" .. bearing_orig .. " test:" .. bearing_test .. " dist: " .. avoid_step1_m .. " found: " .. distance_found)
+        -- check margin in last bearing's direction
+        local test_loc_previous_bearing = current_loc:copy()
+        test_loc_previous_bearing:offset_bearing(wrap_180(bearing_orig), avoid_step1_m)
 
-            local distance_previous_m, _ = find_closest_obstacle(current_loc, test_loc_previous_bearing, avoid_step1_m)
-            if (distance_previous_m < (bendy_ratio * distance_found)) then
-                -- don't change direction abruptly. If margin difference is not significant, follow the last direction
-            	-- gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. " RESIST: was " .. bearing_test .. " now " .. bearing_orig .. "found: " .. distance_found .. " ratio: " .. (bendy_ratio * distance_found))
-                bearing_test = bearing_orig
-                distance_found  = distance_previous_m
-            end
+        local distance_previous_m, _ = find_closest_obstacle(current_loc, test_loc_previous_bearing, avoid_step1_m)
+        if (math.abs(distance_previous_m) < math.abs(bendy_ratio * distance_found)) then
+            -- don't change direction abruptly. If margin difference is not significant, follow the last direction
+            -- gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. " RESIST: was " .. bearing_test .. " now " .. bearing_orig .. " found: " .. math.abs(distance_found) .. " ratio: " .. math.abs(bendy_ratio * distance_found) .. " new dist:" .. distance_previous_m)
+            bearing_test = bearing_orig
+            distance_found  = distance_previous_m
         end
 
         return distance_found, bearing_test
@@ -1281,7 +1288,7 @@ DAA = {
                 distance_found_m = distance_found_m + distance2_m
             end
         end
-        distance_found_m, bearing_test_deg = resist_bearing_change(bearing_deg, avoid_step1_m, bearing_test_deg, distance_found_m)
+	-- distance_found_m, bearing_test_deg = resist_bearing_change(bearing_deg, avoid_step1_m, bearing_test_deg, distance_found_m)
 
         return distance_found_m, bearing_test_deg, obstacle_found
     end
@@ -1394,6 +1401,8 @@ DAA = {
             --gcs:send_text(MAV_SEVERITY.ERROR, string.format("DETECTED: %s distance: %.0f m", obstacle_avoiding.label, obstacle_avoiding.distance_m))
             now_debug_ms = now_ms
         end
+
+	    distance_to_target_m, best_bearing_deg = resist_bearing_change(bearing_deg, current_lookahead, best_bearing_deg, distance_to_target_m)
 
         -- calculate the new target location based on the best bearing we found. target_loc is passed for altitude only
         local new_target_loc = location_project(current_loc, best_bearing_deg, distance_to_target_m, target_loc)
@@ -1661,7 +1670,7 @@ local function update()
 	    -- gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " switch:"..switch_state)
         if switch_state == 0 then -- switch Low to disarm - so defaults to on
             DAA.enable()
-        elseif switch_state == 1 then -- switch High to turn off
+        elseif switch_state >= 1 then -- switch High to turn off
             DAA.disable()
         end
         last_switch_state = switch_state
