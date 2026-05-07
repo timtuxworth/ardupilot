@@ -176,6 +176,12 @@ const AP_Param::GroupInfo AP_ADSB::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("OPTIONS",  15, AP_ADSB, _options, 0),
 
+    // @Param: OPTIONS
+    // @DisplayName: ADS-B Enable
+    // @Description: By default ADS-B is enabled if any ADSB_TYPE values are selected. This will enable ADS-B for MAVLink ADSB_VEHICLE even if no devices are connected.
+    // @Values: 0:Default,1:Enabled
+    AP_GROUPINFO("ENABLE",  16, AP_ADSB, _enabled, 0),
+
     AP_GROUPEND
 };
 
@@ -251,8 +257,8 @@ bool AP_ADSB::check_startup()
         }
     }
 
-    if (all_backends_disabled) {
-        // nothing to do
+    if (all_backends_disabled and !_enabled) {
+        // nothing to do if ADSB_ENABLE = 0 and no backends, but if no backends and ADSB_ENABLE = 1 we will still enable anyway
         return false;
     }
     if (in_state.vehicle_list == nullptr)  {
@@ -355,7 +361,6 @@ void AP_ADSB::update(void)
     loc.vertical_pos_accuracy_is_valid = gps.vertical_accuracy(loc.vertical_pos_accuracy);
     loc.horizontal_vel_accuracy_is_valid = gps.speed_accuracy(loc.horizontal_vel_accuracy);
 
-
     loc.vel_ned = gps.velocity();
 
     loc.vertRateD_is_valid = AP::ahrs().get_vert_pos_rate_D(loc.vertRateD);
@@ -436,6 +441,32 @@ void AP_ADSB::update(const AP_ADSB::Loc &loc)
         }
     }
 
+    /*
+    static uint32_t last_debug_ms;
+    if (now - last_debug_ms >= 2000) {
+        last_debug_ms = now;
+        Location current_loc;
+        const bool have_pos = AP::ahrs().get_location(current_loc);
+        for (uint16_t i = 0; i < in_state.vehicle_count; i++) {
+            const adsb_vehicle_t &v = in_state.vehicle_list[i];
+            if (have_pos) {
+                Location vloc;
+                vloc.lat = v.info.lat;
+                vloc.lng = v.info.lon;
+                vloc.alt = v.info.altitude / 10;
+                vloc.relative_alt = false;
+                const float hdist = current_loc.get_distance(vloc);
+                const float vdist = (v.info.altitude * 0.001f) - (current_loc.alt * 0.01f);
+                if (hdist < 2000) {
+                    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "ADSB[%u] %s h=%.0f v=%.0f",
+                                i, v.info.callsign, hdist, vdist);
+                }
+            } else {
+                GCS_SEND_TEXT(MAV_SEVERITY_DEBUG, "ADSB[%u] %s (no pos)", i, v.info.callsign);
+            }
+        }
+    }
+    */
 }
 
 /*
