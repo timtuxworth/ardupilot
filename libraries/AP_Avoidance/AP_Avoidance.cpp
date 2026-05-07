@@ -874,6 +874,8 @@ float AP_Avoidance::distance_to_obstacle(const Vector3f &start_NED_m, const Vect
         }
     }
 
+//    GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL,"ADSB distance %.0f", distance_new_m);
+
     return distance_new_m;
 }
 
@@ -918,6 +920,8 @@ float AP_Avoidance::distance_to_aircraft(const Vector3f &vehicle_NED_m, const fl
             }
         }
     }
+
+//    GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL,"aircraft distance %.0f", safe_sqrt(distance_new_msq));
 
     // we need to do one square root here at the end. But by using squared above we avoid lots of them
     return safe_sqrt(distance_new_msq);
