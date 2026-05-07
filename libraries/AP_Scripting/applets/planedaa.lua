@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "PlaneDAA"
-SCRIPT_VERSION      = "4.8.0-013"
+SCRIPT_VERSION      = "4.8.0-016"
 
 STARTUP_DELAY = 25  -- wait this many seconds for the FC to come up before starting the script
 
@@ -386,7 +386,7 @@ FLT_MAX = 3.402823466e+38
 local current_loc           = ahrs:get_position()
 local current_heading_deg   = math.deg(ahrs:get_yaw_rad())
 local current_mode          = vehicle:get_mode()
-local current_state         = quadplane:get_mav_vtol_state()
+local vtol_state            = MAV_VTOL_STATE.UNDEFINED
 
 local now_ms                = millis()
 local now_params_ms         = now_ms
@@ -460,7 +460,11 @@ local function get_vehicle_state()
     current_loc         = ahrs:get_position()
     current_heading_deg = math.deg(ahrs:get_yaw_rad())
     current_mode        = vehicle:get_mode()
-    current_state       = quadplane:get_mav_vtol_state()
+    if quadplane then
+        vtol_state      = quadplane:get_mav_vtol_state()
+    else
+        vtol_state          = MAV_VTOL_STATE.UNDEFINED
+    end
 
     now_ms = millis()
 
@@ -1156,28 +1160,28 @@ DAA = {
     unless the new margin is atleast _bendy_ratio times better than the margin with previously calculated bearing.
     We return true if we have resisted the change and will follow the last calculated bearing. 
     --]]
-    local function resist_bearing_change(bearing_orig, avoid_step1_m, bearing_test, distance_found)
-        if distance_found ==  0 then
-            return distance_found, bearing_test
+    local function resist_bearing_change(bearing_orig_deg, avoid_step1_m, bearing_deg, distance_found_m)
+        if distance_found_m ==  0 then
+            return distance_found_m, bearing_deg
         end
-	    if math.abs(wrap_180(bearing_orig - bearing_test)) < bendy_angle then
-            return distance_found, bearing_test
+	    if math.abs(wrap_180(bearing_orig_deg - bearing_deg)) < bendy_angle then
+            return distance_found_m, bearing_deg
         end
         -- gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. 
-    -- " RESIST: bearing orig" .. bearing_orig .. " test:" .. bearing_test .. " dist: " .. avoid_step1_m .. " found: " .. distance_found)
+        --    " RESIST: bearing orig: " .. bearing_orig_deg .. " test:" .. bearing_deg .. " dist: " .. avoid_step1_m .. " found: " .. distance_found_m)
         -- check margin in last bearing's direction
         local test_loc_previous_bearing = current_loc:copy()
-        test_loc_previous_bearing:offset_bearing(wrap_180(bearing_orig), avoid_step1_m)
+        test_loc_previous_bearing:offset_bearing(wrap_180(bearing_orig_deg), avoid_step1_m)
 
         local distance_previous_m, _ = find_closest_obstacle(current_loc, test_loc_previous_bearing, avoid_step1_m)
-        if (math.abs(distance_previous_m) < math.abs(bendy_ratio * distance_found)) then
+        if (math.abs(distance_previous_m) < math.abs(bendy_ratio * distance_found_m)) then
             -- don't change direction abruptly. If margin difference is not significant, follow the last direction
             -- gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. " RESIST: was " .. bearing_test .. " now " .. bearing_orig .. " found: " .. math.abs(distance_found) .. " ratio: " .. math.abs(bendy_ratio * distance_found) .. " new dist:" .. distance_previous_m)
-            bearing_test = bearing_orig
-            distance_found  = distance_previous_m
+            bearing_deg = bearing_orig_deg
+            distance_found_m  = distance_previous_m
         end
 
-        return distance_found, bearing_test
+        return distance_found_m, bearing_deg
     end
 
     -- calculates the second step of the bendy ruler test - look foward a 2nd "full_distance" to see if we can still avoid obstacles
@@ -1681,7 +1685,7 @@ local function update()
         local suggested_target_loc = DAA.detect()
         DAA.alert(suggested_target_loc)
         -- currently we only do avoidance in FW mode
-        if current_state == MAV_VTOL_STATE.FW then
+        if vtol_state == MAV_VTOL_STATE.FW then
             DAA.avoid(suggested_target_loc)
         end
     end
