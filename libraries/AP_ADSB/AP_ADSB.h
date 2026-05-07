@@ -334,6 +334,7 @@ private:
     AP_Int32 _special_ICAO_target;
 
     AP_Int32 _options;
+    AP_Int8 _enabled;
 
     static const uint8_t _max_samples = 30;
     ObjectBuffer<adsb_vehicle_t> _samples{_max_samples};
