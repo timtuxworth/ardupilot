@@ -37,9 +37,9 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "PlaneDAA"
-SCRIPT_VERSION      = "4.8.0-016"
+SCRIPT_VERSION      = "4.8.0-017"
 
-STARTUP_DELAY = 25  -- wait this many seconds for the FC to come up before starting the script
+STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the script
 
 PLANE_MODE          = {CIRCLE = 1, STABILIZE = 2, TRAINING = 3, ACRO = 4, FBWA = 4, FBWB = 6, CRUISE = 7, 
                         AUTOTUNE = 8, AUTO=10, RTL=11, LOITER=12, TAKEOFF = 13, AVOID_ADSB = 14, GUIDED=15, 
@@ -419,9 +419,9 @@ local function get_mode_string(mode)
         return "Loiter"
     elseif mode == PLANE_MODE.GUIDED then
         return "Guided"
-    elseif mode == PLANE_MODE.QSTABILIZE then 
+    elseif mode == PLANE_MODE.QSTABILIZE then
         return "Q Stabilize"
-    elseif mode == PLANE_MODE.QHOVER then 
+    elseif mode == PLANE_MODE.QHOVER then
         return "Q Hover"
     elseif mode == PLANE_MODE.QLOITER then
         return "Q Loiter"
@@ -463,7 +463,7 @@ local function get_vehicle_state()
     if quadplane then
         vtol_state      = quadplane:get_mav_vtol_state()
     else
-        vtol_state          = MAV_VTOL_STATE.UNDEFINED
+        vtol_state      = MAV_VTOL_STATE.UNDEFINED
     end
 
     now_ms = millis()
@@ -1427,7 +1427,7 @@ DAA = {
         if (now_ms - now_obstacle_ms) > 5000 then
             gcs:send_named_string("DAA-ALERT", "obstacle")
             gcs:send_named_string("DAA-OBSTCL", obstacle_avoiding.label)
-            gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(" ALERT: %s %.0f m",
+            gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" ALERT: %s %.0f m",
                                 obstacle_avoiding.label, obstacle_avoiding.distance_xy))
             gcs:send_named_float("DAA-DISTXY", obstacle_avoiding.distance_xy)
             gcs:send_named_float("DAA-DISTZ", obstacle_avoiding.distance_z)
@@ -1586,7 +1586,7 @@ DAA = {
                     avoid_dist = navigation_target_loc:get_distance(obstacle.location)
                 end
 
-                gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s distance %.0f m", obstacle.label, math.abs(obstacle_distance)))
+                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s distance %.0f m", obstacle.label, math.abs(obstacle_distance)))
                 avoiding_label = obstacle.label
                 gcs:send_named_string("DAA-AVOID", "obstacle")
                 gcs:send_named_string("DAA-OBSTCL", avoiding_label)
