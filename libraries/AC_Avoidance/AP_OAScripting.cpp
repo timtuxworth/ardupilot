@@ -114,7 +114,7 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
 
 #ifdef AP_FENCE_ENABLED
     const AC_Fence *fence = AC_Fence::get_singleton();
-    if (fence != nullptr) {
+    if (fence != nullptr && fence->enabled()) {
         // fences use cm (for now), so do this once now so we can pass to all the fence methods
         const Vector2f start_NE_cm(start_NED_m.x * 100.0f, start_NED_m.y * 100.0f);
         const Vector2f end_NE_cm(end_NED_m.x * 100.0f, end_NED_m.y * 100.0f);
@@ -203,8 +203,8 @@ bool AP_OAScripting::find_aircraft(const Location &vehicle_loc, const float look
     }
 
     return false;
-
 }
+
 // Lua binding to be used in Object Detection to find the neareast fence, ADS-B object, or proximity obstacle
 //   the use of the word "obstacle" is intended to be generic, unfortunately one of the cases of ArduPilot is "Obstacles" stored in the AP_OAAvoidance library
 // Note that the distance is the distance to any margin around the obstacles. AP_OAAvoidance obstacles have this as do fences. So the distance can be negative if you are too close.
