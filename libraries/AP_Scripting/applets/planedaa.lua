@@ -36,8 +36,8 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 --]]
 
 SCRIPT_NAME         = "Plane DAA"
-SCRIPT_NAME_SHORT   = "PlaneDAA"
-SCRIPT_VERSION      = "4.8.0-017"
+SCRIPT_NAME_SHORT   = "pDAA"
+SCRIPT_VERSION      = "4.8.0-019"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the script
 
@@ -107,7 +107,7 @@ ADSB_EMITTER = {
     HIGH_VORTEX_LARGE           = 4,
     HEAVY                       = 5,
     HIGHLY_MANUV                = 6,
-    ROTOCRAFT                   = 7,    -- this is Helicopter
+    ROTOCRAFT                   = 7,    -- this is Helicopter not a drone
     -- 8 Unassigned
     GLIDER                      = 9,
     LIGHTER_AIR                 = 10,
@@ -669,6 +669,52 @@ local function pretty_label(script_obstacle)
     return "Unknown"
 end
 
+local function pretty_obstacle_type(type)
+    if type == OBSTACLE_TYPE.GENERAL then
+        return "general"
+    end
+    if type == OBSTACLE_TYPE.MAV_SYSID then
+        return "mavdrone"
+    end
+    if type == OBSTACLE_TYPE.GENERAL_AVIATION then 
+        return "aircraft"
+    end
+    if type == OBSTACLE_TYPE.WEATHER then
+        return "weather"
+    end
+    if type == OBSTACLE_TYPE.BIRD_MIGRATORY then
+        return "bird"
+    end
+    if type == OBSTACLE_TYPE.BIRD_OF_PREY then
+        return "predator"
+    end
+    if type == OBSTACLE_TYPE.FENCE_HOME then
+        return "fence:home"
+    end
+    if type == OBSTACLE_TYPE.FENCE_CIRCLE_INCLUSION then
+        return "fence:circle-inc"
+    end
+    if type == OBSTACLE_TYPE.FENCE_CIRCLE_EXCLUSION then
+        return "fence:circle-exc"
+    end
+    if type == OBSTACLE_TYPE.FENCE_POLYGON_INCLUSION then
+        return "fence:poly-inc"
+    end
+    if type == OBSTACLE_TYPE.FENCE_POLYGON_EXCLUSION then
+        return "fence:poly-exc"
+    end
+    if type == OBSTACLE_TYPE.FENCE_LUA then
+        return "fence:lua"
+    end
+    if type == OBSTACLE_TYPE.PROXIMITY then
+        return "proximity"
+    end
+    if type == OBSTACLE_TYPE.AIS then
+        return "ship"
+    end
+    return "unknown"
+end
+
 local function populate_obstacle(distance_m, any_obstacle)
     local obstacle = {}
     obstacle.distance_m   = distance_m                      -- this is the Projected distance based on lookahead
@@ -744,7 +790,7 @@ local function find_closest_obstacle(loc1, loc2, lookahead_m)
     else
     --]]
     if any_obstacle.obstacle_type == OBSTACLE_TYPE.GENERAL_AVIATION then
-        obstacle_marget = well_clear_xy + margin_aircraft
+        obstacle_margin = well_clear_xy + margin_aircraft
     elseif any_obstacle.obstacle_type == OBSTACLE_TYPE.AIS then
         obstacle_margin = well_clear_xy + margin_ais
     elseif any_obstacle.obstacle_type == OBSTACLE_TYPE.PROXIMITY then
@@ -857,7 +903,7 @@ local loiteralt = {
         --local new_target_loc, direction = start_loiter(loiteralt.target_alt_agl_m, direction_right, groundspeed_ms)
         gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": LOITER %s to %.0f/%.0f(%.0f) alt radius %.0f m",
                 direction, target_alt_m, target_alt_frame, mavlink_wrappers.alt_frame_to_mavlink(target_alt_frame), radius_m ))
-        
+
         previous_mode = vehicle:get_mode()
         vehicle:set_mode(PLANE_MODE.GUIDED)
 
@@ -869,7 +915,7 @@ local loiteralt = {
                                                         yaw     = 0 }) then
             loiteralt.active = true
         else
-                gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": loiteralt.stop set_vehicle FAILED" ))
+            gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": loiteralt.stop set_vehicle FAILED" ))
             loiteralt.stop()
         end
 
@@ -971,7 +1017,7 @@ DAA = {
     local previous_label    = ""
     local avoiding_label    = ""
     local previous_aircraft = ""
-    local STATE             = {monitoring = 1, avoiding = 2, loitering = 3, hovering = 4, landing  = 5}
+    local STATE             = {monitoring = 1, avoiding = 2, loitering = 3, loitering_avoiding = 4, hovering = 5, landing  = 6}
     local current_state     = STATE.monitoring
     local LoWC_active       = false
     local LoWC_label        = ""
@@ -996,7 +1042,7 @@ DAA = {
     end
 
     -- methods to log DAA results DAAD = Detect, DAAA = Alert, DAAV = aVoid
-    local function log_detect_result(obstacle_found, distance_found_m, distance_to_target_m, best_bearing_deg, target_loc)
+    local function log_detect_result(obstacle_found, distance_found_m, distance_to_target_m, best_bearing_deg, target_loc, obstacle_type)
         --    log_detect_result(false, distance_found_m, distance_to_target_m, best_bearing_deg, target_loc)
         if target_loc == nil or distance_found_m == nil or distance_to_target_m == nil or best_bearing_deg == nil then
             -- we can't be avoiding if no target, so no loggin required
@@ -1010,10 +1056,10 @@ DAA = {
 
         --logger:write('DAAD',                -- D for Detect
         local status, err = pcall(logger.write, logger, "DAAD",
-            'Obs,DstF,DstT,HdgB,Tfnd,TLat,TLng,TAlt,TFra',
-            'BffffLLfB',                    -- Formats (L for Lat/Lng, f for Alt)
-            '-mmmdDUm-',                    -- Units (D=lat deg, U=lng deg, m=meter)
-            '-----GG--',                    -- Multipliers (G=1e-7 for L types)
+            'Obs,DstF,DstT,HdgB,Tfnd,TLat,TLng,TAlt,TFra,ObjT',
+            'BffffLLfBI',                   -- Formats (L for Lat/Lng, f for Alt)
+            '-mmmdDUm--',                   -- Units (D=lat deg, U=lng deg, m=meter)
+            '-----GG---',                   -- Multipliers (G=1e-7 for L types)
             (obstacle_found and 1 or 0),    -- Obs - Obstacle found true/false
             distance_found_m,               -- DstF - Distance to found obstacle in meters
             distance_to_target_m,           -- DstT - Distance to proposed new target to avoid the obstacle
@@ -1022,7 +1068,8 @@ DAA = {
             target_loc:lat(),               -- TLat - Latitude of proposed new target in degrees
             target_loc:lng(),               -- TLng - Longitude of proposed new target in degrees
             target_loc:alt() * 0.01,        -- TAlt - Alitude of proposed new target in meters
-            target_loc:get_alt_frame())     -- TFrm - Frame of the ALtitlde: 0: AMSL, 1: Home Relative, 3: Terrain Relative
+            target_loc:get_alt_frame()),    -- TFrm - Frame of the ALtitlde: 0: AMSL, 1: Home Relative, 3: Terrain Relative
+            obstacle_type                   -- ObjT - the OBSTACLE_TYPE of the object detected
 
         if not status then
             gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " log detect:" .. tostring(err) )
@@ -1063,7 +1110,7 @@ DAA = {
         end
         local status, err = pcall(logger.write, logger, "DAAV",
         --logger:write('DAAV',                        -- V for aVoid
-            'DstO,TLat,TLng,TAlt,TFra,DstH,DstZ,TypO',
+            'DstO,TLat,TLng,TAlt,TFra,DstH,DstZ,ObjT',
             'fLLfBffB',                             -- Formats (L for Lat/Lng, f for Alt)
             'mDUm-mm-',                             -- Units (D=lat deg, U=lng deg, m=meter)
             '-GG-----',                             -- Multipliers (G=1e-7 for L types)
@@ -1074,7 +1121,7 @@ DAA = {
             target_loc:get_alt_frame(),    -- TFrm - Frame of the ALtitlde: 0: AMSL, 1: Home Relative, 3: Terrain Relative
             obstacle.distance_xy,                   -- DstH - Horizontal distance to the obstacle
             obstacle.distance_z,                    -- DstZ - Vertical distance to the aircraft (+ve is up),
-            obstacle.type                           -- ObsT - the type of the obstacle as an OBSTACLE_TYPE
+            obstacle.type                           -- ObjT - the type of the obstacle as an OBSTACLE_TYPE
         )
         if not status then
             gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " log avoid:" .. tostring(err) )
@@ -1368,7 +1415,6 @@ DAA = {
         local distance_to_target_m = limit_distance(current_loc, target_loc, bearing_deg)
         -- If the full distance is less than 20m, no avoidance is needed
         if distance_to_target_m < 20 then
-            log_detect_result(false, distance_to_target_m, distance_to_target_m, best_bearing_deg, target_loc)
             return nil
         end
 
@@ -1389,13 +1435,13 @@ DAA = {
         end
         ::continue::
 
-        -- we need to independenty detect aircraft because even if an aircraft may not be the closest obstacle found by bendy ruler, we may still need to deal with it
+        -- we need to independently detect aircraft because even if an aircraft may not be the closest obstacle found by bendy ruler, we may still need to deal with it
         -- in other words, sometimes aircraft have higher priority than any other obstacles
         detect_aircraft()
 
         if obstacle_avoiding == nil then
             --gcs:send_text(MAV_SEVERITY.ERROR, "NO OBSTACLE")
-            log_detect_result(false, obstacle_distance_m, distance_to_target_m, best_bearing_deg, target_loc)
+            --log_detect_result(false, obstacle_distance_m, distance_to_target_m, best_bearing_deg, target_loc, -1)
             return nil -- no avoidance required
         else
             --gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. "step1 dist: " .. obstacle_avoiding.distance_m .. " src: " .. obstacle_avoiding.label .. " bearing: " .. best_bearing_deg)
@@ -1410,7 +1456,7 @@ DAA = {
 
         -- calculate the new target location based on the best bearing we found. target_loc is passed for altitude only
         local new_target_loc = location_project(current_loc, best_bearing_deg, distance_to_target_m, target_loc)
-        log_detect_result(true, obstacle_distance_m, distance_to_target_m, best_bearing_deg, new_target_loc)
+        log_detect_result(true, obstacle_distance_m, distance_to_target_m, best_bearing_deg, new_target_loc, obstacle_avoiding.type)
         return new_target_loc
     end
 
@@ -1427,8 +1473,9 @@ DAA = {
         if (now_ms - now_obstacle_ms) > 5000 then
             gcs:send_named_string("DAA-ALERT", "obstacle")
             gcs:send_named_string("DAA-OBSTCL", obstacle_avoiding.label)
-            gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" ALERT: %s %.0f m",
-                                obstacle_avoiding.label, obstacle_avoiding.distance_xy))
+            gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" ALERT: %s %s %.0f m",
+                                obstacle_avoiding.label, pretty_obstacle_type(obstacle_avoiding.type),
+                                obstacle_avoiding.distance_xy))
             gcs:send_named_float("DAA-DISTXY", obstacle_avoiding.distance_xy)
             gcs:send_named_float("DAA-DISTZ", obstacle_avoiding.distance_z)
             previous_label  = obstacle_avoiding.label
@@ -1586,7 +1633,7 @@ DAA = {
                     avoid_dist = navigation_target_loc:get_distance(obstacle.location)
                 end
 
-                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s distance %.0f m", obstacle.label, math.abs(obstacle_distance)))
+                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s %s distance %.0f m", obstacle.label, pretty_obstacle_type(obstacle.type), math.abs(obstacle_distance)))
                 avoiding_label = obstacle.label
                 gcs:send_named_string("DAA-AVOID", "obstacle")
                 gcs:send_named_string("DAA-OBSTCL", avoiding_label)
@@ -1625,11 +1672,48 @@ DAA = {
     end
 
     -- execute avoidance maneuvers depending on the nature of the obstacle
+    function DAA.avoidstates(new_target_loc)
+        if daa_action == 0 then
+            return              -- parameter DAA_AVOID can be used to disable avoidance
+        end
+        if current_state == STATE.loitering or current_state == STATE.loitering_avoiding then
+            do_loitering()
+            if obstacle_avoiding ~= nil then
+                current_state = STATE.loitering_avoiding
+                avoid_obstacle(new_target_loc,obstacle_avoiding)
+            else
+                current_state = STATE.loitering
+            end
+            return
+        elseif current_state == STATE.hovering or current_state == STATE.avoiding or current_state == STATE.hovering or current_state == STATE.landing then
+            -- do nothing for now
+        elseif aircraft_avoiding ~= nil then
+            gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITER AIRCRAFT: %s", aircraft_avoiding.label))
+            loiteralt.start(ga_avoid_alt, ga_avoid_alt_frame, true, airspeed_ms)
+            current_state = STATE.loitering
+
+            gcs:send_named_string("DAA-AVOID", "LOITER")
+            gcs:send_named_float("DAA-LOITER", ga_avoid_alt)
+            gcs:send_named_string("DAA-ARCRFT", aircraft_avoiding.label)
+            gcs:send_named_float("DAA-DIST", aircraft_avoiding.distance_m)
+
+            return
+        else
+            current_state = STATE.monitoring
+        end
+        avoid_obstacle(new_target_loc, obstacle_avoiding)
+        --if loiteralt.active then
+        --    current_state = STATE.loitering -- deal with avoiding an obstacle (e.g. a drone) while currently in a loiter (to avoid a plane)
+        --end
+    end
+
+    -- execute avoidance maneuvers depending on the nature of the obstacle
     function DAA.avoid(new_target_loc)
         if daa_action == 0 then
             return              -- parameter DAA_AVOID can be used to disable avoidance
         end
-        if current_state == STATE.loitering then
+        if loiteralt.active then
+            current_state = STATE.loitering
             do_loitering()
         elseif current_state == STATE.hovering or current_state == STATE.avoiding or current_state == STATE.hovering or current_state == STATE.landing then
             -- do nothing for now
@@ -1648,7 +1732,11 @@ DAA = {
             current_state = STATE.monitoring
         end
         avoid_obstacle(new_target_loc, obstacle_avoiding)
+        if loiteralt.active then
+            current_state = STATE.loitering -- deal with avoiding an obstacle (e.g. a drone) while currently in a loiter (to avoid a plane)
+        end
     end
+
 end) () -- DAA management class
 
 -------------------------------------------------------------------------------
