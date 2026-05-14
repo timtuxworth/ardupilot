@@ -15,10 +15,7 @@
 
 #include "AC_Avoidance_config.h"
 
-//#ifdef AP_ADSB_AVOIDANCE_ENABLED
 #ifdef AP_SCRIPTING_ENABLED
-#ifdef AP_AVOIDANCE_ENABLED
-//#ifdef AP_ADSB_AVOIDANCE_ENABLED
 
 #include "AP_OAScripting.h"
 
@@ -425,22 +422,22 @@ void AP_OAScripting::_populate_fence_obstacle(OAObstacle &fence_obstacle, AP_OAS
 }
 
 // create a "Scripting Obstacle" to easily pass info about an obstacle to Lua for avoidance obstacles
-void AP_OAScripting::_populate_scripting_obstacle(OAObstacle &script_obstacle, const AP_Avoidance::Obstacle avoid_obstacle)
+void AP_OAScripting::_populate_scripting_obstacle(OAObstacle &script_obstacle, const AP_Avoidance::Obstacle *avoid_obstacle)
 {
-    script_obstacle.timestamp_ms    = avoid_obstacle.timestamp_ms;
+    script_obstacle.timestamp_ms    = avoid_obstacle->timestamp_ms;
 
-    script_obstacle.obstacle_type   = static_cast<uint8_t>(_get_obstacle_type(avoid_obstacle.emitter_type, script_obstacle.icao_code));
-    script_obstacle.label           = _get_obstacle_label(avoid_obstacle.emitter_type, avoid_obstacle.src_id);
-    script_obstacle.src_id          = avoid_obstacle.src_id;
+    script_obstacle.obstacle_type   = static_cast<uint8_t>(_get_obstacle_type(avoid_obstacle->emitter_type, script_obstacle.icao_code));
+    script_obstacle.label           = _get_obstacle_label(avoid_obstacle->emitter_type, avoid_obstacle->src_id);
+    script_obstacle.src_id          = avoid_obstacle->src_id;
 
-    script_obstacle.icao_code       = avoid_obstacle.src_id & 0xFFFFFF;
-    script_obstacle.emitter_type    = avoid_obstacle.emitter_type;
+    script_obstacle.icao_code       = avoid_obstacle->src_id & 0xFFFFFF;
+    script_obstacle.emitter_type    = avoid_obstacle->emitter_type;
 
-    script_obstacle.is_aircraft     = AP_Avoidance::is_adsb_aircraft(avoid_obstacle.emitter_type);
-    script_obstacle.is_drone        = AP_Avoidance::is_adsb_uav(avoid_obstacle.emitter_type);
+    script_obstacle.is_aircraft     = AP_Avoidance::is_adsb_aircraft(avoid_obstacle->emitter_type);
+    script_obstacle.is_drone        = AP_Avoidance::is_adsb_uav(avoid_obstacle->emitter_type);
 
-    script_obstacle.velocity_NED_ms = avoid_obstacle._velocity_ned_ms;
-    script_obstacle.location        = avoid_obstacle._location;
+    script_obstacle.velocity_NED_ms = avoid_obstacle->_velocity_ned_ms;
+    script_obstacle.location        = avoid_obstacle->_location;
     if(script_obstacle.location.initialised()) {
         script_obstacle.location.get_vector_from_origin_NEU_m(script_obstacle.position_NED_m);
         // until we get the new NED functions
@@ -468,8 +465,8 @@ float AP_OAScripting::_distance_to_avoidance(const Vector3f &start_NED_cm, const
 
     float distance_m = avoid->distance_to_obstacle(start_NED_cm, end_NED_cm, any_avoidance, aircraft_avoidance);
     if (distance_m < FLT_MAX) {
-        _populate_scripting_obstacle(script_any_obstacle, any_avoidance);
-        _populate_scripting_obstacle(script_aircraft_obstacle, aircraft_avoidance);
+        _populate_scripting_obstacle(script_any_obstacle, &any_avoidance);
+        _populate_scripting_obstacle(script_aircraft_obstacle, &aircraft_avoidance);
     }
     return distance_m;
 }
@@ -485,12 +482,9 @@ float AP_OAScripting::_distance_to_aircraft(const Vector3f &vehicle_NED_cm, cons
 
     float distance_m = avoid->distance_to_aircraft(vehicle_NED_cm, FLT_MAX, avoid_obstacle);
     if (distance_m < lookahead_m) {
-        _populate_scripting_obstacle(script_obstacle, avoid_obstacle);
+        _populate_scripting_obstacle(script_obstacle, &avoid_obstacle);
     }
     return distance_m;
 }
 
-//#endif //AP_ADSB_AVOIDANCE_ENABLED
-#endif // AP_AVOIDANCE_ENABLED
 #endif // AP_SCRIPTING_ENABLED
-//#endif // AP_ADSB_AVOIDANCE_ENABLED
