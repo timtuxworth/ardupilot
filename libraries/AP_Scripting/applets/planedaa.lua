@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-019"
+SCRIPT_VERSION      = "4.8.0-020"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the script
 
@@ -295,7 +295,7 @@ DAA_BR_RATIO = bind_add_param('BR_RATIO', 17, 1.5)
     // @Increment: 5
     // @User: Standard
 --]]
-DAA_BR_ANGLE = bind_add_param('BR_ANGLE', 18, 75)
+DAA_BR_ANGLE = bind_add_param('BR_ANGLE', 18, 45)
 
 --[[
     // @Param: AVD_ALT
@@ -1014,6 +1014,7 @@ DAA = {
     local wind_speed        = 0.0
     local obstacle_avoiding = nil
     local aircraft_avoiding = nil
+    local last_avoid_bearing_deg = nil
     local previous_label    = ""
     local avoiding_label    = ""
     local previous_aircraft = ""
@@ -1208,27 +1209,28 @@ DAA = {
     We return true if we have resisted the change and will follow the last calculated bearing. 
     --]]
     local function resist_bearing_change(bearing_orig_deg, avoid_step1_m, bearing_deg, distance_found_m)
-        if distance_found_m ==  0 then
-            return distance_found_m, bearing_deg
+        if bearing_orig_deg == nil then
+            -- no prior commitment, accept the proposed bearing
+            return bearing_deg
         end
-	    if math.abs(wrap_180(bearing_orig_deg - bearing_deg)) < bendy_angle then
-            return distance_found_m, bearing_deg
+        if distance_found_m == 0 then
+            -- obstacle is immediate, must manoeuvre regardless
+            return bearing_deg
         end
-        -- gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. 
-        --    " RESIST: bearing orig: " .. bearing_orig_deg .. " test:" .. bearing_deg .. " dist: " .. avoid_step1_m .. " found: " .. distance_found_m)
-        -- check margin in last bearing's direction
-        local test_loc_previous_bearing = current_loc:copy()
-        test_loc_previous_bearing:offset_bearing(wrap_180(bearing_orig_deg), avoid_step1_m)
-
-        local distance_previous_m, _ = find_closest_obstacle(current_loc, test_loc_previous_bearing, avoid_step1_m)
-        if (math.abs(distance_previous_m) < math.abs(bendy_ratio * distance_found_m)) then
-            -- don't change direction abruptly. If margin difference is not significant, follow the last direction
-            -- gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. " RESIST: was " .. bearing_test .. " now " .. bearing_orig .. " found: " .. math.abs(distance_found) .. " ratio: " .. math.abs(bendy_ratio * distance_found) .. " new dist:" .. distance_previous_m)
-            bearing_deg = bearing_orig_deg
-            distance_found_m  = distance_previous_m
+        if math.abs(wrap_180(bearing_orig_deg - bearing_deg)) < bendy_angle then
+            -- proposed change is small enough, no resistance needed
+            return bearing_deg
         end
-
-        return distance_found_m, bearing_deg
+        -- measure clearance in the previously committed direction
+        local test_loc = current_loc:copy()
+        test_loc:offset_bearing(bearing_orig_deg, avoid_step1_m)
+        local distance_previous_m, _ = find_closest_obstacle(current_loc, test_loc, avoid_step1_m)
+        -- only switch sides if the new direction is significantly better (bendy_ratio times more clearance)
+        if distance_found_m < bendy_ratio * distance_previous_m then
+            -- new direction is not significantly better — stay the course
+            return bearing_orig_deg
+        end
+        return bearing_deg
     end
 
     -- calculates the second step of the bendy ruler test - look foward a 2nd "full_distance" to see if we can still avoid obstacles
@@ -1383,7 +1385,6 @@ DAA = {
 
         log_detect_aircraft(aircraft_avoiding)
         --gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(" DETECTED AIRCRAFT: xy %.0f z %.0f", aircraft_avoiding.distance_xy,aircraft_avoiding.distance_z) )
- 
     end
 
 
@@ -1440,6 +1441,7 @@ DAA = {
         detect_aircraft()
 
         if obstacle_avoiding == nil then
+            last_avoid_bearing_deg = nil
             --gcs:send_text(MAV_SEVERITY.ERROR, "NO OBSTACLE")
             --log_detect_result(false, obstacle_distance_m, distance_to_target_m, best_bearing_deg, target_loc, -1)
             return nil -- no avoidance required
@@ -1452,11 +1454,11 @@ DAA = {
             now_debug_ms = now_ms
         end
 
-	    distance_to_target_m, best_bearing_deg = resist_bearing_change(bearing_deg, current_lookahead, best_bearing_deg, distance_to_target_m)
+        best_bearing_deg = resist_bearing_change(last_avoid_bearing_deg, current_lookahead, best_bearing_deg, best_distance_m)
+        last_avoid_bearing_deg = best_bearing_deg
 
-        -- calculate the new target location based on the best bearing we found. target_loc is passed for altitude only
-        local new_target_loc = location_project(current_loc, best_bearing_deg, distance_to_target_m, target_loc)
-        log_detect_result(true, obstacle_distance_m, distance_to_target_m, best_bearing_deg, new_target_loc, obstacle_avoiding.type)
+        local proj_distance = math.max(distance_to_target_m, current_lookahead)   -- fix bug 2
+        local new_target_loc = location_project(current_loc, best_bearing_deg, proj_distance, target_loc)
         return new_target_loc
     end
 
