@@ -1,8 +1,6 @@
 #pragma once
 
 #ifdef AP_SCRIPTING_ENABLED
-#ifdef AP_AVOIDANCE_ENABLED
-//#ifdef AP_ADSB_AVOIDANCE_ENABLED
 
 #include "AC_Avoidance_config.h"
 #include "AP_OADatabase.h"
@@ -15,6 +13,9 @@
 #include "AP_OAVisGraph.h"
 #include <AP_Logger/AP_Logger_config.h>
 #include <GCS_MAVLink/GCS.h>
+
+// Forward declare the class and its nested struct cleanly
+class AP_Avoidance; 
 
 struct OAObstacle;
 
@@ -107,7 +108,7 @@ private:
     float _distance_to_aircraft(const Vector3f &vehicle_NED_cm, const float lookahead_m, OAObstacle &script_obstacle) const;
 
     // create a "Scripting Obstacle" to easily pass info about an obstacle to Lua
-    static void _populate_scripting_obstacle(OAObstacle &scripting_obstacle, const AP_Avoidance::Obstacle avoidance_obstacle);
+    static void _populate_scripting_obstacle(OAObstacle &scripting_obstacle, const AP_Avoidance::Obstacle *avoidance_obstacle);
     static void _populate_fence_obstacle(OAObstacle &fence_obstacle, AP_OAScripting::ObstacleType obstacle_type);
 
     static ObstacleType _get_obstacle_type(uint8_t emitter_type, int32_t obstacle_id);
@@ -142,6 +143,5 @@ struct OAObstacle {
 };
 
 //#endif // AP_ADSB_AVOIDANCE_ENABLED
-#endif // AP_AVOIDANCE_ENABLED
 #endif // AP_SCRIPTING_ENABLED
 //#endif
