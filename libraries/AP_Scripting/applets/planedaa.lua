@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-022"
+SCRIPT_VERSION      = "4.8.0-023"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the script
 
@@ -468,7 +468,8 @@ local function get_vehicle_state()
     if quadplane_enabled then
         vtol_state      = quadplane:get_mav_vtol_state()
     else
-        vtol_state      = MAV_VTOL_STATE.UNDEFINED
+        -- not a quadplane, so we are always in fixed wing flight
+        vtol_state      = MAV_VTOL_STATE.FW
     end
 
     now_ms = millis()
