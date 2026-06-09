@@ -13,11 +13,12 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "AC_Avoidance_config.h"
+#include <AP_Avoidance/AP_Avoidance_config.h>
+#include "AP_OAScripting.h"
+
 
 #ifdef AP_SCRIPTING_ENABLED
-
-#include "AP_OAScripting.h"
+#if AP_ADSB_AVOIDANCE_ENABLED
 
 #if AP_FENCE_ENABLED
 
@@ -487,4 +488,5 @@ float AP_OAScripting::_distance_to_aircraft(const Vector3f &vehicle_NED_cm, cons
     return distance_m;
 }
 
+#endif // AP_ADSB_AVOIDANCE_ENABLED
 #endif // AP_SCRIPTING_ENABLED
