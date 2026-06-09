@@ -348,7 +348,10 @@ float AC_PolyFence_loader::distance_line_to_circle_inclusion(const Vector2f& sta
 
     for (uint8_t i=0; i<_num_loaded_circle_inclusion_boundaries; i++) {
         const InclusionCircle &circle = _loaded_circle_inclusion_boundary[i];
-        float distance_m = circle.radius - Vector2f::closest_distance_between_line_and_point(start_NE_cm, end_NE_cm, circle.pos_cm) * 0.01f;
+        // the segment is closest to exiting the circle at whichever endpoint
+        // lies farthest from the centre
+        const float far_cm = MAX((start_NE_cm - circle.pos_cm).length(), (end_NE_cm - circle.pos_cm).length());
+        float distance_m = circle.radius - far_cm * 0.01f;
         distance_new_m = (distance_m < distance_new_m) ? distance_m : distance_new_m;
     }
     return distance_new_m;
