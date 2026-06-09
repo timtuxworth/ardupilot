@@ -811,6 +811,19 @@ local function find_closest_obstacle(loc1, loc2, lookahead_m)
         return FLT_MAX, nil
     end
 
+    -- If any fence is currently breached, skip all fence avoidance.
+    -- When inside an exclusion zone or outside an inclusion zone the bendy ruler sees every
+    -- exit/return path as "blocked", trapping the plane. Let it navigate freely instead.
+    local is_fence_type = any_obstacle.obstacle_type == OBSTACLE_TYPE.FENCE_HOME
+        or any_obstacle.obstacle_type == OBSTACLE_TYPE.FENCE_CIRCLE_INCLUSION
+        or any_obstacle.obstacle_type == OBSTACLE_TYPE.FENCE_CIRCLE_EXCLUSION
+        or any_obstacle.obstacle_type == OBSTACLE_TYPE.FENCE_POLYGON_INCLUSION
+        or any_obstacle.obstacle_type == OBSTACLE_TYPE.FENCE_POLYGON_EXCLUSION
+        or any_obstacle.obstacle_type == OBSTACLE_TYPE.FENCE_LUA
+    if is_fence_type and fence ~= nil and fence:get_breaches() ~= 0 then
+        return FLT_MAX, nil
+    end
+
     obstacle = populate_obstacle(distance_m, any_obstacle)
 
     --gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT ..": threat: " .. any_obstacle:icao_code() .. " drone? " .. any_obstacle:is_drone() .. " aircraft:" .. any_obstacle:is_aircraft())
