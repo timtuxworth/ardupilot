@@ -7639,25 +7639,29 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
 
     def PlaneDAAFenceBreachEscape(self):
         '''planedaa must not trap the plane inside an exclusion fence after a breach.
-        Home is placed inside a large exclusion circle so the plane is in breach from
-        takeoff.  Once planedaa starts (after STARTUP_DELAY) fence:get_breaches() is
-        non-zero; the fix causes it to skip fence avoidance so the plane can reach the
-        waypoint outside the fence.  Without the fix the bendy ruler traps the plane
-        inside and the test times out.'''
+        Home is inside a large exclusion circle.  The fence is enabled after takeoff
+        so arming is normal.  Once planedaa starts (after STARTUP_DELAY) and the fence
+        is breached, fence:get_breaches() is non-zero; the fix causes it to skip fence
+        avoidance so the plane can reach the waypoint outside the fence.  Without the
+        fix the bendy ruler traps the plane inside and the test times out.'''
         self.install_applet_script_context("planedaa.lua")
+        self.install_script_module(
+            self.script_modules_source_path("mavlink_wrappers.lua"),
+            "mavlink_wrappers.lua",
+        )
         self.context_collect('STATUSTEXT')
 
         self.set_parameters({
             "SCR_ENABLE": 1,
             "SCR_VM_I_COUNT": 1000000,
             "AVD_ENABLE": 1,
-            "FENCE_ENABLE": 1,
-            "FENCE_TYPE": 4,    # polyfence only (includes MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION)
-            "FENCE_ACTION": 0,  # report only — do not RTL on breach
+            "FENCE_ENABLE": 0,   # start OFF so arming is not blocked
+            "FENCE_TYPE": 4,     # polyfence only (includes MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION)
+            "FENCE_ACTION": 0,   # report only — do not RTL on breach
         })
 
         # exclusion circle centred 200 m north of home, radius 400 m.
-        # home (takeoff point) is 200 m from the centre, well inside the fence.
+        # home is 200 m from the centre — well inside the exclusion.
         home = self.home_position_as_mav_location()
         circle_centre = self.offset_location_ne(home, 200, 0)
         self.upload_fences_from_locations([(
@@ -7666,7 +7670,6 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         )])
 
         # mission: takeoff → waypoint 800 m north (outside the fence) → RTL
-        # seq 0=home, 1=TAKEOFF, 2=WP-outside, 3=RTL
         self.upload_simple_relhome_mission([
             (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 80),
             (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 800, 0, 80),
@@ -7678,8 +7681,12 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         self.arm_vehicle()
         self.change_mode("AUTO")
 
-        # wait for planedaa to announce it is active (after its internal STARTUP_DELAY).
-        # by that point the plane is airborne inside the exclusion zone.
+        # Enable the fence once the plane is airborne.  Home is inside the
+        # exclusion circle so the breach is immediate — no force-arm needed.
+        self.wait_altitude(10, 1000, relative=True, timeout=30)
+        self.do_fence_enable()
+
+        # wait for planedaa to announce it is active (after its internal STARTUP_DELAY)
         self.wait_text("Plane DAA", check_context=True, timeout=60)
 
         # if the fix is absent, bendy ruler traps the plane inside the fence and
