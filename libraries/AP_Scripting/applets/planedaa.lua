@@ -1475,7 +1475,7 @@ DAA = {
         if (now_ms - now_obstacle_ms) > 5000 then
             gcs:send_named_string("DAA-ALERT", "obstacle")
             gcs:send_named_string("DAA-OBSTCL", obstacle_avoiding.label)
-            gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" ALERT: %s %s %.0f m",
+            gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" ALERT: %s %s %.0fm",
                                 obstacle_avoiding.label, pretty_obstacle_type(obstacle_avoiding.type),
                                 obstacle_avoiding.distance_xy))
             gcs:send_named_float("DAA-DISTXY", obstacle_avoiding.distance_xy)
@@ -1488,7 +1488,7 @@ DAA = {
     local function NMAC_triggered(nmac_obstacle)
         NMAC_active = true
         NMAC_label  = nmac_obstacle.label
-        gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. string.format(" ALERT AIRCRAFT: %s Near Miss: %.0fm/%.0fm ", 
+        gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. string.format(" ALERT AIRCRAFT: %s Near Miss: %.0fm/%.0fm", 
                         nmac_obstacle.label, nmac_obstacle.distance_xy, nmac_obstacle.distance_z ))
         gcs:send_named_string("DAA-NMAC", "aircraft")
     end
@@ -1507,8 +1507,10 @@ DAA = {
     local function LoWC_triggered(lowc_obstacle)
         LoWC_active = true
         LoWC_label  = lowc_obstacle.label
-        gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" ALERT AIRCRAFT: %s Loss of Well Clear: %.0f/%.0f m", 
-                    lowc_obstacle.label, lowc_obstacle.distance_xy, lowc_obstacle.distance_z ))
+        gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" ALERT AIRCRAFT: %s Loss of Well Clear", 
+                    lowc_obstacle.label ))
+        gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" ALERT AIRCRAFT: LoWC: %.0f/%.0fm",
+                    lowc_obstacle.distance_xy, lowc_obstacle.distance_z ))
         gcs:send_named_string("DAA-LOWC", "aircraft")
     end
 
@@ -1635,7 +1637,8 @@ DAA = {
                     avoid_dist = navigation_target_loc:get_distance(obstacle.location)
                 end
 
-                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s %s distance %.0f m", obstacle.label, pretty_obstacle_type(obstacle.type), math.abs(obstacle_distance)))
+                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s dist: %.0fm", obstacle.label,  math.abs(obstacle_distance)))
+                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s ", pretty_obstacle_type(obstacle.type)))
                 avoiding_label = obstacle.label
                 gcs:send_named_string("DAA-AVOID", "obstacle")
                 gcs:send_named_string("DAA-OBSTCL", avoiding_label)
@@ -1666,7 +1669,7 @@ DAA = {
         if aircraft_avoiding ~= nil then
             loiteralt.aircraft_seen()
             if (now_ms - now_loitering_ms) > 5000 then
-                gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. string.format(" LOITERING to %.0f m for AIRCRAFT: %s", ga_avoid_alt, aircraft_avoiding.label))
+                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITERING to %.0f m for AIRCRAFT: %s", ga_avoid_alt, aircraft_avoiding.label))
                 now_loitering_ms = now_ms
             end
         end
