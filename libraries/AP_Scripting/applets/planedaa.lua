@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-021"
+SCRIPT_VERSION      = "4.8.0-022"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the script
 
@@ -454,13 +454,18 @@ local function get_mode_string(mode)
     return string.format("mode: %d", mode)
 end
 
+-- the quadplane singleton is non-nil even when Q_ENABLE is 0, but calling
+-- get_mav_vtol_state() in that state dereferences a null pointer and crashes,
+-- so also require Q_ENABLE to be set
+local quadplane_enabled = quadplane ~= nil and (param:get('Q_ENABLE') or 0) > 0
+
 -- keep local copies of parameter values that the user might change so update ever 5 seconds
 local function get_vehicle_state()
 
     current_loc         = ahrs:get_position()
     current_heading_deg = math.deg(ahrs:get_yaw_rad())
     current_mode        = vehicle:get_mode()
-    if quadplane then
+    if quadplane_enabled then
         vtol_state      = quadplane:get_mav_vtol_state()
     else
         vtol_state      = MAV_VTOL_STATE.UNDEFINED
@@ -769,38 +774,39 @@ local function find_closest_obstacle(loc1, loc2, lookahead_m)
     end
 
     if any_obstacle == nil then
-        gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT ..": threat Nil ")
+        return FLT_MAX, nil
     end
 
+    local obstacle_type_val = any_obstacle:obstacle_type()
     local margin_fence          = DAA_MARGIN_FENCE:get()
 
     local obstacle_margin = 0;
     --[[
     These are currently handled inside find_threats, it would be better if they could be parameterized
-    if any_obstacle.obstacle_type == OBSTACLE_TYPE.GENERAL_AVIATION then
+    if obstacle_type_val == OBSTACLE_TYPE.GENERAL_AVIATION then
         obstacle_margin = margin_aircraft
-    elseif any_obstacle.obstacle_type == OBSTACLE_TYPE.MAV_SYSID then
+    elseif obstacle_type_val == OBSTACLE_TYPE.MAV_SYSID then
         obstacle_margin = margin_uav
-    elseif any_obstacle.obstacle_type == OBSTACLE_TYPE.BIRD_MIGRATORY then
+    elseif obstacle_type_val == OBSTACLE_TYPE.BIRD_MIGRATORY then
         obstacle_margin = margin_bird
-    elseif any_obstacle.obstacle_type == OBSTACLE_TYPE.BIRD_OF_PREY then
+    elseif obstacle_type_val == OBSTACLE_TYPE.BIRD_OF_PREY then
         obstacle_margin = margin_prey
-    elseif any_obstacle.obstacle_type == OBSTACLE_TYPE.WEATHER then
+    elseif obstacle_type_val == OBSTACLE_TYPE.WEATHER then
         obstacle_margin = margin_weather
     else
     --]]
-    if any_obstacle.obstacle_type == OBSTACLE_TYPE.GENERAL_AVIATION then
+    if obstacle_type_val == OBSTACLE_TYPE.GENERAL_AVIATION then
         obstacle_margin = well_clear_xy + margin_aircraft
-    elseif any_obstacle.obstacle_type == OBSTACLE_TYPE.AIS then
+    elseif obstacle_type_val == OBSTACLE_TYPE.AIS then
         obstacle_margin = well_clear_xy + margin_ais
-    elseif any_obstacle.obstacle_type == OBSTACLE_TYPE.PROXIMITY then
+    elseif obstacle_type_val == OBSTACLE_TYPE.PROXIMITY then
         obstacle_margin = margin_proximity
-    elseif any_obstacle.obstacle_type == OBSTACLE_TYPE.FENCE_CIRCLE_EXCLUSION
-        or any_obstacle.obstacle_type == OBSTACLE_TYPE.FENCE_CIRCLE_INCLUSION
-        or any_obstacle.obstacle_type == OBSTACLE_TYPE.FENCE_POLYGON_INCLUSION
-        or any_obstacle.obstacle_type == OBSTACLE_TYPE.FENCE_POLYGON_INCLUSION
-        or any_obstacle.obstacle_type == OBSTACLE_TYPE.FENCE_HOME
-        or any_obstacle.obstacle_type == OBSTACLE_TYPE.FENCE_LUA
+    elseif obstacle_type_val == OBSTACLE_TYPE.FENCE_CIRCLE_EXCLUSION
+        or obstacle_type_val == OBSTACLE_TYPE.FENCE_CIRCLE_INCLUSION
+        or obstacle_type_val == OBSTACLE_TYPE.FENCE_POLYGON_INCLUSION
+        or obstacle_type_val == OBSTACLE_TYPE.FENCE_POLYGON_EXCLUSION
+        or obstacle_type_val == OBSTACLE_TYPE.FENCE_HOME
+        or obstacle_type_val == OBSTACLE_TYPE.FENCE_LUA
         then
         obstacle_margin = margin_fence
     end
@@ -814,12 +820,12 @@ local function find_closest_obstacle(loc1, loc2, lookahead_m)
     -- If any fence is currently breached, skip all fence avoidance.
     -- When inside an exclusion zone or outside an inclusion zone the bendy ruler sees every
     -- exit/return path as "blocked", trapping the plane. Let it navigate freely instead.
-    local is_fence_type = any_obstacle.obstacle_type == OBSTACLE_TYPE.FENCE_HOME
-        or any_obstacle.obstacle_type == OBSTACLE_TYPE.FENCE_CIRCLE_INCLUSION
-        or any_obstacle.obstacle_type == OBSTACLE_TYPE.FENCE_CIRCLE_EXCLUSION
-        or any_obstacle.obstacle_type == OBSTACLE_TYPE.FENCE_POLYGON_INCLUSION
-        or any_obstacle.obstacle_type == OBSTACLE_TYPE.FENCE_POLYGON_EXCLUSION
-        or any_obstacle.obstacle_type == OBSTACLE_TYPE.FENCE_LUA
+    local is_fence_type = obstacle_type_val == OBSTACLE_TYPE.FENCE_HOME
+        or obstacle_type_val == OBSTACLE_TYPE.FENCE_CIRCLE_INCLUSION
+        or obstacle_type_val == OBSTACLE_TYPE.FENCE_CIRCLE_EXCLUSION
+        or obstacle_type_val == OBSTACLE_TYPE.FENCE_POLYGON_INCLUSION
+        or obstacle_type_val == OBSTACLE_TYPE.FENCE_POLYGON_EXCLUSION
+        or obstacle_type_val == OBSTACLE_TYPE.FENCE_LUA
     if is_fence_type and fence ~= nil and fence:get_breaches() ~= 0 then
         return FLT_MAX, nil
     end
@@ -1208,9 +1214,7 @@ DAA = {
 
     local function calc_avoidance_distance(avoid_step1_m, target_distance)
         -- test for flying past the waypoint, so if we are close, we have room to dodge after the waypoint
-        local avoid_max = math.min(avoid_step1_m, target_distance + math.min(margin_fence / 2, 100))
-        local avoid_sec1 = avoid_max / airspeed_ms
-        return airspeed_ms * avoid_sec1
+        return math.min(avoid_step1_m, target_distance + math.min(margin_fence / 2, 100))
     end
 
     --[[
