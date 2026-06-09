@@ -1,8 +1,12 @@
 #pragma once
 
+#include <AP_Scripting/AP_Scripting_config.h>
+
 #ifdef AP_SCRIPTING_ENABLED
 
-#include "AC_Avoidance_config.h"
+#include <AP_Avoidance/AP_Avoidance_config.h>
+#if AP_ADSB_AVOIDANCE_ENABLED
+
 #include "AP_OADatabase.h"
 #include <AC_Fence/AC_Fence.h>
 #include <AP_Avoidance/AP_Avoidance.h>
@@ -142,6 +146,6 @@ struct OAObstacle {
     float                       radius_m;       // only for circular fences
 };
 
-//#endif // AP_ADSB_AVOIDANCE_ENABLED
+#endif // AP_ADSB_AVOIDANCE_ENABLED
 #endif // AP_SCRIPTING_ENABLED
 //#endif
