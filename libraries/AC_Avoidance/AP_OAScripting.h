@@ -4,8 +4,11 @@
 
 #ifdef AP_SCRIPTING_ENABLED
 
-#include <AP_Avoidance/AP_Avoidance_config.h>
-#if AP_ADSB_AVOIDANCE_ENABLED
+#include "AC_Avoidance_config.h"
+#include <AP_Vehicle/AP_Vehicle_Type.h>
+// Only enabled for ArduPlane with avoidance (requires AP_Avoidance library)
+#define AP_OA_SCRIPTING_ENABLED (APM_BUILD_TYPE(APM_BUILD_ArduPlane) && AP_AVOIDANCE_ENABLED)
+#if AP_OA_SCRIPTING_ENABLED
 
 #include "AP_OADatabase.h"
 #include <AC_Fence/AC_Fence.h>
@@ -146,6 +149,6 @@ struct OAObstacle {
     float                       radius_m;       // only for circular fences
 };
 
-#endif // AP_ADSB_AVOIDANCE_ENABLED
+#endif // AP_OA_SCRIPTING_ENABLED
 #endif // AP_SCRIPTING_ENABLED
 //#endif
