@@ -1213,12 +1213,15 @@ const AC_PolyFence_loader &AC_Fence::polyfence() const
 float AC_Fence::distance_line_to_home_inclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const
 {
     float distance_new_m = FLT_MAX;
-    if ( !(_enabled && (_configured_fences & AC_FENCE_TYPE_CIRCLE)) ) {    
+    if ( !(get_enabled_fences() & AC_FENCE_TYPE_CIRCLE) ) {
         return distance_new_m;
     }
     Vector2f home_NE_cm;
     if (AP::ahrs().get_home().get_vector_xy_from_origin_NE_cm(home_NE_cm) ) {
-        float distance_m = Vector2f::closest_distance_between_line_and_point(start_NE_cm, end_NE_cm, home_NE_cm) * 0.01f - _circle_radius_m;
+        // the segment is closest to exiting the circle at whichever endpoint
+        // lies farthest from home
+        const float far_cm = MAX((start_NE_cm - home_NE_cm).length(), (end_NE_cm - home_NE_cm).length());
+        float distance_m = _circle_radius_m - far_cm * 0.01f;
         distance_new_m = (distance_m < distance_new_m) ? distance_m : distance_new_m;
     }
     return distance_new_m - _margin_m;
@@ -1228,7 +1231,7 @@ float AC_Fence::distance_line_to_home_inclusion(const Vector2f& start_NE_cm, con
 // the distance will be positive if we are outside the inclusion circle, or -ve if outside the circle
 float AC_Fence::distance_line_to_circle_inclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const
 {
-    if ( !(_enabled && (_configured_fences & AC_FENCE_TYPE_POLYGON)) ) {    // Yes POLYGON - a circle (in AC_Fence) is a type of polygon
+    if ( !(get_enabled_fences() & AC_FENCE_TYPE_POLYGON) ) {    // Yes POLYGON - a circle (in AC_Fence) is a type of polygon
         return FLT_MAX;
     }
     return _poly_loader.distance_line_to_circle_inclusion(start_NE_cm, end_NE_cm) - _margin_m;
@@ -1238,8 +1241,8 @@ float AC_Fence::distance_line_to_circle_inclusion(const Vector2f& start_NE_cm, c
 // the distanced will be positive if we are outside the exclusion circle, or -ve if inside the circle
 float AC_Fence::distance_line_to_circle_exclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const
 {
-    if ( !(_enabled && (_configured_fences & AC_FENCE_TYPE_POLYGON)) ) { // Yes POLYGON - a circle (in AC_Fence) is a type of polygon
-        return false;
+    if ( !(get_enabled_fences() & AC_FENCE_TYPE_POLYGON) ) { // Yes POLYGON - a circle (in AC_Fence) is a type of polygon
+        return FLT_MAX;
     }
 
     return _poly_loader.distance_line_to_circle_exclusion(start_NE_cm, end_NE_cm) - _margin_m;
@@ -1249,8 +1252,8 @@ float AC_Fence::distance_line_to_circle_exclusion(const Vector2f& start_NE_cm, c
 // the distance will be positive if the vehicles is inside the inclusion, or -ve if it is outside
 float AC_Fence::distance_line_to_polygon_inclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const
 {
-    if ( !(_enabled && (_configured_fences & AC_FENCE_TYPE_POLYGON)) ) {
-        return false;
+    if ( !(get_enabled_fences() & AC_FENCE_TYPE_POLYGON) ) {
+        return FLT_MAX;
     }
 
     return _poly_loader.distance_line_to_polygon_inclusion(start_NE_cm, end_NE_cm) - _margin_m;
@@ -1260,8 +1263,8 @@ float AC_Fence::distance_line_to_polygon_inclusion(const Vector2f& start_NE_cm, 
 // the distance will be positive if the vehicle is outside the exclusion, or -ve if inside it
 float AC_Fence::distance_line_to_polygon_exclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const
 {
-    if ( !(_enabled && (_configured_fences & AC_FENCE_TYPE_POLYGON)) ) {
-        return false;
+    if ( !(get_enabled_fences() & AC_FENCE_TYPE_POLYGON) ) {
+        return FLT_MAX;
     }
 
     return _poly_loader.distance_line_to_polygon_exclusion(start_NE_cm, end_NE_cm) - _margin_m;
