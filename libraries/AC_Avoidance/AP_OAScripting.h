@@ -54,6 +54,8 @@ public:
         FENCE_LUA                   = 11,
         PROXIMITY                   = 12,
         AIS                         = 13,
+        FENCE_ALT_MAX               = 14,   // max altitude fence (AC_FENCE_TYPE_ALT_MAX, FENCE_TYPE bit 0)
+        FENCE_ALT_MIN               = 15,   // min altitude fence (AC_FENCE_TYPE_ALT_MIN, FENCE_TYPE bit 3)
     };
 
 
