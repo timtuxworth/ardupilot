@@ -7818,19 +7818,42 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
 
     def PlaneDAAFenceAltitude(self):
         '''planedaa must avoid the altitude fences FENCE_ALT_MAX (FENCE_TYPE
-        bit 0) and FENCE_ALT_MIN (FENCE_TYPE bit 3).  Altitude is a vertical
-        problem that does not fit the horizontal bendy ruler, so it is handled
-        by a separate clamp-and-continue path: the plane keeps tracking the
-        waypoint horizontally but levels off inside a DAA_MARGIN_ALT buffer
-        and must never breach.  Each scenario commands a waypoint altitude on
-        the far side of the limit, so the mission alone would breach it.  With
-        FENCE_ACTION=0 (report only) any "fence breached" statustext fails the
-        test, so a non-breach over a sustained hold proves the clamp works.'''
+        bit 0) and FENCE_ALT_MIN (FENCE_TYPE bit 3) in the above-home frame.
+        Altitude is a vertical problem that does not fit the horizontal bendy
+        ruler, so it is handled by a separate clamp-and-continue path: the
+        plane keeps tracking the waypoint horizontally but levels off inside a
+        DAA_MARGIN_ALT buffer and must never breach.  Each scenario commands a
+        waypoint altitude on the far side of the limit, so the mission alone
+        would breach it.  With FENCE_ACTION=0 (report only) any "fence breached"
+        statustext fails the test, so a non-breach over a sustained hold proves
+        the clamp works.'''
+        self._PlaneDAAFenceAltitude(terrain=False)
+
+    def PlaneDAAFenceAltitudeTerrain(self):
+        '''As PlaneDAAFenceAltitude but with FENCE_ALT_MAX_TP/FENCE_ALT_MIN_TP=3
+        (above-terrain frame).  This exercises the script's altitude clamp in
+        the terrain frame: detect_altitude_fence()/clamp_alt_to_fence() read and
+        clamp altitude AGL via get_alt_m(TERRAIN) using the frame returned by
+        get_safe_alt_max()/get_safe_alt_min().  Terrain is served by
+        install_terrain_handlers_context() and the band is checked against
+        TERRAIN_REPORT.current_height (AGL), so it holds regardless of the
+        terrain offset from home.'''
+        self._PlaneDAAFenceAltitude(terrain=True)
+
+    def _PlaneDAAFenceAltitude(self, terrain=False):
         self.install_applet_script_context("planedaa.lua")
         self.install_script_module(
             self.script_modules_source_path("mavlink_wrappers.lua"),
             "mavlink_wrappers.lua",
         )
+
+        # Location::AltFrame: 1 = ABOVE_HOME, 3 = ABOVE_TERRAIN
+        alt_tp = 3 if terrain else 1
+        # in the terrain frame measure the band against AGL, not height above home
+        altitude_source = "TERRAIN_REPORT.current_height" if terrain else None
+
+        if terrain:
+            self.install_terrain_handlers_context()
 
         self.set_parameters({
             "SCR_ENABLE": 1,
@@ -7839,7 +7862,30 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             "FENCE_ENABLE": 0,    # enabled in-flight so arming is unimpeded
             "FENCE_ACTION": 0,    # report only — a breach must fail the test, not RTL
             "FENCE_MARGIN": 2,    # pin the fence's own margin so the band is deterministic
+            "FENCE_ALT_MAX_TP": alt_tp,
+            "FENCE_ALT_MIN_TP": alt_tp,
         })
+        if terrain:
+            self.set_parameter("TERRAIN_ENABLE", 1)
+
+        home = self.home_position_as_mav_location()
+
+        def wait_terrain_ready():
+            '''wait until the autopilot has terrain data along the flight path'''
+            far = self.offset_location_ne(home, 2600, 0)
+            tstart = self.get_sim_time_cached()
+            self.progress("Waiting for terrain data along path")
+            while True:
+                if self.get_sim_time_cached() - tstart > 120:
+                    raise NotAchievedException("Did not load required terrain")
+                for i in range(11):
+                    lat = home.lat + i * (far.lat - home.lat) / 10
+                    lon = home.lng + i * (far.lng - home.lng) / 10
+                    self.mav.mav.terrain_check_send(int(lat * 1.0e7), int(lon * 1.0e7))
+                report = self.assert_receive_message('TERRAIN_REPORT', timeout=60)
+                if report.pending == 0:
+                    break
+            self.progress("Terrain ready")
 
         # With FENCE_MARGIN=2 and DAA_MARGIN_ALT=20 the script clamps to
         # get_safe_alt_max()-20 == (alt_max-2)-20 and get_safe_alt_min()+20 ==
@@ -7860,7 +7906,8 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         ]
 
         for s in scenarios:
-            self.start_subtest("planedaa avoids %s fence" % s["name"])
+            self.start_subtest("planedaa avoids %s fence%s" %
+                               (s["name"], " (terrain frame)" if terrain else ""))
             self.context_push()
             self.context_collect('STATUSTEXT')
 
@@ -7882,6 +7929,9 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             ])
 
             self.reboot_sitl()
+            if terrain:
+                # reboot clears the terrain cache; reload before relying on AGL
+                wait_terrain_ready()
             self.wait_ready_to_arm()
 
             # DAA parameters only exist once the script has registered them at boot
@@ -7902,8 +7952,12 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
                 self.wait_current_waypoint(3, timeout=120)
 
                 # the plane must move toward the commanded (breaching) altitude
-                # but level off inside the safe band rather than crossing
-                self.wait_altitude(s["band"][0], s["band"][1], relative=True, timeout=200)
+                # but level off inside the safe band rather than crossing.  In
+                # the terrain frame the band is checked against AGL.
+                self.wait_altitude(s["band"][0], s["band"][1],
+                                   relative=not terrain,
+                                   altitude_source=altitude_source,
+                                   timeout=200)
 
                 # hold while the mission still commands an altitude beyond the
                 # fence; the clamp must keep it contained the whole time
@@ -9244,6 +9298,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             Test(self.PlaneDAAFenceBreachEscape, speedup=8),
             Test(self.PlaneDAAFenceAvoidance, speedup=8),
             Test(self.PlaneDAAFenceAltitude, speedup=8),
+            Test(self.PlaneDAAFenceAltitudeTerrain, speedup=8),
             self.ScriptedArmingChecksApplet,
             self.ScriptedArmingChecksAppletEStop,
             self.ScriptedArmingChecksAppletRally,
