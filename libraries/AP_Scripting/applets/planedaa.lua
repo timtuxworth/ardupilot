@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-025"
+SCRIPT_VERSION      = "4.8.0-027"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -338,15 +338,37 @@ DAA_AVD_ALERT = bind_add_param('AVD_ALERT', 21, 1)
 DAA_AVD_ACTION = bind_add_param('AVD_ACTION', 22, 1)
 
 --[[
-    // @Param: AVD_MARGIN_ALT
+    // @Param: DAA_MARGIN_ALT
     // @DisplayName: Altitude fence avoidance margin
-    // @Description: Proactive buffer (in metres) inside the safe altitude-fence limits at which DAA starts clamping the commanded altitude. Avoidance kicks in for FENCE_ALT_MAX (FENCE_TYPE bit 0) and/or FENCE_ALT_MIN (FENCE_TYPE bit 3) when enabled.
+    // @Description: Proactive buffer (in metres) inside the safe altitude-fence limits at which DAA starts clamping the commanded altitude. The plane levels off this far inside the safe limit. Avoidance kicks in for FENCE_ALT_MAX (FENCE_TYPE bit 0) and/or FENCE_ALT_MIN (FENCE_TYPE bit 3) when enabled.
     // @Units: m
     // @Range: 0 200
     // @Increment: 1
     // @User: Standard
 --]]
 DAA_MARGIN_ALT = bind_add_param('MARGIN_ALT', 23, 20)
+
+--[[
+    // @Param: DAA_ALT_HYST_M
+    // @DisplayName: Altitude fence avoidance hysteresis
+    // @Description: Hysteresis band (in metres) for altitude-fence avoidance. Once engaged, avoidance stays engaged until the altitude is this far back inside the safe band, preventing chatter as the plane levels off. Also sets how far before the level-off altitude the notice is announced.
+    // @Units: m
+    // @Range: 0 100
+    // @Increment: 1
+    // @User: Standard
+--]]
+DAA_ALT_HYST_M = bind_add_param('ALT_HYST_M', 24, 10)
+
+--[[
+    // @Param: DAA_ALT_COOL_S
+    // @DisplayName: Altitude fence alert cooldown
+    // @Description: Minimum time (in seconds) between altitude-fence "levelling off" notices, so brief re-engagements do not re-spam the GCS. Does not affect the avoidance itself.
+    // @Units: s
+    // @Range: 0 120
+    // @Increment: 1
+    // @User: Standard
+--]]
+DAA_ALT_COOL_S = bind_add_param('ALT_COOL_S', 25, 15)
 
 WARN_DIST_XY                = bind_param("AVD_W_DIST_XY")
 WARN_ACTION                 = bind_param("AVD_W_ACTION")
@@ -362,6 +384,8 @@ local roll_limit_deg        = ROLL_LIMIT_DEG:get()
 local lookahead_param       = DAA_LKAHD:get()
 local margin_fence          = DAA_MARGIN_FENCE:get()
 local margin_alt            = DAA_MARGIN_ALT:get()
+local alt_hyst_m            = DAA_ALT_HYST_M:get()
+local alt_cool_ms           = DAA_ALT_COOL_S:get() * 1000
 local margin_aircraft       = DAA_MARGIN_GA:get()
 local margin_bird           = DAA_MARGIN_BIRD:get()
 local margin_prey           = DAA_MARGIN_PREY:get()
@@ -495,6 +519,8 @@ local function get_vehicle_state()
         lookahead_param     = DAA_LKAHD:get()
         margin_fence        = DAA_MARGIN_FENCE:get()
         margin_alt          = DAA_MARGIN_ALT:get()
+        alt_hyst_m          = DAA_ALT_HYST_M:get()
+        alt_cool_ms         = DAA_ALT_COOL_S:get() * 1000
         margin_aircraft     = DAA_MARGIN_GA:get()
         margin_bird         = DAA_MARGIN_BIRD:get()
         margin_prey         = DAA_MARGIN_PREY:get()
@@ -1432,10 +1458,11 @@ DAA = {
         end
     end
 
-    -- altitude fences have no horizontal location, so build a lightweight obstacle for alerting/telemetry only
-    local function make_alt_fence_obstacle(otype, label_str, breach_amount_m)
+    -- altitude fences have no horizontal location, so build a lightweight obstacle for alerting/telemetry only.
+    -- headroom_m is the (positive) distance from the current altitude to the safe fence limit, reported in the alert.
+    local function make_alt_fence_obstacle(otype, label_str, headroom_m)
         local obstacle = {}
-        obstacle.distance_m  = breach_amount_m
+        obstacle.distance_m  = headroom_m
         obstacle.sysid       = 0
         obstacle.icao_code   = 0
         obstacle.type        = otype
@@ -1443,24 +1470,36 @@ DAA = {
         obstacle.location    = nil
         obstacle.pos_NED_m   = nil
         obstacle.vel_NED_ms  = nil
-        obstacle.distance_xy = breach_amount_m
-        obstacle.distance_z  = breach_amount_m
+        obstacle.distance_xy = headroom_m
+        obstacle.distance_z  = headroom_m
         return obstacle
     end
+
+    -- latch + hysteresis for the altitude-fence trigger. The proactive projection crosses the limit
+    -- intermittently as the plane climbs toward then levels off at the clamp altitude; without a latch
+    -- the trigger toggles and re-alerts every few seconds. Once engaged we stay engaged (so the alert
+    -- de-dupes to one message and the clamp holds steady) until the plane is clearly back in safe air.
+    local alt_fence_active = false
+    local alt_fence_near = false
+    local last_alt_alert_ms = 0
 
     -- Proactively detect that we are approaching (or projected to cross) an altitude fence.
     -- Only kicks in for the fences enabled in FENCE_TYPE: bit 0 (ALT_MAX) and/or bit 3 (ALT_MIN).
     -- The vertical position is projected forward using the current climb rate over the time it takes to fly
     -- the lookahead distance (capped to a sane vertical horizon) so we level off before the band is reached.
-    -- Returns a synthetic obstacle when corrective action is needed, otherwise nil.
+    -- Returns a synthetic obstacle while corrective action is needed (latched), otherwise nil.
     local function detect_altitude_fence()
         if fence == nil or current_loc == nil then
+            alt_fence_active = false
+            alt_fence_near = false
             return nil
         end
         local enabled = fence:get_enabled_fences()
         local alt_max_on = (enabled & FENCE_TYPE_ALT_MAX) ~= 0
         local alt_min_on = (enabled & FENCE_TYPE_ALT_MIN) ~= 0
         if not alt_max_on and not alt_min_on then
+            alt_fence_active = false
+            alt_fence_near = false
             return nil
         end
 
@@ -1474,31 +1513,62 @@ DAA = {
         local horizon_s = lookahead_param / math.max(groundspeed_ms, 1.0)
         horizon_s = math.min(math.max(horizon_s, 1.0), 20.0)
 
+        -- pick whichever enabled altitude fence currently needs (or is already taking) action.
+        -- enter when current or projected altitude is past the clamp limit; while latched, only release
+        -- once we are DAA_ALT_HYST_M clear of the limit on both current and projected altitude.
+        local otype, label_str, headroom_m
         if alt_max_on then
             local safe_max, frame_max = fence:get_safe_alt_max()
             local cur = current_loc:get_alt_m(frame_max)
             if cur ~= nil then
                 local ceiling = safe_max - margin_alt
                 local projected = cur + climb_rate_ms * horizon_s
-                if cur > ceiling or projected > ceiling then
-                    return make_alt_fence_obstacle(OBSTACLE_TYPE.FENCE_ALT_MAX, "Alt Max Fence",
-                                                   math.max(cur - ceiling, 0.0))
+                local enter = cur > ceiling or projected > ceiling
+                local clear = cur < ceiling - alt_hyst_m and projected < ceiling - alt_hyst_m
+                if enter or (alt_fence_active and not clear) then
+                    otype, label_str = OBSTACLE_TYPE.FENCE_ALT_MAX, "Alt Max Fence"
+                    headroom_m = safe_max - cur     -- metres below the safe ceiling
                 end
             end
         end
-        if alt_min_on then
+        if label_str == nil and alt_min_on then
             local safe_min, frame_min = fence:get_safe_alt_min()
             local cur = current_loc:get_alt_m(frame_min)
             if cur ~= nil then
                 local floor_alt = safe_min + margin_alt
                 local projected = cur + climb_rate_ms * horizon_s
-                if cur < floor_alt or projected < floor_alt then
-                    return make_alt_fence_obstacle(OBSTACLE_TYPE.FENCE_ALT_MIN, "Alt Min Fence",
-                                                   math.max(floor_alt - cur, 0.0))
+                local enter = cur < floor_alt or projected < floor_alt
+                local clear = cur > floor_alt + alt_hyst_m and projected > floor_alt + alt_hyst_m
+                if enter or (alt_fence_active and not clear) then
+                    otype, label_str = OBSTACLE_TYPE.FENCE_ALT_MIN, "Alt Min Fence"
+                    headroom_m = cur - safe_min     -- metres above the safe floor
                 end
             end
         end
-        return nil
+
+        local now_active = label_str ~= nil
+
+        -- Announce once when we actually level off near the limit (within the clamp band), not while
+        -- merely projecting a distant crossing. The "near" latch + cooldown collapses the brief
+        -- trigger drop-outs during a long climb/descent into a single notice; the steady clamp is silent.
+        -- The reported distance is the steady-state clearance the plane settles at (DAA_MARGIN_ALT),
+        -- not the trigger headroom.
+        local near = now_active and headroom_m ~= nil and headroom_m <= (margin_alt + alt_hyst_m)
+        if near and not alt_fence_near and (now_ms - last_alt_alert_ms) > alt_cool_ms then
+            gcs:send_named_string("DAA-ALERT", "alt-fence")
+            gcs:send_named_string("DAA-OBSTCL", label_str)
+            gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. string.format(" levelling off %.0fm from %s",
+                                margin_alt, label_str))
+            gcs:send_named_float("DAA-DISTZ", margin_alt)
+            last_alt_alert_ms = now_ms
+        end
+
+        alt_fence_near = near
+        alt_fence_active = now_active
+        if not now_active then
+            return nil
+        end
+        return make_alt_fence_obstacle(otype, label_str, math.max(headroom_m, 0.0))
     end
 
     -- crude aircraft are a special case. We do specific things if there is an aircraft nearby so we need to know the nearest one
@@ -1617,6 +1687,13 @@ DAA = {
     end
 
     local function alert_obstacle(alert_target_loc)
+        if obstacle_avoiding ~= nil and
+                (obstacle_avoiding.type == OBSTACLE_TYPE.FENCE_ALT_MAX or
+                 obstacle_avoiding.type == OBSTACLE_TYPE.FENCE_ALT_MIN) then
+            -- altitude fences emit their own throttled, edge-triggered notice from
+            -- detect_altitude_fence(); don't also raise the generic obstacle ALERT
+            return
+        end
         if obstacle_avoiding == nil or alert_target_loc == nil  or obstacle_avoiding.distance_xy > lookahead_param then
             previous_label = ""
             return
@@ -1794,7 +1871,6 @@ DAA = {
                 end
 
                 gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s dist: %.0fm", obstacle.label,  math.abs(obstacle_distance)))
-                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s ", pretty_obstacle_type(obstacle.type)))
                 avoiding_label = obstacle.label
                 gcs:send_named_string("DAA-AVOID", "obstacle")
                 gcs:send_named_string("DAA-OBSTCL", avoiding_label)
