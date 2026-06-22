@@ -416,6 +416,12 @@ void AP_OAScripting::_populate_fence_obstacle(OAObstacle &fence_obstacle, AP_OAS
     case AP_OAScripting::ObstacleType::FENCE_LUA:
         fence_obstacle.label    = (char *)"Lua Fence";
         break;
+    case AP_OAScripting::ObstacleType::FENCE_ALT_MAX:
+        fence_obstacle.label    = (char *)"Alt Max Fence";
+        break;
+    case AP_OAScripting::ObstacleType::FENCE_ALT_MIN:
+        fence_obstacle.label    = (char *)"Alt Min Fence";
+        break;
     default:
         fence_obstacle.label    = (char *)"Geo Fence";
         break;
