@@ -1140,8 +1140,8 @@ DAA = {
             target_loc:lat(),               -- TLat - Latitude of proposed new target in degrees
             target_loc:lng(),               -- TLng - Longitude of proposed new target in degrees
             target_loc:alt() * 0.01,        -- TAlt - Alitude of proposed new target in meters
-            target_loc:get_alt_frame()),    -- TFrm - Frame of the ALtitlde: 0: AMSL, 1: Home Relative, 3: Terrain Relative
-            obstacle_type                   -- ObjT - the OBSTACLE_TYPE of the object detected
+            target_loc:get_alt_frame(),     -- TFrm - Frame of the ALtitlde: 0: AMSL, 1: Home Relative, 3: Terrain Relative
+            obstacle_type)                  -- ObjT - the OBSTACLE_TYPE of the object detected
 
         if not status then
             gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " log detect:" .. tostring(err) )
@@ -1149,7 +1149,8 @@ DAA = {
     end
 
     local function log_detect_aircraft(aircraft)
-        if aircraft == nil then
+        -- a position-less contact (e.g. bearing-only ADS-B) has no location to log
+        if aircraft == nil or aircraft.location == nil then
             return
         end
 
@@ -1584,7 +1585,10 @@ DAA = {
         obstacle.velocity       
     --]]
 
-        local distance_m, aircraft_obstacle = OAScripting:find_aircraft(current_loc, margin_aircraft)
+        -- search out to the well clear distance (plus the GA margin), matching the GA
+        -- treatment in the bendy ruler path, so aircraft are detected and logged at a
+        -- useful range rather than only once they are within DAA_MARGIN_GA of us
+        local distance_m, aircraft_obstacle = OAScripting:find_aircraft(current_loc, well_clear_xy + margin_aircraft)
 
         if distance_m == nil then
             aircraft_avoiding = nil
@@ -1683,6 +1687,8 @@ DAA = {
 
         local proj_distance = math.max(distance_to_target_m, current_lookahead)   -- fix bug 2
         local new_target_loc = location_project(current_loc, best_bearing_deg, proj_distance, target_loc)
+        log_detect_result(true, obstacle_avoiding.distance_m, distance_to_target_m,
+                          best_bearing_deg, new_target_loc, obstacle_avoiding.type)
         return new_target_loc
     end
 

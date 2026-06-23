@@ -4591,32 +4591,38 @@ function osd:get_screen() end
 function osd:display_disabled() end
 
 -- OAScripting class for ObjectAvoidance scripting interface
-OAScipting {}
+OAScripting = {}
 
--- find the obstacle closed to a line (start_loc, end_loc)
+-- find the threats (obstacles and fences) closest to a line (start_loc, end_loc)
 ---@param start_loc Location -- Location of the start of the line
 ---@param end_loc Location -- Location of the end of the line to check
 ---@param lookahead_m float -- the furthest distance out from the line to check
----@return number|nil distance_min_m -- the return value of the closest distance object found
----@return integer|nil type -- the AP_OAAvoidance::ObstacleType of the type of object found 
----@return string|nil label -- label of the obstacle for display to the user. for GA vehicles will be an ICAO code
----@return integer|nil src_id -- the MAV_SYDID of the obstacle if relevant. For MAVLink this will be the MAV_SYSID of the vehice
----@return Location_ud|nil location -- Location of the obstacle found
----@return Vector3f_ud|nil pos_NED_m -- position of the obstacle found in m NED from the origin
----@return Vector3f_ud|nil velocity_ms -- velocity of the obstacle in ms NED from the origin
-function OAScripting:distance_to_obstacle(start_loc, end_loc, lookahead_m) end
+---@return number|nil distance_min_m -- distance to the closest threat found, or nil if none
+---@return OAObstacle_ud|nil obstacle -- the closest threat found
+---@return OAObstacle_ud|nil obstacle2 -- additional threat found
+---@return OAObstacle_ud|nil obstacle3 -- additional threat found
+---@return OAObstacle_ud|nil obstacle4 -- additional threat found
+function OAScripting:find_threats(start_loc, end_loc, lookahead_m) end
 
 -- find the aircraft closest to a Location
 ---@param vehicle_loc Location -- Location to search for aircraft
+---@param lookahead_m float -- the furthest distance out from vehicle_loc to check
+---@return number|nil distance_min_m -- distance to the closest aircraft found, or nil if none
+---@return OAObstacle_ud|nil aircraft -- the closest aircraft found
+function OAScripting:find_aircraft(vehicle_loc, lookahead_m) end
+
+-- find the single obstacle closest to a line (start_loc, end_loc), returning its details
+---@param start_loc Location -- Location of the start of the line
+---@param end_loc Location -- Location of the end of the line to check
 ---@param lookahead_m float -- the furthest distance out from the line to check
----@return number|nil distance_min_m -- the return value of the closest distance object found
----@return integer|nil type -- the AP_OAAvoidance::ObstacleType of the type of object found 
+---@return number|nil distance_min_m -- distance to the closest obstacle found, or nil if none
+---@return integer|nil type -- the AP_OAAvoidance::ObstacleType of the type of object found
 ---@return string|nil label -- label of the obstacle for display to the user. for GA vehicles will be an ICAO code
----@return integer|nil src_id -- the MAV_SYDID of the obstacle if relevant. For MAVLink this will be the MAV_SYSID of the vehice
+---@return integer|nil src_id -- the MAV_SYSID of the obstacle if relevant. For MAVLink this will be the MAV_SYSID of the vehicle
 ---@return Location_ud|nil location -- Location of the obstacle found
 ---@return Vector3f_ud|nil pos_NED_m -- position of the obstacle found in m NED from the origin
 ---@return Vector3f_ud|nil velocity_ms -- velocity of the obstacle in ms NED from the origin
-function OAScripting:distance_to_aircraft(start_loc, end_loc, lookahead_m) end
+function OAScripting:find_closest_obstacle(start_loc, end_loc, lookahead_m) end
 
 -- OAObstacle is a userdata object that holds obstacle information managed by OAScripting
 -- it is returned by calls to OAScripting methods, it can't be created or manipulated in Lua
