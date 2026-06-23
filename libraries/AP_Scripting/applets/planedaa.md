@@ -11,6 +11,107 @@ environments across the globe.
 
 This script requires the AC_AVOID library to be available. This requires a custom build.
 
+## Setup
+
+DAA is not a single switch — it stitches together the scripting engine, the ADS-B
+avoidance subsystem, the geofence subsystem and (optionally) terrain. The
+parameters below are grouped by what each piece enables. After changing any
+`*_ENABLE` parameter you must reboot the autopilot before the dependent
+parameters appear.
+
+### 1. Firmware build
+
+The flight controller firmware must be a **custom build** that includes the
+`AP_OAScripting` bindings from the AC_Avoidance library, which expose the
+`OAScripting` singleton to Lua. The script aborts at startup if this object is
+not present.
+
+### 2. Scripting engine
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| `SCR_ENABLE` | `1` | Enable Lua scripting (reboot required). |
+| `SCR_VM_I_COUNT` | `1000000` | **Increase from the default.** `planedaa.lua` is large and the per-loop instruction budget must be raised or the VM will fault. |
+
+**You must install TWO files, and they go in DIFFERENT places.** This trips
+people up: `planedaa.lua` depends on the `mavlink_wrappers` module, which it
+loads with `require("mavlink_wrappers")` at startup. If that module is not on
+the SD card in the right place, the applet fails to load immediately — it does
+not start in a degraded mode.
+
+The two files live in different source folders and must be copied to different
+destination folders:
+
+| Source (in the ArduPilot tree) | Destination (on the SD card) |
+|--------------------------------|------------------------------|
+| `AP_Scripting/applets/planedaa.lua` | `APM/scripts/planedaa.lua` |
+| `AP_Scripting/modules/mavlink_wrappers.lua` | `APM/scripts/modules/mavlink_wrappers.lua` |
+
+Notes:
+
+- `mavlink_wrappers.lua` is a **module**, so it lives under `modules/`, not next
+  to the applet. ArduPilot's `require` searches `scripts/` and
+  `scripts/modules/`, so the module must end up in `APM/scripts/modules/`.
+- Do **not** rename either file — `require("mavlink_wrappers")` looks for a file
+  named exactly `mavlink_wrappers.lua`.
+- If you only copy `planedaa.lua`, the script will not run. The most common
+  setup failure is forgetting the module or putting it in the wrong folder.
+
+### 3. Dynamic traffic detection (aircraft / drones / ADS-B)
+
+Detection of aircraft, drones and other MAVLink/ADS-B traffic is served from the
+`AP_Avoidance` database, which is only populated when avoidance is enabled.
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| `AVD_ENABLE` | `1` | **Required.** Without it the avoidance database stays empty and `OAScripting:find_aircraft()`/`find_threats()` see no dynamic traffic. |
+| `ADSB_TYPE` | per hardware | Set to match your ADS-B receiver so `ADSB_VEHICLE` messages are processed. In SITL this is the path used to inject simulated traffic. |
+
+The Well Clear and Near Mid-Air Collision (NMAC) volumes that DAA reads at
+startup default to the **ASTM F3442M-23** thresholds for crude aircraft (with
+NMAC falling back to the FAA / RTCA DO-396 figures, as ASTM F3442M does not
+itself define NMAC). The firmware defaults are already these values — change
+them only with good reason:
+
+| Parameter | Default | Equivalent | Source |
+|-----------|---------|------------|--------|
+| `AVD_WCLR_XY` | `609.6` m | 2000 ft | ASTM F3442M-23 Well Clear horizontal |
+| `AVD_WCLR_Z` | `76.2` m | 250 ft | ASTM F3442M-23 Well Clear vertical |
+| `AVD_NMAC_XY` | `152.4` m | 500 ft | FAA NMAC horizontal |
+| `AVD_NMAC_Z` | `30.48` m | 100 ft | RTCA DO-396 (TCAS MOPS) NMAC vertical |
+
+### 4. Fence avoidance
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| `FENCE_ENABLE` | `1` | **Required** for any fence avoidance — `find_threats()` only walks fences when the fence subsystem is enabled. |
+| `FENCE_TYPE` | bitmask | Selects which fences are active. Altitude-fence avoidance specifically needs **bit 0 (`ALT_MAX`)** and/or **bit 3 (`ALT_MIN`)**. |
+| `FENCE_ACTION` | `0` (report) | DAA performs the avoidance itself, so report-only is usually wanted to stop the flight controller *also* triggering its own RTL/Brake on a breach. |
+| `FENCE_ALT_MAX_TP` / `FENCE_ALT_MIN_TP` | frame | Frame of the altitude fences; set to match your intent (see terrain note below). |
+
+### 5. Terrain (default altitude frame)
+
+`DAA_AVD_ALT_TP` defaults to **3 (above terrain)**, and altitude-fence avoidance
+reads terrain-relative safe altitudes when the fence frames are terrain. If you
+use any terrain frame you must enable terrain and have terrain data available:
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| `TERRAIN_ENABLE` | `1` | Required when `DAA_AVD_ALT_TP` or `FENCE_ALT_*_TP` use the terrain frame. |
+
+### 6. Activation
+
+DAA **defaults to ON** at boot. To toggle it in flight, assign the DAA scripting
+function to an RC channel:
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| `DAA_ACT_FN` | `308` | Scripting/aux function used by the script. |
+| `RCx_OPTION` | `308` | Assign to a switch channel to toggle DAA. Logic is inverted: switch **Low = enabled**, switch **High = disabled**. |
+
+For quadplanes, set `Q_ENABLE = 1` as usual (avoidance manoeuvres are only
+commanded while the vehicle is in fixed-wing flight).
+
 ## Parameters
 
 The script adds the following `DAA_` parameters to control its behaviour. It also
