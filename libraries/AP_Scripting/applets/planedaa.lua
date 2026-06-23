@@ -132,6 +132,7 @@ ADSB_EMITTER = {
 
 }
 
+-- luacheck: ignore DAA_active
 local DAA_active = true;
 
 local PARAM_TABLE_KEY = 125
@@ -387,6 +388,9 @@ local margin_alt            = DAA_MARGIN_ALT:get()
 local alt_hyst_m            = DAA_ALT_HYST_M:get()
 local alt_cool_ms           = DAA_ALT_COOL_S:get() * 1000
 local margin_aircraft       = DAA_MARGIN_GA:get()
+-- margin_bird/prey/uav/weather are parked for planned obstacle types (see the
+-- commented-out block in find_closest_obstacle); read but not yet consumed.
+-- luacheck: ignore margin_bird margin_prey margin_uav margin_weather
 local margin_bird           = DAA_MARGIN_BIRD:get()
 local margin_prey           = DAA_MARGIN_PREY:get()
 local margin_uav            = DAA_MARGIN_UAV:get()
@@ -410,6 +414,7 @@ GRAVITY_MSS = 9.80665
 LOCATION_SCALING_FACTOR_INV = 89.83204953368922
 
 -- TODO should be a parameter (also convert to degrees)
+-- luacheck: ignore bearing_inc_cd
 local bearing_inc_cd = 1500
 local bearing_inc_deg = 1.5
 
@@ -571,6 +576,7 @@ local function dot_product_2vector(p,w)
     return (w:x() * p:x()) + (w:y() * p:y())
 end
 
+-- luacheck: ignore closest_point
 local function closest_point(p, w)
     local l2 = length_squared(w)
     if l2 < 1e-6 then
@@ -616,6 +622,7 @@ local function wrap_longitude(lon)
 end
 
  -- Extrapolate latitude/longitude given bearing and distance
+-- luacheck: ignore offset_bearing
 local function offset_bearing(lat, lng, bearing_deg, distance)
     --local radians = math.rad
     local ofs_north = math.cos(math.rad(bearing_deg)) * distance
@@ -807,17 +814,8 @@ local function find_closest_obstacle(loc1, loc2, lookahead_m)
     -- to an exclusion zone
     local bearing_deg   = math.deg(loc1:get_bearing(loc2))
     local loc1_shifted  = location_project(loc1, bearing_deg, 1, loc2)
-    local obstacle = {}
+    local obstacle
 
---[[
-    obstacle.distance_m,
-    obstacle.type,
-    obstacle.label,
-    obstacle.sysid,
-    obstacle.location,
-    obstacle.post_NED_m,
-    obstacle.velocity       = OAScripting:find_closest_obstacle(loc1_shifted, loc2, lookahead_m)*/
---]]
     local distance_m, any_obstacle, _, _, _  =
             OAScripting:find_threats(loc1_shifted, loc2, lookahead_m)
 
@@ -830,7 +828,6 @@ local function find_closest_obstacle(loc1, loc2, lookahead_m)
     end
 
     local obstacle_type_val = any_obstacle:obstacle_type()
-    local margin_fence          = DAA_MARGIN_FENCE:get()
 
     local obstacle_margin = 0;
     --[[
@@ -938,8 +935,8 @@ local loiteralt = {
     local target_alt_m = nil
     local target_alt_frame = ALT_FRAME.GLOBAL
 
-    function loiteralt.start(new_alt_m, new_alt_frame, direction_right, speed_ms)
-        local direction = ""
+    function loiteralt.start(new_alt_m, new_alt_frame, direction_right, _speed_ms)
+        local direction
 
         if loiteralt.active then
             -- gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. ": loiteralt ALREADY ACTIVE: ")
@@ -960,9 +957,9 @@ local loiteralt = {
         --                    pre_loiteralt_heading_deg, current_heading_deg
         --                    , math.abs(pre_loiteralt_heading_deg - current_heading_deg), target_alt_m) )
 
-        -- this gives us a radius of an approximation of a "standard turn" based on groundspeed (why groundspeed?)
-        local radius_m = (60.0 * speed_ms) / math.pi
-        radius_m = wp_loiter_rad
+        -- use the configured loiter radius (a groundspeed-based "standard turn"
+        -- radius, (60.0 * speed) / math.pi, was tried previously but not used)
+        local radius_m = wp_loiter_rad
         local loiteralt_loc = current_loc:copy()
         if direction_right then
             direction = "right"
@@ -1040,8 +1037,6 @@ local loiteralt = {
             return
         end
 
-        local current_location_agl = current_loc:copy()
-        current_location_agl:change_alt_frame(mavlink.ALT_FRAME.ABOVE_TERRAIN)
         -- if we've reached altitude and are pointing approximately where we were before we started loiteralt
         if now - now_debug > 2 and false then
             gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": loiteralt check hdg pre %.0f now %.0f dif %0.1f",
@@ -1071,13 +1066,13 @@ end)()
 -------------------------------------------------------------------------------
 --- DAA (Detect, Alert, Avoid) management class
 -------------------------------------------------------------------------------
-DAA = {
+local DAA = {
    enabled = false,
 }
 (function ()
     local active            = true;
     local navigating        = false;
-    local current_loc       = ahrs:get_position()
+    local current_loc       = ahrs:get_position() -- luacheck: ignore current_loc
     local groundspeed_ms    = ahrs:groundspeed_vector():length()
     local airspeed_ms       = ahrs:airspeed_EAS() or groundspeed_ms
     local ground_course_deg = wrap_180(math.deg(ahrs:groundspeed_vector():angle()))
@@ -1088,6 +1083,7 @@ DAA = {
     local last_avoid_bearing_deg = nil
     local previous_label    = ""
     local avoiding_label    = ""
+    -- luacheck: ignore previous_aircraft
     local previous_aircraft = ""
     local STATE             = {monitoring = 1, avoiding = 2, loitering = 3, loitering_avoiding = 4, hovering = 5, landing  = 6}
     local current_state     = STATE.monitoring
@@ -1174,6 +1170,7 @@ DAA = {
         end
     end
 
+    -- luacheck: ignore log_alert
     local function log_alert()
     end
 
@@ -1203,11 +1200,11 @@ DAA = {
 
     function DAA.disable()
         DAA.enabled = false
-    	gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. " disabled")
+        gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. " disabled")
     end 
     function DAA.enable()
         DAA.enabled = true
-    	gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. " enabled")
+        gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. " enabled")
     end
 
     --return true if we are in a state where DAA can apply
@@ -1233,7 +1230,7 @@ DAA = {
             navigation_target_loc   = nil
             daa_target_loc          = nil
             if navigating then
-    	        gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. "NOT NAVIGATING")
+                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. "NOT NAVIGATING")
                 navigating = false
             end
             active = false
@@ -1248,13 +1245,15 @@ DAA = {
             (not locations_equal(navigation_target_loc, current_target_loc) and
                 not locations_equal(daa_target_loc, current_target_loc)) then
             -- the vehicle navigation code has changed it's target
+            --[[ debug only
             if navigation_target_loc == nil then
-        	    --gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. "Set Navigation Target NAV")
+                --gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. "Set Navigation Target NAV")
             elseif daa_target_loc == nil then
-        	    --gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. "Set Navigation Target DAA")
+                --gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. "Set Navigation Target DAA")
             elseif not locations_equal(daa_target_loc, current_target_loc) then
-        	    --gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. "Set Navigation Target diff")
+                --gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. "Set Navigation Target diff")
             end
+            --]]
             navigation_target_loc = current_target_loc:copy()
         end
 
@@ -1304,7 +1303,7 @@ DAA = {
     end
 
     -- calculates the second step of the bendy ruler test - look foward a 2nd "full_distance" to see if we can still avoid obstacles
-    local function test_step2(loc_test, target_bearing, avoid_step2_m, full_distance)
+    local function test_step2(loc_test, target_bearing, avoid_step2_m, _full_distance)
         local test_bearings = { 0, 45, -45 }
         local target_loc = loc_test:copy()
         target_loc:offset_bearing(target_bearing, avoid_step2_m)
@@ -1337,6 +1336,7 @@ DAA = {
     end
 
     -- This method calculates the projected location in the desired direction taking account of airspeed, windspeed and the time it takes to turn
+    -- luacheck: ignore location_after_course_change
     local function location_after_course_change(from_loc, course_deg, to_loc)
         local course_change_deg = wrap_180(course_deg - ground_course_deg)
         local ground_speed_ms = effective_groundspeed(airspeed_ms, course_deg, wind_dir_rad, wind_speed) -- ground speed based on the new bearing (accounting for wind)
@@ -1404,7 +1404,7 @@ DAA = {
             if distance2_m >= current_lookahead then
                 if i == 0 and bearing2_deg == bearing_deg then
                     -- means we have a direct unobstructed path for step1 (i == 0) and step2
-            	    -- gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. "UNOBSTRUCTED  bearing: " .. bearing2)
+                    -- gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. "UNOBSTRUCTED  bearing: " .. bearing2)
                     return FLT_MAX, bearing_deg, nil -- no avoidance required
                 end
                 -- we've found at least one direction where there is no obstacle at least for 2 steps out
@@ -1673,8 +1673,6 @@ DAA = {
             --gcs:send_text(MAV_SEVERITY.ERROR, "NO OBSTACLE")
             --log_detect_result(false, obstacle_distance_m, distance_to_target_m, best_bearing_deg, target_loc, -1)
             return nil -- no avoidance required
-        else
-            --gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. "step1 dist: " .. obstacle_avoiding.distance_m .. " src: " .. obstacle_avoiding.label .. " bearing: " .. best_bearing_deg)
         end
 
         if (now_ms - now_debug_ms) > 2000 then
@@ -1865,9 +1863,6 @@ DAA = {
             return
         end
         -- if we have a new target - update it if it's different from our current target otherwise revert to the original target
-        if obstacle ~= nil and new_target_loc ~= nil then
-            --gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s lat %.0f lng %.0f", obstacle.label, new_target_loc:lat(), new_target_loc:lng()))
-        end
         if set_avoid_location(new_target_loc) and navigation_target_loc ~= nil then
             local avoid_dist = navigation_target_loc:get_distance(new_target_loc)
             if (now_ms - now_avoiding_ms) > 5000 and obstacle ~= nil and avoid_dist > 5 then
@@ -1928,7 +1923,7 @@ DAA = {
                 current_state = STATE.loitering
             end
             return
-        elseif current_state == STATE.hovering or current_state == STATE.avoiding or current_state == STATE.hovering or current_state == STATE.landing then
+        elseif current_state == STATE.hovering or current_state == STATE.avoiding or current_state == STATE.hovering or current_state == STATE.landing then -- luacheck: ignore 542
             -- do nothing for now
         elseif aircraft_avoiding ~= nil then
             gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITER AIRCRAFT: %s", aircraft_avoiding.label))
@@ -1958,7 +1953,7 @@ DAA = {
         if loiteralt.active then
             current_state = STATE.loitering
             do_loitering()
-        elseif current_state == STATE.hovering or current_state == STATE.avoiding or current_state == STATE.hovering or current_state == STATE.landing then
+        elseif current_state == STATE.hovering or current_state == STATE.avoiding or current_state == STATE.hovering or current_state == STATE.landing then -- luacheck: ignore 542
             -- do nothing for now
         elseif aircraft_avoiding ~= nil then
             gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITER AIRCRAFT: %s", aircraft_avoiding.label))
@@ -1994,8 +1989,8 @@ local function update()
 
     local switch_function = DAA_ACT_FN:get()
     if switch_function == nil then
-        if ~no_DAA_displayed then
-    	    gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " no DAA function")
+        if not no_DAA_displayed then
+            gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " no DAA function")
             no_DAA_displayed = true
         end
         return
