@@ -13,15 +13,39 @@ This script requires the AC_AVOID library to be available. This requires a custo
 
 ## Parameters
 
-The script adds the following parameters to control it's behaviour. It uses
-the existing AVD parameters that are used for the Copter FOLLOW mode. In addition
-the following "FOLLP" parameters are added.
+The script adds the following `DAA_` parameters to control its behaviour. It also
+reuses the existing core `AVD_` parameters (`AVD_WCLR_XY`, `AVD_WCLR_Z`,
+`AVD_NMAC_XY`, `AVD_NMAC_Z`, etc.) that define the Well Clear and Near Mid-Air
+Collision volumes, and the `FENCE_*` parameters for the altitude/geo fences.
 
-## FOLLP_FAIL_MODE
-
-This is the mode the plane will change to if following fails. Failure happens
-if the following plane loses telemetry from the target, or the distance exceeds
-FOLL_DIST_MAX.
+| Parameter | Default | Units | Description |
+|-----------|---------|-------|-------------|
+| `DAA_ACT_FN` | 308 | | RC option / scripting function used to activate the DAA capability. |
+| `DAA_MARGIN_FENCE` | 50 | m | Avoidance margin for the geofence. |
+| `DAA_MARGIN_DYN` | 20 | m | Avoidance margin for dynamic objects. |
+| `DAA_MARGIN_EXCL` | 20 | m | Avoidance margin for exclusion zones. |
+| `DAA_MARGIN_WIDE` | 30 | m | Avoidance margin for wide avoidance. |
+| `DAA_MARGIN_HGT` | 60 | m | Avoidance margin for height avoidance. |
+| `DAA_LKAHD` | 1000 | m | Avoidance lookahead distance. |
+| `DAA_UPDATE_RATE` | 10 | Hz | Rate at which avoidance is processed. |
+| `DAA_HEIGHT_USE` | 0 | | Whether to consider height differences when calculating collisions (0: use height, 1: ignore height). |
+| `DAA_MARGIN_GA` | 50 | m | Avoidance margin for fixed-wing/General Aviation aircraft, over and above the Well Clear margin `AVD_WCLR_XY`. |
+| `DAA_MARGIN_WTH` | 173 | m | Avoidance radius for weather/clouds/rain. |
+| `DAA_MARGIN_BIRD` | 100 | m | Avoidance margin for migratory birds. |
+| `DAA_MARGIN_PREY` | 200 | m | Avoidance radius for birds of prey. |
+| `DAA_MARGIN_UAV` | 50 | m | Avoidance radius for UAVs/drones (MAVLink sourced). |
+| `DAA_MARGIN_AIS` | 50 | m | Avoidance radius for AIS ship contacts (MAVLink sourced). |
+| `DAA_MARGIN_PRX` | 50 | m | Avoidance radius for obstacles detected by proximity sensors. |
+| `DAA_BR_RATIO` | 1.5 | | BendyRuler will avoid changing bearing unless the ratio of the previous margin to the newly calculated margin is at least this much. |
+| `DAA_BR_ANGLE` | 45 | deg | BendyRuler resists changing the current bearing if the change exceeds this angle. |
+| `DAA_AVD_ALT` | 50 | m | Altitude to loiter/descend to when avoiding a crude aircraft contact. Ignored if zero. |
+| `DAA_AVD_ALT_TP` | 3 | | Frame of `DAA_AVD_ALT` (0: absolute, 1: above home, 2: above origin, 3: above terrain). |
+| `DAA_AVD_ALERT` | 1 | | Whether to alert on avoidance (0: none, 1: alert). |
+| `DAA_AVD_ACTION` | 1 | | Whether to act on avoidance (0: none, 1: avoid). |
+| `DAA_MARGIN_ALT` | 20 | m | Proactive buffer inside the safe altitude-fence limits at which DAA starts clamping the commanded altitude. |
+| `DAA_ALT_HYST_M` | 10 | m | Hysteresis band for altitude-fence avoidance, preventing chatter as the plane levels off. |
+| `DAA_ALT_COOL_S` | 15 | s | Minimum time between altitude-fence "levelling off" notices, so brief re-engagements do not re-spam the GCS. |
+| `DAA_HEADING_INC` | 1.5 | deg | Angular step used when searching candidate headings around the target bearing for a collision-free path. The search sweeps a full circle in increments of this size, alternating left and right. Smaller values search more finely but cost more CPU per update. |
 
 ## Logging
 

@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-027"
+SCRIPT_VERSION      = "4.8.0-028"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -193,7 +193,7 @@ DAA_MARGIN_EXCL   = bind_add_param('MARGIN_EXCL', 4, 20)
 DAA_MARGIN_WIDE   = bind_add_param('MARGIN_WIDE', 5, 30)
 
 --[[
-  // @Param: BR_MARGIN_HGT 
+  // @Param: DAA_MARGIN_HGT
   // @DisplayName: height avoidance margin
   // @Description: Avoidance margin for height avoidance 
   // @Units: m
@@ -228,17 +228,17 @@ DAA_HEIGHT_USE  = bind_add_param('HEIGHT_USE', 9, 0)
   // @Param: DAA_MARGIN_GA
   // @DisplayName: Margin for General Aviation
   // @Description: Avoidance margin for Fixed Wing aircraft/General Aviation (Helicopters? eVTOL?) over and above the Well Clear margin AVD_WCLR_XY
-ß  // @Units: m
+  // @Units: m
 --]]
 DAA_MARGIN_GA  = bind_add_param('MARGIN_GA', 10, 50)
 
 --[[
-  // @Param: DAA_MARGIN_WTHR
+  // @Param: DAA_MARGIN_WTH
   // @DisplayName: Radius for Weather
   // @Description: Avoidance radius for Weather/Clouds/Rain 
   // @Units: m
 --]]
-DAA_MARGIN_WTHR  = bind_add_param('MARGIN_WTH', 11, 173)
+DAA_MARGIN_WTH  = bind_add_param('MARGIN_WTH', 11, 173)
 
 --[[
   // @Param: DAA_MARGIN_BIRD
@@ -281,8 +281,8 @@ DAA_MARGIN_AIS  = bind_add_param('MARGIN_AIS', 15, 50)
 DAA_MARGIN_PRX  = bind_add_param('MARGIN_PRX', 16, 50)
 
 --[[
-// @Param: BR_RATIO
-    // @DisplayName: DAA margin ratio for BendyRuler to change bearing significantly 
+    // @Param: DAA_BR_RATIO
+    // @DisplayName: DAA margin ratio for BendyRuler to change bearing significantly
     // @Description:  DAA BendyRuler will avoid changing bearing unless ratio of previous margin from obstacle (or fence) to present calculated margin is at least this much.
     // @Range: 1.1 2
     // @Increment: 0.1
@@ -291,8 +291,8 @@ DAA_MARGIN_PRX  = bind_add_param('MARGIN_PRX', 16, 50)
 DAA_BR_RATIO = bind_add_param('BR_RATIO', 17, 1.5)
 
 --[[
-    // @Param: BR_ANGLE
-    // @DisplayName: BendyRuler's bearing change resistance threshold angle   
+    // @Param: DAA_BR_ANGLE
+    // @DisplayName: BendyRuler's bearing change resistance threshold angle
     // @Description:  DAA BendyRuler will resist changing current bearing if the change in bearing is over this angle
     // @Range: 20 180
     // @Increment: 5
@@ -301,8 +301,8 @@ DAA_BR_RATIO = bind_add_param('BR_RATIO', 17, 1.5)
 DAA_BR_ANGLE = bind_add_param('BR_ANGLE', 18, 45)
 
 --[[
-    // @Param: AVD_ALT
-    // @DisplayName: The altitude to loiter to when avoiding a crude aircraft   
+    // @Param: DAA_AVD_ALT
+    // @DisplayName: The altitude to loiter to when avoiding a crude aircraft
     // @Description:  DAA will loiter and descent to this altitude if a crude aircraft is detected within DAA_MARGIN_GA of the vehicle. Ignored if zero (0).
     // @Range: 20 5000
     // @Increment: 5
@@ -311,8 +311,8 @@ DAA_BR_ANGLE = bind_add_param('BR_ANGLE', 18, 45)
 DAA_AVD_ALT = bind_add_param('AVD_ALT', 19, 50)
 
 --[[
-    // @Param: AVD_ALT_TP
-    // @DisplayName: The frame of the DAA_AVD_ALT  
+    // @Param: DAA_AVD_ALT_TP
+    // @DisplayName: The frame of the DAA_AVD_ALT
     // @Description:  DAA will loiter and descent to DAA_AVD_ALT in this frame. 0: Absolute, 1: Above Home, 2: Above Origin, 3: Above Terrain (default)
     // @Range: 20 5000
     // @Increment: 5
@@ -321,8 +321,8 @@ DAA_AVD_ALT = bind_add_param('AVD_ALT', 19, 50)
 DAA_AVD_ALT_TP = bind_add_param('AVD_ALT_TP', 20, 3)
 
 --[[
-    // @Param: AVD_ALERT
-    // @DisplayName: Alert for DAA Avoidance 
+    // @Param: DAA_AVD_ALERT
+    // @DisplayName: Alert for DAA Avoidance
     // @Description: Alert or not Alert 
     // @Values: 0: None, 1: Alert
     // @User: Standard
@@ -330,8 +330,8 @@ DAA_AVD_ALT_TP = bind_add_param('AVD_ALT_TP', 20, 3)
 DAA_AVD_ALERT = bind_add_param('AVD_ALERT', 21, 1)
 
 --[[
-    // @Param: AVD_ACTION
-    // @DisplayName: Action for DAA Avoidance 
+    // @Param: DAA_AVD_ACTION
+    // @DisplayName: Action for DAA Avoidance
     // @Description: Action for DAA Avoidance
     // @Values: 0: None, 1: Avoid
     // @User: Standard
@@ -371,6 +371,18 @@ DAA_ALT_HYST_M = bind_add_param('ALT_HYST_M', 24, 10)
 --]]
 DAA_ALT_COOL_S = bind_add_param('ALT_COOL_S', 25, 15)
 
+--[[
+    // @Param: DAA_HEADING_INC
+    // @DisplayName: Avoidance heading search increment
+    // @Description: Angular step (in degrees) used when searching candidate headings around the target bearing for a collision-free path. Smaller values search more finely but cost more CPU per avoidance update.
+    // @Units: deg
+    // @Range: 0.5 45
+    // @Increment: 0.5
+    // @User: Advanced
+--]]
+DEFAULT_HEADING_INC_DEG = 1.5
+DAA_HEADING_INC = bind_add_param('HEADING_INC', 26, DEFAULT_HEADING_INC_DEG)
+
 WARN_DIST_XY                = bind_param("AVD_W_DIST_XY")
 WARN_ACTION                 = bind_param("AVD_W_ACTION")
 AVD_ENABLE                  = bind_param("AVD_ENABLE")
@@ -394,7 +406,7 @@ local margin_aircraft       = DAA_MARGIN_GA:get()
 local margin_bird           = DAA_MARGIN_BIRD:get()
 local margin_prey           = DAA_MARGIN_PREY:get()
 local margin_uav            = DAA_MARGIN_UAV:get()
-local margin_weather        = DAA_MARGIN_WTHR:get()
+local margin_weather        = DAA_MARGIN_WTH:get()
 local margin_ais            = DAA_MARGIN_AIS:get()
 local margin_proximity      = DAA_MARGIN_PRX:get()
 local refresh_rate          = 1000.0 / DAA_UPDATE_RATE:get()
@@ -413,10 +425,10 @@ local near_miss_z           = AVD_NMAC_Z:get()
 GRAVITY_MSS = 9.80665
 LOCATION_SCALING_FACTOR_INV = 89.83204953368922
 
--- TODO should be a parameter (also convert to degrees)
--- luacheck: ignore bearing_inc_cd
-local bearing_inc_cd = 1500
-local bearing_inc_deg = 1.5
+local bearing_inc_deg = DAA_HEADING_INC:get() or DEFAULT_HEADING_INC_DEG
+if bearing_inc_deg <= 0 then
+    bearing_inc_deg = DEFAULT_HEADING_INC_DEG
+end
 
 COLLISION_DETECTED = false
 
@@ -530,7 +542,7 @@ local function get_vehicle_state()
         margin_bird         = DAA_MARGIN_BIRD:get()
         margin_prey         = DAA_MARGIN_PREY:get()
         margin_uav          = DAA_MARGIN_UAV:get()
-        margin_weather      = DAA_MARGIN_WTHR:get()
+        margin_weather      = DAA_MARGIN_WTH:get()
         margin_ais          = DAA_MARGIN_AIS:get()
         margin_proximity    = DAA_MARGIN_PRX:get()
         refresh_rate        = 1000.0 / DAA_UPDATE_RATE:get()
