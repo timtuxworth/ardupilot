@@ -212,7 +212,7 @@ DAA_LKAHD  = bind_add_param('LKAHD', 7, 1000)
   // @Param: DAA_UPDATE_RATE
   // @DisplayName: rate to process avoidance
   // @Description: Avoidance processing rate
-  // @Units: hz
+  // @Units: Hz
 --]]
 DAA_UPDATE_RATE  = bind_add_param('UPDATE_RATE', 8, 10.0)
 
