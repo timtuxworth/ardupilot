@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-028"
+SCRIPT_VERSION      = "4.8.0-029"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -383,6 +383,17 @@ DAA_ALT_COOL_S = bind_add_param('ALT_COOL_S', 25, 15)
 DEFAULT_HEADING_INC_DEG = 1.5
 DAA_HEADING_INC = bind_add_param('HEADING_INC', 26, DEFAULT_HEADING_INC_DEG)
 
+--[[
+    // @Param: DAA_WIND_MIN
+    // @DisplayName: Minimum wind speed for wind-aware avoidance
+    // @Description: Minimum wind speed (in m/s) before the avoidance look-ahead accounts for wind-driven drift while turning onto a candidate heading. Below this the still-air path is used, so calm-air behaviour is unchanged. Set very high to disable the wind-aware path entirely.
+    // @Units: m/s
+    // @Range: 0 50
+    // @Increment: 0.5
+    // @User: Advanced
+--]]
+DAA_WIND_MIN = bind_add_param('WIND_MIN', 27, 2.0)
+
 WARN_DIST_XY                = bind_param("AVD_W_DIST_XY")
 WARN_ACTION                 = bind_param("AVD_W_ACTION")
 AVD_ENABLE                  = bind_param("AVD_ENABLE")
@@ -417,6 +428,7 @@ local ga_avoid_alt          = DAA_AVD_ALT:get()
 local ga_avoid_alt_frame    = DAA_AVD_ALT_TP:get()
 local daa_alert             = DAA_AVD_ALERT:get()
 local daa_action            = DAA_AVD_ACTION:get()
+local wind_min_ms           = DAA_WIND_MIN:get()
 local well_clear_xy         = AVD_WCLR_XY:get()
 local well_clear_z          = AVD_WCLR_Z:get()
 local near_miss_xy          = AVD_NMAC_XY:get()
@@ -553,6 +565,12 @@ local function get_vehicle_state()
         ga_avoid_alt_frame  = DAA_AVD_ALT_TP:get()
         daa_alert           = DAA_AVD_ALERT:get()
         daa_action          = DAA_AVD_ACTION:get()
+        wind_min_ms         = DAA_WIND_MIN:get()
+
+        bearing_inc_deg     = DAA_HEADING_INC:get() or DEFAULT_HEADING_INC_DEG
+        if bearing_inc_deg <= 0 then
+            bearing_inc_deg = DEFAULT_HEADING_INC_DEG
+        end
 
         well_clear_xy        = AVD_WCLR_XY:get()
         well_clear_z         = AVD_WCLR_Z:get()
@@ -1143,7 +1161,7 @@ local DAA = {
             (obstacle_found and 1 or 0),    -- Obs - Obstacle found true/false
             distance_found_m,               -- DstF - Distance to found obstacle in meters
             distance_to_target_m,           -- DstT - Distance to proposed new target to avoid the obstacle
-            best_bearing_deg,               -- HdgB - Best bearing found to avoid obstacles
+            wrap_360(best_bearing_deg),     -- HdgB - Best bearing found to avoid obstacles (0-360 deg)
             (has_target and 1 or 0),        -- TFnd - Target found
             target_loc:lat(),               -- TLat - Latitude of proposed new target in degrees
             target_loc:lng(),               -- TLng - Longitude of proposed new target in degrees
@@ -1348,7 +1366,6 @@ local DAA = {
     end
 
     -- This method calculates the projected location in the desired direction taking account of airspeed, windspeed and the time it takes to turn
-    -- luacheck: ignore location_after_course_change
     local function location_after_course_change(from_loc, course_deg, to_loc)
         local course_change_deg = wrap_180(course_deg - ground_course_deg)
         local ground_speed_ms = effective_groundspeed(airspeed_ms, course_deg, wind_dir_rad, wind_speed) -- ground speed based on the new bearing (accounting for wind)
@@ -1373,7 +1390,8 @@ local DAA = {
     end
 
     -- This method checks whether we will collide with any obstacle if we fly at a given bearing bearing_deg + i * bearing_inc_deg
-    local function test_step1(full_distance, bearing_deg, i, target_loc)
+    local function test_step1(full_distance, bearing_deg, i, target_loc, prefer_sign)
+        prefer_sign = prefer_sign or 1
 
         -- need to get rid of the legacy _cd
         -- local bearing_cd = bearing_deg * 100.0
@@ -1383,12 +1401,16 @@ local DAA = {
         --local bearing_delta_cd = i * bearing_inc_cd / 2
         local bearing_delta_deg = i * bearing_inc_deg / 2.0
 
-        --gcs:send_text(0, string.format("i: %d", i)) 
+        --gcs:send_text(0, string.format("i: %d", i))
         if i % 2 == 1 then
             -- Alternate between left and right of the target
             --bearing_delta_cd = -bearing_delta_cd
             bearing_delta_deg = -bearing_delta_deg
         end
+        -- prefer_sign flips which side the alternating search leads with, so the
+        -- more downwind escape is explored (and, being clear first, chosen) ahead of
+        -- the upwind one. prefer_sign is 1 in calm air, so behaviour is unchanged.
+        bearing_delta_deg = bearing_delta_deg * prefer_sign
 
         local avoid_step1_m     = current_lookahead
         local avoid_step2_m     = current_lookahead * 2.0
@@ -1396,9 +1418,14 @@ local DAA = {
         -- Test bearing used to look ahead for obstacles
         -- local bearing_test = wrap_180((bearing_cd*0.01) + (bearing_delta_cd*0.01))
         local bearing_test_deg  = wrap_180(bearing_deg + bearing_delta_deg)
-        -- local adjusted_loc = location_after_course_change(current_loc, bearing_test_deg, target_loc)
-        -- fudge to ignore the course change
+        -- Start the look-ahead from where we will actually be after turning onto this
+        -- candidate course. In wind this leads the carrot, so the search both penalises
+        -- headings that drift toward the obstacle and prefers wind-favourable escapes.
+        -- Gated on wind speed so calm-air behaviour (and the autotests) is unchanged.
         local adjusted_loc      = current_loc
+        if wind_speed > wind_min_ms then
+            adjusted_loc = location_after_course_change(current_loc, bearing_test_deg, target_loc)
+        end
 
         -- Position after one step from where we think we will be after turning to bearing_test_deg
         local avoidance_distance_m  = calc_avoidance_distance(avoid_step1_m, full_distance)
@@ -1648,9 +1675,23 @@ local DAA = {
             return nil
         end
 
+        -- When the wind is significant, bias the search to explore the more downwind
+        -- side of the target first: a downwind turn keeps groundspeed up and stops the
+        -- wind pushing us back toward the obstacle, and the first clear path found wins.
+        -- The original (calm-air) search leads with the negative/left side, so
+        -- prefer_sign = 1 reproduces it exactly and leaves the autotests unchanged.
+        local prefer_sign = 1
+        if wind_speed > wind_min_ms then
+            local gs_left  = effective_groundspeed(airspeed_ms, bearing_deg - 45, wind_dir_rad, wind_speed)
+            local gs_right = effective_groundspeed(airspeed_ms, bearing_deg + 45, wind_dir_rad, wind_speed)
+            if gs_right > gs_left then
+                prefer_sign = -1
+            end
+        end
+
         -- Try 5 degree increments around a circle, alternating left and right. Check each one to see if flying in that direction would avoid all obstacles.
         for i = 0, (360 / bearing_inc_deg) do
-            local distance_found_m, bearing_found_deg, obstacle_found = test_step1(distance_to_target_m, bearing_deg, i, target_loc)
+            local distance_found_m, bearing_found_deg, obstacle_found = test_step1(distance_to_target_m, bearing_deg, i, target_loc, prefer_sign)
             if distance_found_m > best_distance_m then
                 best_distance_m = distance_found_m
                 best_bearing_deg = bearing_found_deg
