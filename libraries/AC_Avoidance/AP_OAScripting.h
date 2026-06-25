@@ -6,8 +6,16 @@
 
 #include "AC_Avoidance_config.h"
 #include <AP_Vehicle/AP_Vehicle_Type.h>
-// Only enabled for ArduPlane with avoidance (requires AP_Avoidance library)
+// AP_OAScripting calls into the AP_Avoidance (ADS-B) library, which is only built
+// for ArduPlane and ArduCopter. The matching applet (planedaa.lua) is Plane-only,
+// so gate the whole feature to ArduPlane: it must never be compiled or linked on
+// any other vehicle (Copter/Rover/Sub/Tracker/AP_Periph). The build-type macro
+// has to live in this header so the class is not even declared elsewhere, hence
+// this header is whitelisted in Tools/ardupilotwaf/ap_library.py. The #ifndef
+// allows an explicit override if ever needed.
+#ifndef AP_OA_SCRIPTING_ENABLED
 #define AP_OA_SCRIPTING_ENABLED (APM_BUILD_TYPE(APM_BUILD_ArduPlane) && AP_AVOIDANCE_ENABLED)
+#endif
 #if AP_OA_SCRIPTING_ENABLED
 
 #include "AP_OADatabase.h"
