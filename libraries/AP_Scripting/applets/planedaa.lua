@@ -463,7 +463,6 @@ FLT_MAX = 3.402823466e+38
 -------------------------------------------------------------------------------
 
 local current_loc           = ahrs:get_position()
-local current_heading_deg   = math.deg(ahrs:get_yaw_rad())
 local current_mode          = vehicle:get_mode()
 local vtol_state            = MAV_VTOL_STATE.UNDEFINED
 
@@ -542,7 +541,6 @@ local quadplane_enabled = quadplane ~= nil and (param:get('Q_ENABLE') or 0) > 0
 local function get_vehicle_state()
 
     current_loc         = ahrs:get_position()
-    current_heading_deg = math.deg(ahrs:get_yaw_rad())
     current_mode        = vehicle:get_mode()
     if quadplane_enabled then
         vtol_state      = quadplane:get_mav_vtol_state()
@@ -1049,19 +1047,6 @@ local loiteralt = {
                 return false
             end
         end
-        if not force_stop and false then
-            -- if we are pointing in the wrong direction for the requried next waypoint, keep going until we are 
-            -- pointing more or less in the right direction (but not if force_stop is true)
-            local current_alt_m = current_loc:get_alt_m(target_alt_frame)
-            if (math.abs(current_alt_m - target_alt_m)) > 10 or
-                    (math.abs(wrap_180(pre_loiteralt_heading_deg - current_heading_deg)) < 45.0) then
-                gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": loiteralt STOP? alt  %.0f trg %.0f hdg: %.0f prv: %.0f",
-                            current_alt_m, target_alt_m, current_heading_deg, pre_loiteralt_heading_deg) )
-                -- not ready to stop yet
-                return false
-            end
-        end
-
         if previous_mode > 0 and previous_mode ~= PLANE_MODE.GUIDED then
             vehicle:set_mode(previous_mode)
             gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": Loiter Done set mode: %s", get_mode_string(previous_mode) ))
@@ -1075,26 +1060,16 @@ local loiteralt = {
 
     -- should be called regularly if loiteralt is active
     function loiteralt.update()
-        if active and current_mode ~= PLANE_MODE.GUIDED then
+        if loiteralt.active and current_mode ~= PLANE_MODE.GUIDED then
             gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": Pilot changed from GUIDED to: %.0f", current_mode ))
             previous_mode = -1
             loiteralt.stop(true)
             return
         end
-        if not active or current_loc == nil then
+        if not loiteralt.active or current_loc == nil then
             return
         end
 
-        -- if we've reached altitude and are pointing approximately where we were before we started loiteralt
-        if now - now_debug > 2 and false then
-            gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": loiteralt check hdg pre %.0f now %.0f dif %0.1f",
-                        pre_loiteralt_heading_deg, current_heading_deg,
-                        math.abs(pre_loiteralt_heading_deg - current_heading_deg)) )
-            gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": loiteralt check alt curr %.0f trg %.0f max %0.1f",
-                        current_altitude_m, loiteralt.target_alt_amsl_m,
-                        altitude_max) )
-            now_debug = now
-        end
         -- if we have achieved the target altitude exit immediately and we are pointing to the next WP
         --local current_agl_m = current_location_agl:alt() * 0.01
 
@@ -1180,7 +1155,7 @@ local DAA = {
             distance_found_m,               -- DstF - Distance to found obstacle in meters
             distance_to_target_m,           -- DstT - Distance to proposed new target to avoid the obstacle
             wrap_360(best_bearing_deg),     -- HdgB - Best bearing found to avoid obstacles (0-360 deg)
-            (has_target and 1 or 0),        -- TFnd - Target found
+            (target_loc ~= nil and 1 or 0), -- TFnd - Target found
             target_loc:lat(),               -- TLat - Latitude of proposed new target in degrees
             target_loc:lng(),               -- TLng - Longitude of proposed new target in degrees
             target_loc:alt() * 0.01,        -- TAlt - Alitude of proposed new target in meters
@@ -1336,6 +1311,10 @@ local DAA = {
         end
         if math.abs(wrap_180(bearing_orig_deg - bearing_deg)) < bendy_angle then
             -- proposed change is small enough, no resistance needed
+            return bearing_deg
+        end
+        if current_loc == nil then
+            -- no current position to measure against, accept the proposed bearing
             return bearing_deg
         end
         -- measure clearance in the previously committed direction
@@ -1526,7 +1505,7 @@ local DAA = {
     -- de-dupes to one message and the clamp holds steady) until the plane is clearly back in safe air.
     local alt_fence_active = false
     local alt_fence_near = false
-    local last_alt_alert_ms = 0
+    local last_alt_alert_ms = uint32_t(0)
 
     -- Proactively detect that we are approaching (or projected to cross) an altitude fence.
     -- Only kicks in for the fences enabled in FENCE_TYPE: bit 0 (ALT_MAX) and/or bit 3 (ALT_MIN).
@@ -1626,8 +1605,13 @@ local DAA = {
         obstacle.sysid,
         obstacle.location,
         obstacle.post_NED_m,
-        obstacle.velocity       
+        obstacle.velocity
     --]]
+
+        if current_loc == nil then
+            aircraft_avoiding = nil
+            return
+        end
 
         -- search out to the well clear distance (plus the GA margin), matching the GA
         -- treatment in the bendy ruler path, so aircraft are detected and logged at a
@@ -1657,7 +1641,7 @@ local DAA = {
         aircraft_avoiding = nil
 
         -- we want to calculate avoidance towards the current NAVIGATION TARGET (navigation_target_loc) - coping to target_loc to avoid changing the copy/pasted code
-        if navigation_target_loc == nil then
+        if navigation_target_loc == nil or current_loc == nil then
             gcs:send_text(MAV_SEVERITY.ERROR, " AVOIDING: NO TARGET ")
             return
         end
@@ -1903,7 +1887,9 @@ local DAA = {
             current_state = STATE.loitering
 
             gcs:send_named_string("DAA-AVOID", "loiter")
-            gcs:send_named_string("DAA-ARCRFT", aircraft_avoiding.label)
+            if aircraft_avoiding ~= nil then
+                gcs:send_named_string("DAA-ARCRFT", aircraft_avoiding.label)
+            end
             gcs:send_named_float("DAA-LOITER", ga_avoid_alt)
 
             return
@@ -1938,6 +1924,10 @@ local DAA = {
     end
 
     local function do_loitering()
+        if current_loc == nil then
+            -- no current position to measure against, keep loitering until we have one
+            return
+        end
         if aircraft_avoiding == nil or (current_loc:get_distance(aircraft_avoiding.location) > margin_aircraft) then
             if loiteralt.stop(false) then
                 -- gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": loiteralt.stop NO aircraft" ))
