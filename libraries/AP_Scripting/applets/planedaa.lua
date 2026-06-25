@@ -394,6 +394,17 @@ DAA_HEADING_INC = bind_add_param('HEADING_INC', 26, DEFAULT_HEADING_INC_DEG)
 --]]
 DAA_WIND_MIN = bind_add_param('WIND_MIN', 27, 2.0)
 
+--[[
+    // @Param: DAA_WIND_MARG
+    // @DisplayName: Wind-scaled fence margin
+    // @Description: Extra fence avoidance margin added per m/s of wind above DAA_WIND_MIN, in metres per m/s. This widens the commanded standoff from fences in wind so the controller has buffer to absorb cross-track drift and is less likely to be blown across the boundary. 0 disables wind scaling. The extra margin is DAA_WIND_MARG * max(0, wind_speed - DAA_WIND_MIN).
+    // @Units: s
+    // @Range: 0 20
+    // @Increment: 0.5
+    // @User: Advanced
+--]]
+DAA_WIND_MARG = bind_add_param('WIND_MARG', 28, 5.0)
+
 WARN_DIST_XY                = bind_param("AVD_W_DIST_XY")
 WARN_ACTION                 = bind_param("AVD_W_ACTION")
 AVD_ENABLE                  = bind_param("AVD_ENABLE")
@@ -429,6 +440,7 @@ local ga_avoid_alt_frame    = DAA_AVD_ALT_TP:get()
 local daa_alert             = DAA_AVD_ALERT:get()
 local daa_action            = DAA_AVD_ACTION:get()
 local wind_min_ms           = DAA_WIND_MIN:get()
+local wind_margin_per_ms    = DAA_WIND_MARG:get()
 local well_clear_xy         = AVD_WCLR_XY:get()
 local well_clear_z          = AVD_WCLR_Z:get()
 local near_miss_xy          = AVD_NMAC_XY:get()
@@ -566,6 +578,7 @@ local function get_vehicle_state()
         daa_alert           = DAA_AVD_ALERT:get()
         daa_action          = DAA_AVD_ACTION:get()
         wind_min_ms         = DAA_WIND_MIN:get()
+        wind_margin_per_ms  = DAA_WIND_MARG:get()
 
         bearing_inc_deg     = DAA_HEADING_INC:get() or DEFAULT_HEADING_INC_DEG
         if bearing_inc_deg <= 0 then
@@ -838,7 +851,7 @@ local function populate_obstacle(distance_m, any_obstacle)
     return obstacle
 end
 
-local function find_closest_obstacle(loc1, loc2, lookahead_m)
+local function find_closest_obstacle(loc1, loc2, lookahead_m, wind_ms)
     -- By projecting 1m along the line we avoid a problem with the
     -- exclusion avoidance being happy to skirt along a line parallel
     -- to an exclusion zone
@@ -888,6 +901,11 @@ local function find_closest_obstacle(loc1, loc2, lookahead_m)
         or obstacle_type_val == OBSTACLE_TYPE.FENCE_LUA
         then
         obstacle_margin = margin_fence
+        -- widen the standoff in wind so the controller has buffer to absorb cross-track
+        -- drift and is less likely to be blown across the fence (DAA_WIND_MARG = 0 disables)
+        if wind_ms ~= nil and wind_ms > wind_min_ms then
+            obstacle_margin = obstacle_margin + wind_margin_per_ms * (wind_ms - wind_min_ms)
+        end
     end
 
     -- gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT ..": threat: " .. any_obstacle:label() .. " : " .. distance_m)
@@ -1323,7 +1341,7 @@ local DAA = {
         -- measure clearance in the previously committed direction
         local test_loc = current_loc:copy()
         test_loc:offset_bearing(bearing_orig_deg, avoid_step1_m)
-        local distance_previous_m, _ = find_closest_obstacle(current_loc, test_loc, avoid_step1_m)
+        local distance_previous_m, _ = find_closest_obstacle(current_loc, test_loc, avoid_step1_m, wind_speed)
         -- only switch sides if the new direction is significantly better (bendy_ratio times more clearance)
         if distance_found_m < bendy_ratio * distance_previous_m then
             -- new direction is not significantly better — stay the course
@@ -1349,7 +1367,7 @@ local DAA = {
             local distance          = calc_avoidance_distance(avoid_step2_m, target_distance)
             local loc_test2         = location_project(loc_test, bearing_test, distance, target_loc)
 
-            local distance_m, _     = find_closest_obstacle(loc_test2, target_loc, current_lookahead)
+            local distance_m, _     = find_closest_obstacle(loc_test2, target_loc, current_lookahead, wind_speed)
 
             if distance_m > current_lookahead then
                 -- return immediately - no obstacles in this direction
@@ -1389,35 +1407,14 @@ local DAA = {
         return projected_loc
     end
 
-    -- This method checks whether we will collide with any obstacle if we fly at a given bearing bearing_deg + i * bearing_inc_deg
-    local function test_step1(full_distance, bearing_deg, i, target_loc, prefer_sign)
-        prefer_sign = prefer_sign or 1
-
-        -- need to get rid of the legacy _cd
-        -- local bearing_cd = bearing_deg * 100.0
-
-        -- gcs:send_text(0, string.format("test bearing: %.1f deg", bearing_cd / 100.0))
-
-        --local bearing_delta_cd = i * bearing_inc_cd / 2
-        local bearing_delta_deg = i * bearing_inc_deg / 2.0
-
-        --gcs:send_text(0, string.format("i: %d", i))
-        if i % 2 == 1 then
-            -- Alternate between left and right of the target
-            --bearing_delta_cd = -bearing_delta_cd
-            bearing_delta_deg = -bearing_delta_deg
-        end
-        -- prefer_sign flips which side the alternating search leads with, so the
-        -- more downwind escape is explored (and, being clear first, chosen) ahead of
-        -- the upwind one. prefer_sign is 1 in calm air, so behaviour is unchanged.
-        bearing_delta_deg = bearing_delta_deg * prefer_sign
-
+    -- Core clearance probe for an explicit candidate course bearing_test_deg. Returns
+    -- (distance_found_m, bearing_test_deg, obstacle_found); a clear course returns
+    -- FLT_MAX with obstacle_found == nil. allow_straight lets the unobstructed
+    -- straight-ahead path short-circuit (only meaningful for the i == 0 candidate).
+    local function probe_bearing(bearing_test_deg, bearing_deg, full_distance, target_loc, allow_straight)
         local avoid_step1_m     = current_lookahead
         local avoid_step2_m     = current_lookahead * 2.0
 
-        -- Test bearing used to look ahead for obstacles
-        -- local bearing_test = wrap_180((bearing_cd*0.01) + (bearing_delta_cd*0.01))
-        local bearing_test_deg  = wrap_180(bearing_deg + bearing_delta_deg)
         -- Start the look-ahead from where we will actually be after turning onto this
         -- candidate course. In wind this leads the carrot, so the search both penalises
         -- headings that drift toward the obstacle and prefers wind-favourable escapes.
@@ -1431,8 +1428,7 @@ local DAA = {
         local avoidance_distance_m  = calc_avoidance_distance(avoid_step1_m, full_distance)
         local test_loc              = location_project(adjusted_loc, bearing_test_deg, avoidance_distance_m, target_loc)
 
-        local distance_found_m, obstacle_found = find_closest_obstacle(adjusted_loc, test_loc, current_lookahead)
-        ---@cast margin number
+        local distance_found_m, obstacle_found = find_closest_obstacle(adjusted_loc, test_loc, current_lookahead, wind_speed)
         if distance_found_m == nil then
             gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. "closest returned NIL ")
             return FLT_MAX, bearing_deg, nil -- no avoidance required
@@ -1441,18 +1437,27 @@ local DAA = {
             -- This direction avoids all obstacles for one step. Check if it leads to a clear path for a longer distance.
             local bearing2_deg, distance2_m = test_step2(test_loc, bearing_test_deg, avoid_step2_m, current_lookahead)
             if distance2_m >= current_lookahead then
-                if i == 0 and bearing2_deg == bearing_deg then
-                    -- means we have a direct unobstructed path for step1 (i == 0) and step2
-                    -- gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. "UNOBSTRUCTED  bearing: " .. bearing2)
+                if allow_straight and bearing2_deg == bearing_deg then
+                    -- means we have a direct unobstructed path for step1 and step2
                     return FLT_MAX, bearing_deg, nil -- no avoidance required
                 end
                 -- we've found at least one direction where there is no obstacle at least for 2 steps out
                 distance_found_m = distance_found_m + distance2_m
             end
         end
-	-- distance_found_m, bearing_test_deg = resist_bearing_change(bearing_deg, avoid_step1_m, bearing_test_deg, distance_found_m)
 
         return distance_found_m, bearing_test_deg, obstacle_found
+    end
+
+    -- This method checks whether we will collide with any obstacle if we fly at a given bearing bearing_deg + i * bearing_inc_deg
+    local function test_step1(full_distance, bearing_deg, i, target_loc)
+        local bearing_delta_deg = i * bearing_inc_deg / 2.0
+        if i % 2 == 1 then
+            -- Alternate between left and right of the target
+            bearing_delta_deg = -bearing_delta_deg
+        end
+        local bearing_test_deg = wrap_180(bearing_deg + bearing_delta_deg)
+        return probe_bearing(bearing_test_deg, bearing_deg, full_distance, target_loc, i == 0)
     end
 
     -- if the plane is currently pointing far away from the target, then assume that we 
@@ -1675,23 +1680,11 @@ local DAA = {
             return nil
         end
 
-        -- When the wind is significant, bias the search to explore the more downwind
-        -- side of the target first: a downwind turn keeps groundspeed up and stops the
-        -- wind pushing us back toward the obstacle, and the first clear path found wins.
-        -- The original (calm-air) search leads with the negative/left side, so
-        -- prefer_sign = 1 reproduces it exactly and leaves the autotests unchanged.
-        local prefer_sign = 1
-        if wind_speed > wind_min_ms then
-            local gs_left  = effective_groundspeed(airspeed_ms, bearing_deg - 45, wind_dir_rad, wind_speed)
-            local gs_right = effective_groundspeed(airspeed_ms, bearing_deg + 45, wind_dir_rad, wind_speed)
-            if gs_right > gs_left then
-                prefer_sign = -1
-            end
-        end
-
-        -- Try 5 degree increments around a circle, alternating left and right. Check each one to see if flying in that direction would avoid all obstacles.
+        -- Try increments around a circle, alternating left and right. The first heading
+        -- that clears all obstacles for two look-ahead steps wins (a bounded downwind
+        -- preference is applied afterwards, once we know we are avoiding).
         for i = 0, (360 / bearing_inc_deg) do
-            local distance_found_m, bearing_found_deg, obstacle_found = test_step1(distance_to_target_m, bearing_deg, i, target_loc, prefer_sign)
+            local distance_found_m, bearing_found_deg, obstacle_found = test_step1(distance_to_target_m, bearing_deg, i, target_loc)
             if distance_found_m > best_distance_m then
                 best_distance_m = distance_found_m
                 best_bearing_deg = bearing_found_deg
