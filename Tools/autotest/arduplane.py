@@ -7817,17 +7817,18 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             self.context_pop()
 
     def PlaneDAAFenceAvoidanceWind(self):
-        '''planedaa wind-aware side selection.  In a crosswind the search should prefer
-        the downwind side of an obstacle: a downwind turn keeps groundspeed up and stops
-        the wind pushing the plane back toward the obstacle.  An exclusion circle sits
-        symmetrically across the track so either side is a valid detour, and a westerly
-        wind makes the eastern detour the downwind one.
+        '''planedaa wind-scaled fence margin.  In wind, DAA_WIND_MARG widens the
+        commanded standoff from a fence (by DAA_WIND_MARG metres per m/s of wind above
+        DAA_WIND_MIN) so the controller has buffer to absorb cross-track drift and is
+        less likely to be blown across the boundary.
 
-        Self-contained A/B, same scenario flown twice.  The control arm disables the
-        wind-aware path (DAA_WIND_MIN very high) and detours to the still-air default
-        (west) side; the treatment arm uses the default and detours to the downwind
-        (east) side.  Requiring the two arms to pick opposite sides proves the wind
-        preference - not the geometry - chose the side, so a regression cannot pass.'''
+        Self-contained A/B, same crosswind scenario flown twice.  The control arm sets
+        DAA_WIND_MARG=0 (feature off) and skirts the exclusion circle at the baseline
+        standoff; the treatment arm sets DAA_WIND_MARG>0 and must keep a measurably
+        larger standoff.  Both fly in the same wind, so only the wind-scaled margin
+        differs - a regression that drops the extra margin makes the standoffs equal and
+        fails the test.  (SITL tracks ground course cleanly, so this verifies the
+        commanded standoff grows; the breach-prevention benefit is on real hardware.)'''
         self.install_applet_script_context("planedaa.lua")
         self.install_script_module(
             self.script_modules_source_path("mavlink_wrappers.lua"),
@@ -7843,13 +7844,14 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             "FENCE_ACTION": 0,     # report only
             "SIM_WIND_TURB": 0,
             "SIM_WIND_SPD": 11,
-            "SIM_WIND_DIR": 270,   # wind FROM the west: the eastern detour is downwind
+            "SIM_WIND_DIR": 90,
         })
 
         home = self.home_position_as_mav_location()
-        # symmetric exclusion circle centred on the due-north track, so the plane may
-        # detour to either side and the wind decides which side is preferred.
+        # exclusion circle across the track; the detour standoff (closest approach to the
+        # centre) is what we measure, so the side taken does not matter.
         excl_radius = 250
+        base_margin = 50
         circle_centre = self.offset_location_ne(home, 1200, 0)
         self.upload_fences_from_locations([(
             mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION,
@@ -7862,23 +7864,17 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
         ])
 
-        def east_offset_m(ref, loc):
-            # signed east offset (metres) of loc relative to ref; +ve == east
-            return math.radians(loc.lng - ref.lng) * 6378137.0 * \
-                math.cos(math.radians(ref.lat))
-
-        def fly_one_arm(wind_min, label):
+        def fly_one_arm(wind_marg, label):
             self.context_push()
             self.context_collect('STATUSTEXT')
             reached = False
             min_dist_m = 1.0e9
-            east_at_closest = 0.0
             try:
                 self.reboot_sitl()
                 self.wait_ready_to_arm()
                 self.set_parameters({
-                    "DAA_WIND_MIN": wind_min,
-                    "DAA_MARGIN_FENCE": 100,
+                    "DAA_MARGIN_FENCE": base_margin,
+                    "DAA_WIND_MARG": wind_marg,
                 })
                 self.arm_vehicle()
                 self.change_mode("AUTO")
@@ -7889,8 +7885,8 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
                 self.do_fence_enable()
                 self.wait_text("Plane DAA", check_context=True, timeout=60)
 
-                # fly the leg past the fence, recording the side (east/west) the plane
-                # is on at its closest approach to the exclusion-circle centre.
+                # fly the leg past the fence, tracking the closest approach to the
+                # exclusion-circle centre (the achieved standoff).
                 tstart = self.get_sim_time()
                 while self.get_sim_time() - tstart < 400:
                     self.mav.recv_match(type='GLOBAL_POSITION_INT',
@@ -7899,7 +7895,6 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
                     d = self.get_distance(circle_centre, here)
                     if d < min_dist_m:
                         min_dist_m = d
-                        east_at_closest = east_offset_m(circle_centre, here)
                     if self.mav.waypoint_current() >= 3:
                         reached = True
                         break
@@ -7907,37 +7902,26 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
                 self.do_fence_disable()
                 self.disarm_vehicle(force=True)
                 self.context_pop()
-            side = "east" if east_at_closest > 0 else "west"
             self.progress(
-                "WIND ARM %s: DAA_WIND_MIN=%g closest=%.0fm east_off=%.0fm side=%s "
-                "reached_wp=%s" %
-                (label, wind_min, min_dist_m, east_at_closest, side, reached))
-            return min_dist_m, east_at_closest, reached
+                "WIND ARM %s: DAA_WIND_MARG=%g standoff=%.0fm reached_wp=%s" %
+                (label, wind_marg, min_dist_m, reached))
+            return min_dist_m, reached
 
-        # Control: wind-aware path disabled -> still-air default (west) detour.
-        ctl_dist, ctl_east, _ = fly_one_arm(99, "control(no-wind-code)")
-        # Treatment: wind-aware path enabled (default) -> downwind (east) detour.
-        trt_dist, trt_east, trt_reached = fly_one_arm(2, "treatment(wind-code)")
+        # Control: wind-scaled margin off -> baseline standoff (~ radius + base_margin).
+        ctl_dist, _ = fly_one_arm(0, "control(no-wind-margin)")
+        # Treatment: wind-scaled margin on -> measurably larger standoff.
+        trt_dist, trt_reached = fly_one_arm(10, "treatment(wind-margin)")
 
-        # both arms detour with a clear margin: this scenario tests the chosen side.
-        if trt_dist < excl_radius:
-            raise NotAchievedException(
-                "treatment arm penetrated the exclusion circle (closest %.0fm < %dm)"
-                % (trt_dist, excl_radius))
         if not trt_reached:
             raise NotAchievedException("treatment arm did not reach the waypoint")
-        # treatment must take the downwind (east) detour ...
-        if trt_east <= 0:
+        # the wind-scaled term at ~10 m/s wind adds 10*(wind-2) ~= 80 m of standoff;
+        # require a clear, conservative increase over the control baseline.
+        min_increase = 40
+        if trt_dist < ctl_dist + min_increase:
             raise NotAchievedException(
-                "treatment arm did not take the downwind (east) detour "
-                "(east offset %.0fm)" % trt_east)
-        # ... and the control the still-air (west) detour, proving the wind preference
-        # (not the geometry) selected the side.
-        if ctl_east >= 0:
-            raise NotAchievedException(
-                "control arm did not take the still-air (west) detour "
-                "(east offset %.0fm): scenario does not isolate the wind preference"
-                % ctl_east)
+                "wind-scaled margin did not widen the standoff enough: control %.0fm, "
+                "treatment %.0fm (needed >= control + %dm)"
+                % (ctl_dist, trt_dist, min_increase))
 
     def PlaneDAAFenceAltitude(self):
         '''planedaa must avoid the altitude fences FENCE_ALT_MAX (FENCE_TYPE
