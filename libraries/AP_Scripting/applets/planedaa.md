@@ -89,6 +89,10 @@ them only with good reason:
 | `FENCE_ACTION` | `0` (report) | DAA performs the avoidance itself, so report-only is usually wanted to stop the flight controller *also* triggering its own RTL/Brake on a breach. |
 | `FENCE_ALT_MAX_TP` / `FENCE_ALT_MIN_TP` | frame | Frame of the altitude fences; set to match your intent (see terrain note below). |
 
+When flying near fences in wind, `DAA_WIND_MARG` widens the standoff in proportion
+to wind speed (above `DAA_WIND_MIN`) so cross-track drift is less likely to carry
+the aircraft across a boundary. See the Parameters table for both.
+
 ### 5. Terrain (default altitude frame)
 
 `DAA_AVD_ALT_TP` defaults to **3 (above terrain)**, and altitude-fence avoidance
@@ -147,6 +151,8 @@ Collision volumes, and the `FENCE_*` parameters for the altitude/geo fences.
 | `DAA_ALT_HYST_M` | 10 | m | Hysteresis band for altitude-fence avoidance, preventing chatter as the plane levels off. |
 | `DAA_ALT_COOL_S` | 15 | s | Minimum time between altitude-fence "levelling off" notices, so brief re-engagements do not re-spam the GCS. |
 | `DAA_HEADING_INC` | 1.5 | deg | Angular step used when searching candidate headings around the target bearing for a collision-free path. The search sweeps a full circle in increments of this size, alternating left and right. Smaller values search more finely but cost more CPU per update. |
+| `DAA_WIND_MIN` | 2 | m/s | Minimum wind speed before the wind-aware avoidance behaviour engages. Below this, the still-air path is used so calm-air behaviour is unchanged. Gates both the wind-aware look-ahead projection and the wind-scaled fence margin. |
+| `DAA_WIND_MARG` | 5 | m per m/s | Extra fence avoidance margin added per m/s of wind above `DAA_WIND_MIN`. The standoff from fences is widened by `DAA_WIND_MARG * max(0, wind_speed - DAA_WIND_MIN)`, giving the controller buffer to absorb cross-track drift so the aircraft is less likely to be blown across the boundary in wind. Set to 0 to disable wind scaling. |
 
 ## Logging
 
