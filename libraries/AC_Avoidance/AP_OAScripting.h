@@ -1,27 +1,23 @@
 #pragma once
 
 #include <AP_Scripting/AP_Scripting_config.h>
-
-// NOTE: #if, not #ifdef — AP_SCRIPTING_ENABLED is always defined (to 0 or 1),
-// so #ifdef would be true even with scripting disabled.
-#if AP_SCRIPTING_ENABLED
-
 #include "AC_Avoidance_config.h"
 #include <AP_Vehicle/AP_Vehicle_Type.h>
 #include <AP_Avoidance/AP_Avoidance_config.h>
-// AP_OAScripting uses the AP_Avoidance (ADS-B) class, which is only built for
-// ArduPlane/ArduCopter AND only defined when AP_ADSB_AVOIDANCE_ENABLED (i.e.
-// HAL_ADSB_ENABLED, which is false on 1MB boards such as fmuv2). The matching
-// applet (planedaa.lua) is Plane-only, so gate the whole feature to ArduPlane +
-// ADS-B avoidance + fence: it must never be compiled or linked on any other
-// vehicle (Copter/Rover/Sub/Tracker/AP_Periph) or on a board lacking ADS-B
-// avoidance (else AP_Avoidance is an incomplete type). The build-type macro has
-// to live in this header so the class is not even declared elsewhere, hence this
-// header is whitelisted in Tools/ardupilotwaf/ap_library.py. The #ifndef allows
-// an explicit override if ever needed.
+
+// AP_OAScripting uses the AP_Avoidance (ADS-B) class, which exists only when
+// AP_ADSB_AVOIDANCE_ENABLED (= HAL_ADSB_ENABLED, false on 1MB boards such as
+// fmuv2). The matching applet (planedaa.lua) is Plane-only, so gate the feature
+// to ArduPlane + scripting + avoidance + ADS-B avoidance. The macro is ALWAYS
+// defined (to 0 or 1) so "#if AP_OA_SCRIPTING_ENABLED" is valid under
+// -Werror=undef wherever this header is included. The build-type macro lives
+// here (so the class is not declared on other vehicles), hence this header is
+// whitelisted in Tools/ardupilotwaf/ap_library.py. The #ifndef allows an
+// explicit override if ever needed.
 #ifndef AP_OA_SCRIPTING_ENABLED
-#define AP_OA_SCRIPTING_ENABLED (APM_BUILD_TYPE(APM_BUILD_ArduPlane) && AP_AVOIDANCE_ENABLED && AP_ADSB_AVOIDANCE_ENABLED)
+#define AP_OA_SCRIPTING_ENABLED (AP_SCRIPTING_ENABLED && APM_BUILD_TYPE(APM_BUILD_ArduPlane) && AP_AVOIDANCE_ENABLED && AP_ADSB_AVOIDANCE_ENABLED)
 #endif
+
 #if AP_OA_SCRIPTING_ENABLED
 
 #include "AP_OADatabase.h"
@@ -166,5 +162,3 @@ struct OAObstacle {
 };
 
 #endif // AP_OA_SCRIPTING_ENABLED
-#endif // AP_SCRIPTING_ENABLED
-//#endif
