@@ -176,10 +176,11 @@ const AP_Param::GroupInfo AP_ADSB::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("OPTIONS",  15, AP_ADSB, _options, 0),
 
-    // @Param: OPTIONS
+    // @Param: ENABLE
     // @DisplayName: ADS-B Enable
     // @Description: By default ADS-B is enabled if any ADSB_TYPE values are selected. This will enable ADS-B for MAVLink ADSB_VEHICLE even if no devices are connected.
     // @Values: 0:Default,1:Enabled
+    // @User: Advanced
     AP_GROUPINFO("ENABLE",  16, AP_ADSB, _enabled, 0),
 
     AP_GROUPEND
