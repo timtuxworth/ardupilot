@@ -2,19 +2,25 @@
 
 #include <AP_Scripting/AP_Scripting_config.h>
 
-#ifdef AP_SCRIPTING_ENABLED
+// NOTE: #if, not #ifdef — AP_SCRIPTING_ENABLED is always defined (to 0 or 1),
+// so #ifdef would be true even with scripting disabled.
+#if AP_SCRIPTING_ENABLED
 
 #include "AC_Avoidance_config.h"
 #include <AP_Vehicle/AP_Vehicle_Type.h>
-// AP_OAScripting calls into the AP_Avoidance (ADS-B) library, which is only built
-// for ArduPlane and ArduCopter. The matching applet (planedaa.lua) is Plane-only,
-// so gate the whole feature to ArduPlane: it must never be compiled or linked on
-// any other vehicle (Copter/Rover/Sub/Tracker/AP_Periph). The build-type macro
-// has to live in this header so the class is not even declared elsewhere, hence
-// this header is whitelisted in Tools/ardupilotwaf/ap_library.py. The #ifndef
-// allows an explicit override if ever needed.
+#include <AP_Avoidance/AP_Avoidance_config.h>
+// AP_OAScripting uses the AP_Avoidance (ADS-B) class, which is only built for
+// ArduPlane/ArduCopter AND only defined when AP_ADSB_AVOIDANCE_ENABLED (i.e.
+// HAL_ADSB_ENABLED, which is false on 1MB boards such as fmuv2). The matching
+// applet (planedaa.lua) is Plane-only, so gate the whole feature to ArduPlane +
+// ADS-B avoidance + fence: it must never be compiled or linked on any other
+// vehicle (Copter/Rover/Sub/Tracker/AP_Periph) or on a board lacking ADS-B
+// avoidance (else AP_Avoidance is an incomplete type). The build-type macro has
+// to live in this header so the class is not even declared elsewhere, hence this
+// header is whitelisted in Tools/ardupilotwaf/ap_library.py. The #ifndef allows
+// an explicit override if ever needed.
 #ifndef AP_OA_SCRIPTING_ENABLED
-#define AP_OA_SCRIPTING_ENABLED (APM_BUILD_TYPE(APM_BUILD_ArduPlane) && AP_AVOIDANCE_ENABLED)
+#define AP_OA_SCRIPTING_ENABLED (APM_BUILD_TYPE(APM_BUILD_ArduPlane) && AP_AVOIDANCE_ENABLED && AP_ADSB_AVOIDANCE_ENABLED)
 #endif
 #if AP_OA_SCRIPTING_ENABLED
 
