@@ -890,7 +890,7 @@ uint8_t AC_Fence::check(bool disable_auto_fences)
         print_fence_message("auto-disabled", fences_to_disable);
     }
 
-#if 1
+#if HAL_LOGGING_ENABLED
     /*
       this debug log message is very useful both when developing tests
       and doing manual SITL fence testing
