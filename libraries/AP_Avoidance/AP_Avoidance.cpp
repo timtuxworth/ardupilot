@@ -857,7 +857,7 @@ float AP_Avoidance::distance_to_obstacle(const Vector3f &start_NED_m, const Vect
             distance_m = distance_m - get_obstacle_radius_m(obstacle.emitter_type);
 
             // height difference is the minimum difference in the height between the line and the obstacle
-            float height_difference_m = MIN(fabs(start_NED_m.z - obstacle_NED_m.z), fabs(end_NED_m.z - obstacle_NED_m.z));
+            float height_difference_m = MIN(fabsf(start_NED_m.z - obstacle_NED_m.z), fabsf(end_NED_m.z - obstacle_NED_m.z));
 
             if (distance_m < distance_new_m && height_difference_m < get_obstacle_height_m(obstacle.emitter_type)) {
                 // we are within the horizontal distance - next check the vertical distance
@@ -911,7 +911,7 @@ float AP_Avoidance::distance_to_aircraft(const Vector3f &vehicle_NED_m, const fl
             float distance_msq = (vehicle_NE_m - obstacle_NE_m).length_squared();
 
             // height difference is the difference in the height between the vehicle and the obstacle
-            float height_difference_m = fabs(vehicle_NED_m.z - obstacle_NED_m.z);
+            float height_difference_m = fabsf(vehicle_NED_m.z - obstacle_NED_m.z);
 
             // this finds the nearest aircraft iff it is within the height limits for 
             if (distance_msq < distance_new_msq && height_difference_m < get_obstacle_height_m(obstacle.emitter_type)) {
