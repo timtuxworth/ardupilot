@@ -16,9 +16,10 @@
 #include "AP_OAScripting.h"
 
 
-#ifdef AP_SCRIPTING_ENABLED
+// #if, not #ifdef: AP_SCRIPTING_ENABLED is always defined (to 0 or 1)
+#if AP_SCRIPTING_ENABLED
 // APM_BUILD_TYPE usage here causes waf to compile this file per-vehicle
-#if APM_BUILD_TYPE(APM_BUILD_ArduPlane) && AP_AVOIDANCE_ENABLED
+#if APM_BUILD_TYPE(APM_BUILD_ArduPlane) && AP_AVOIDANCE_ENABLED && AP_ADSB_AVOIDANCE_ENABLED
 
 #if AP_FENCE_ENABLED
 
@@ -494,5 +495,5 @@ float AP_OAScripting::_distance_to_aircraft(const Vector3f &vehicle_NED_cm, cons
     return distance_m;
 }
 
-#endif // APM_BUILD_TYPE(APM_BUILD_ArduPlane) && AP_AVOIDANCE_ENABLED
+#endif // APM_BUILD_TYPE(APM_BUILD_ArduPlane) && AP_AVOIDANCE_ENABLED && AP_ADSB_AVOIDANCE_ENABLED
 #endif // AP_SCRIPTING_ENABLED
