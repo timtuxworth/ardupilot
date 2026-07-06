@@ -7835,6 +7835,11 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             "ADSB_ENABLE": 1,   # required for AP_ADSB to ingest ADSB_VEHICLE
             "ADSB_TYPE": 1,
             "AVD_ENABLE": 1,    # required for AP_Avoidance to pull ADSB samples
+            # pin the UAV avoidance envelope so the test is independent of the
+            # defaults: horizontal radius and the vertical gate the intruder
+            # (injected +10 m) must sit inside
+            "AVD_UAV_XY": 150,
+            "AVD_UAV_Z": 25,
         })
 
         # collect before reboot so the script's start-up announcement is captured
