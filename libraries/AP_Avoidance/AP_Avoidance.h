@@ -237,6 +237,8 @@ private:
     AP_Float    _well_clear_z;
     AP_Float    _near_miss_xy;
     AP_Float    _near_miss_z;
+    AP_Float    _uav_xy;
+    AP_Float    _uav_z;
 #endif
     // multi-thread support for avoidance
     HAL_Semaphore _rsem;
