@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-029"
+SCRIPT_VERSION      = "4.8.0-031"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -422,9 +422,9 @@ local margin_alt            = DAA_MARGIN_ALT:get()
 local alt_hyst_m            = DAA_ALT_HYST_M:get()
 local alt_cool_ms           = DAA_ALT_COOL_S:get() * 1000
 local margin_aircraft       = DAA_MARGIN_GA:get()
--- margin_bird/prey/uav/weather are parked for planned obstacle types (see the
+-- margin_bird/prey/weather are parked for planned obstacle types (see the
 -- commented-out block in find_closest_obstacle); read but not yet consumed.
--- luacheck: ignore margin_bird margin_prey margin_uav margin_weather
+-- luacheck: ignore margin_bird margin_prey margin_weather
 local margin_bird           = DAA_MARGIN_BIRD:get()
 local margin_prey           = DAA_MARGIN_PREY:get()
 local margin_uav            = DAA_MARGIN_UAV:get()
@@ -725,8 +725,13 @@ local function pretty_label(script_obstacle)
     local obstacle_type = script_obstacle:obstacle_type()
     local emitter_type  = script_obstacle:emitter_type()
 
-    -- this will typically be an GLOBAL_POSITION_INT (or FOLLOW_TARGET?) message
+    -- a MAVLink drone (GLOBAL_POSITION_INT/FOLLOW_TARGET) carries a small MAV system id in
+    -- src_id; an ADSB-sourced drone (emitter 14) carries a 24-bit ICAO address there instead,
+    -- so show that in hex rather than a meaningless decimal "SYSID" (0xBFFF matches the C++ split)
     if script_obstacle:is_drone() == true or emitter_type == ADSB_EMITTER.UAV then
+        if script_obstacle:src_id() > 0xBFFF then
+            return string.format("Drone:%06X", script_obstacle:icao_code())
+        end
         return string.format("SYSID:%d", script_obstacle:src_id())
 
     -- this will have arrived as an ADSB_VEHICLE
@@ -887,6 +892,10 @@ local function find_closest_obstacle(loc1, loc2, lookahead_m, wind_ms)
     --]]
     if obstacle_type_val == OBSTACLE_TYPE.GENERAL_AVIATION then
         obstacle_margin = well_clear_xy + margin_aircraft
+    elseif obstacle_type_val == OBSTACLE_TYPE.MAV_SYSID then
+        -- drone/UAV (ADSB emitter 14): small margin, no ASTM "well clear" bubble and
+        -- no aircraft loiter-to-alt; bendy ruler handles it via obstacle_avoiding
+        obstacle_margin = margin_uav
     elseif obstacle_type_val == OBSTACLE_TYPE.AIS then
         obstacle_margin = well_clear_xy + margin_ais
     elseif obstacle_type_val == OBSTACLE_TYPE.PROXIMITY then
