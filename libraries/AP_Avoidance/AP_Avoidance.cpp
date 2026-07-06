@@ -155,6 +155,20 @@ const AP_Param::GroupInfo AP_Avoidance::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("NMAC_Z",    16, AP_Avoidance, _near_miss_z, 30.48),
 
+    // @Param: UAV_XY
+    // @DisplayName: UAV horizontal avoidance radius
+    // @Description: Horizontal keep-out radius used for ADS-B drones/UAVs (emitter type UAV). This is the drone equivalent of the crude-aircraft Well Clear AVD_WCLR_XY, and is normally smaller since drone-to-drone separation needs are lower.
+    // @Units: m
+    // @User: Advanced
+    AP_GROUPINFO("UAV_XY",    17, AP_Avoidance, _uav_xy, 150),
+
+    // @Param: UAV_Z
+    // @DisplayName: UAV vertical avoidance gate
+    // @Description: Vertical separation gate used for ADS-B drones/UAVs (emitter type UAV). Obstacles more than this far above or below are ignored. This is the drone equivalent of the crude-aircraft Well Clear AVD_WCLR_Z, and is normally small because drones are vertically thin.
+    // @Units: m
+    // @User: Advanced
+    AP_GROUPINFO("UAV_Z",    18, AP_Avoidance, _uav_z, 25),
+
 
 #endif
 
@@ -678,8 +692,8 @@ float AP_Avoidance::get_obstacle_radius_m(uint8_t emitter_type) const
     case static_cast<uint8_t>(ADSB_EMITTER_ULTRA_LIGHT):
         return _well_clear_xy;                                    // also use well clear for these
     // 13 Unassigned
-    case static_cast<uint8_t>(ADSB_EMITTER_UAV):         // option for drone/UAV this is TOO coarse
-        return 25;
+    case static_cast<uint8_t>(ADSB_EMITTER_UAV):         // drone/UAV horizontal radius (AVD_UAV_XY)
+        return _uav_xy;
     case static_cast<uint8_t>(ADSB_EMITTER_SPACE):
         return 9600;                                     // lets give rockets a wide berth, 5nm
 
@@ -735,8 +749,8 @@ float AP_Avoidance::get_obstacle_height_m(uint8_t emitter_type) const
     case static_cast<uint8_t>(ADSB_EMITTER_ULTRA_LIGHT):
         return _well_clear_z;                                    // also use well clear for these
     // 13 Unassigned
-    case static_cast<uint8_t>(ADSB_EMITTER_UAV):         // option for drone/UAV this is TOO coarse
-        return 25;
+    case static_cast<uint8_t>(ADSB_EMITTER_UAV):         // drone/UAV vertical gate (AVD_UAV_Z)
+        return _uav_z;
     case static_cast<uint8_t>(ADSB_EMITTER_SPACE):
         return 9600;                                     // lets give rockets a wide berth, 5nm
 
