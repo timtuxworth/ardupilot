@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-032"
+SCRIPT_VERSION      = "4.8.0-033"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -776,11 +776,16 @@ local function pretty_label(script_obstacle)
     return "Unknown"
 end
 
-local function pretty_obstacle_type(type)
+local function pretty_obstacle_type(type, src_id)
     if type == OBSTACLE_TYPE.GENERAL then
         return "general"
     end
     if type == OBSTACLE_TYPE.MAV_SYSID then
+        -- a small src_id is a real MAVLink drone; a 24-bit ICAO (>0xBFFF) is an
+        -- ADS-B drone (matches the label split in pretty_label)
+        if src_id ~= nil and src_id > 0xBFFF then
+            return "adsbdrone"
+        end
         return "mavdrone"
     end
     if type == OBSTACLE_TYPE.GENERAL_AVIATION then 
@@ -1754,7 +1759,7 @@ local DAA = {
             gcs:send_named_string("DAA-ALERT", "obstacle")
             gcs:send_named_string("DAA-OBSTCL", obstacle_avoiding.label)
             gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" ALERT: %s %s %.0fm",
-                                obstacle_avoiding.label, pretty_obstacle_type(obstacle_avoiding.type),
+                                obstacle_avoiding.label, pretty_obstacle_type(obstacle_avoiding.type, obstacle_avoiding.sysid),
                                 obstacle_avoiding.distance_xy))
             gcs:send_named_float("DAA-DISTXY", obstacle_avoiding.distance_xy)
             gcs:send_named_float("DAA-DISTZ", obstacle_avoiding.distance_z)
