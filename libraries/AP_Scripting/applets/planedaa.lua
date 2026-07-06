@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-031"
+SCRIPT_VERSION      = "4.8.0-032"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -410,6 +410,7 @@ WARN_ACTION                 = bind_param("AVD_W_ACTION")
 AVD_ENABLE                  = bind_param("AVD_ENABLE")
 AVD_WCLR_XY                 = bind_param("AVD_WCLR_XY")
 AVD_WCLR_Z                  = bind_param("AVD_WCLR_Z")
+AVD_UAV_XY                  = bind_param("AVD_UAV_XY")
 AVD_NMAC_XY                 = bind_param("AVD_NMAC_XY")
 AVD_NMAC_Z                  = bind_param("AVD_NMAC_Z")
 ROLL_LIMIT_DEG              = bind_param("ROLL_LIMIT_DEG")
@@ -443,6 +444,7 @@ local wind_min_ms           = DAA_WIND_MIN:get()
 local wind_margin_per_ms    = DAA_WIND_MARG:get()
 local well_clear_xy         = AVD_WCLR_XY:get()
 local well_clear_z          = AVD_WCLR_Z:get()
+local uav_clear_xy          = AVD_UAV_XY:get()
 local near_miss_xy          = AVD_NMAC_XY:get()
 local near_miss_z           = AVD_NMAC_Z:get()
 
@@ -585,6 +587,7 @@ local function get_vehicle_state()
 
         well_clear_xy        = AVD_WCLR_XY:get()
         well_clear_z         = AVD_WCLR_Z:get()
+        uav_clear_xy         = AVD_UAV_XY:get()
         near_miss_xy         = AVD_NMAC_XY:get()
         near_miss_z          = AVD_NMAC_Z:get()
 
@@ -893,9 +896,10 @@ local function find_closest_obstacle(loc1, loc2, lookahead_m, wind_ms)
     if obstacle_type_val == OBSTACLE_TYPE.GENERAL_AVIATION then
         obstacle_margin = well_clear_xy + margin_aircraft
     elseif obstacle_type_val == OBSTACLE_TYPE.MAV_SYSID then
-        -- drone/UAV (ADSB emitter 14): small margin, no ASTM "well clear" bubble and
+        -- drone/UAV (ADSB emitter 14): mirrors the GA line but with the UAV horizontal
+        -- reference (AVD_UAV_XY) instead of the aircraft "well clear" (AVD_WCLR_XY), and
         -- no aircraft loiter-to-alt; bendy ruler handles it via obstacle_avoiding
-        obstacle_margin = margin_uav
+        obstacle_margin = uav_clear_xy + margin_uav
     elseif obstacle_type_val == OBSTACLE_TYPE.AIS then
         obstacle_margin = well_clear_xy + margin_ais
     elseif obstacle_type_val == OBSTACLE_TYPE.PROXIMITY then
