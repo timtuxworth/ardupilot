@@ -7900,6 +7900,10 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             self.wait_text("Drone:%06X" % (icao & 0xFFFFFF),
                            check_context=True, timeout=30)
 
+            # an ADS-B-sourced drone (ICAO src_id) must be typed "adsbdrone",
+            # not "mavdrone" which is reserved for a real MAVLink system id
+            self.wait_text("adsbdrone", check_context=True, timeout=30)
+
             # and after detouring the plane must still reach the waypoint (not trapped)
             self.wait_current_waypoint(3, timeout=400)
         finally:
