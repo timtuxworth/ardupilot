@@ -239,8 +239,20 @@ void AP_ADSB::init(void)
     }
 
     if (detected_num_instances == 0) {
-        _init_failed = true;
-        GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "ADSB: Unable to initialize ADSB driver");
+        // A MAVLink source needs no hardware backend: incoming ADSB_VEHICLE
+        // messages are handled directly by handle_message(). Only fail init if
+        // there is no source at all (no backend and no MAVLink type selected).
+        bool have_mavlink_source = false;
+        for (uint8_t i=0; i<ADSB_MAX_INSTANCES; i++) {
+            if (get_type(i) == Type::MAVLink) {
+                have_mavlink_source = true;
+                break;
+            }
+        }
+        if (!have_mavlink_source) {
+            _init_failed = true;
+            GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "ADSB: Unable to initialize ADSB driver");
+        }
     }
 }
 
