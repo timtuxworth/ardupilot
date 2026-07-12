@@ -7832,8 +7832,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         self.set_parameters({
             "SCR_ENABLE": 1,
             "SCR_VM_I_COUNT": 1000000,
-            "ADSB_ENABLE": 1,   # required for AP_ADSB to ingest ADSB_VEHICLE
-            "ADSB_TYPE": 1,
+            "ADSB_TYPE": 5,     # MAVLink: ingest ADSB_VEHICLE with no ADS-B hardware
             "AVD_ENABLE": 1,    # required for AP_Avoidance to pull ADSB samples
             # pin the UAV avoidance envelope so the test is independent of the
             # defaults: horizontal radius and the vertical gate the intruder

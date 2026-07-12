@@ -66,8 +66,8 @@ AP_ADSB *AP_ADSB::_singleton;
 const AP_Param::GroupInfo AP_ADSB::var_info[] = {
     // @Param: TYPE
     // @DisplayName: ADSB Type
-    // @Description: Type of ADS-B hardware for ADSB-in and ADSB-out configuration and operation. If any type is selected then MAVLink based ADSB-in messages will always be enabled
-    // @Values: 0:Disabled,1:uAvionix-MAVLink,2:Sagetech,3:uAvionix-UCP,4:Sagetech MX Series
+    // @Description: Type of ADS-B hardware for ADSB-in and ADSB-out configuration and operation. If any type is selected then MAVLink based ADSB-in messages will always be enabled. Select MAVLink to process incoming ADSB_VEHICLE messages (e.g. from a companion computer) with no ADS-B hardware attached.
+    // @Values: 0:Disabled,1:uAvionix-MAVLink,2:Sagetech,3:uAvionix-UCP,4:Sagetech MX Series,5:MAVLink
     // @User: Standard
     // @RebootRequired: True
     AP_GROUPINFO_FLAGS("TYPE",     0, AP_ADSB, _type[0],    AP_ADSB_TYPE_DEFAULT, AP_PARAM_FLAG_ENABLE),
@@ -176,13 +176,6 @@ const AP_Param::GroupInfo AP_ADSB::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("OPTIONS",  15, AP_ADSB, _options, 0),
 
-    // @Param: ENABLE
-    // @DisplayName: ADS-B Enable
-    // @Description: By default ADS-B is enabled if any ADSB_TYPE values are selected. This will enable ADS-B for MAVLink ADSB_VEHICLE even if no devices are connected.
-    // @Values: 0:Default,1:Enabled
-    // @User: Advanced
-    AP_GROUPINFO("ENABLE",  16, AP_ADSB, _enabled, 0),
-
     AP_GROUPEND
 };
 
@@ -258,8 +251,8 @@ bool AP_ADSB::check_startup()
         }
     }
 
-    if (all_backends_disabled and !_enabled) {
-        // nothing to do if ADSB_ENABLE = 0 and no backends, but if no backends and ADSB_ENABLE = 1 we will still enable anyway
+    if (all_backends_disabled) {
+        // nothing to do if no backend is configured (ADSB_TYPE all None)
         return false;
     }
     if (in_state.vehicle_list == nullptr)  {
@@ -306,6 +299,12 @@ void AP_ADSB::detect_instance(uint8_t instance)
             _backend[instance] = NEW_NOTHROW AP_ADSB_Sagetech_MXS(*this, instance);
         }
 #endif
+        break;
+
+    case Type::MAVLink:
+        // No hardware backend: incoming ADSB_VEHICLE MAVLink messages are handled
+        // directly by AP_ADSB. The vehicle_list is still allocated because
+        // ADSB_TYPE != None, so check_startup() enables ADSB-in processing.
         break;
     }
 
