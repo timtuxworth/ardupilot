@@ -150,7 +150,7 @@ function bind_add_param(name, idx, default_value)
 end
 
 -- setup follow mode specific parameters
-assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 30), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
+assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 32), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
 
 --[[
     // @Param: DAA_ACT_FN
@@ -405,6 +405,50 @@ DAA_WIND_MIN = bind_add_param('WIND_MIN', 27, 2.0)
 --]]
 DAA_WIND_MARG = bind_add_param('WIND_MARG', 28, 5.0)
 
+--[[
+    // @Param: DAA_SLEW_DPS
+    // @DisplayName: Avoidance heading slew rate
+    // @Description: Maximum rate the commanded avoidance heading is allowed to change, in degrees per second. Rate-limiting the avoidance heading smooths the oscillation a per-cycle bendy ruler produces against moving obstacles and near fences. Bypassed when the estimated time-to-conflict is below DAA_SLEW_URG so an urgent manoeuvre keeps full authority. 0 disables the slew limit.
+    // @Units: deg/s
+    // @Range: 0 90
+    // @Increment: 1
+    // @User: Advanced
+--]]
+DAA_SLEW_DPS = bind_add_param('SLEW_DPS', 29, 20)
+
+--[[
+    // @Param: DAA_SLEW_URG
+    // @DisplayName: Avoidance slew urgency time
+    // @Description: If the estimated time-to-conflict with a moving obstacle is below this, the DAA_SLEW_DPS heading slew limit is bypassed so the aircraft can turn at full authority. 0 always applies the slew limit.
+    // @Units: s
+    // @Range: 0 20
+    // @Increment: 0.5
+    // @User: Advanced
+--]]
+DAA_SLEW_URG = bind_add_param('SLEW_URG', 30, 4)
+
+--[[
+    // @Param: DAA_SIDE_HOLD
+    // @DisplayName: Avoidance side hold time
+    // @Description: Once a left/right avoidance side is committed for an obstacle, the opposite side must be preferred by the bendy ruler for at least this long before the aircraft is allowed to switch sides. This stops the left/right flip-flop when avoiding a moving obstacle. 0 disables side commitment.
+    // @Units: s
+    // @Range: 0 10
+    // @Increment: 0.5
+    // @User: Advanced
+--]]
+DAA_SIDE_HOLD = bind_add_param('SIDE_HOLD', 31, 3)
+
+--[[
+    // @Param: DAA_CPA_MIN
+    // @DisplayName: Avoidance minimum closing speed
+    // @Description: Minimum closing speed for a moving obstacle to be treated as a conflict. A moving obstacle whose predicted closest approach stays beyond the well-clear distance and which is opening range faster than this is not avoided (it is leaving). 0 avoids regardless of closing speed.
+    // @Units: m/s
+    // @Range: 0 20
+    // @Increment: 0.5
+    // @User: Advanced
+--]]
+DAA_CPA_MIN = bind_add_param('CPA_MIN', 32, 2)
+
 WARN_DIST_XY                = bind_param("AVD_W_DIST_XY")
 WARN_ACTION                 = bind_param("AVD_W_ACTION")
 AVD_ENABLE                  = bind_param("AVD_ENABLE")
@@ -447,6 +491,10 @@ local well_clear_z          = AVD_WCLR_Z:get()
 local uav_clear_xy          = AVD_UAV_XY:get()
 local near_miss_xy          = AVD_NMAC_XY:get()
 local near_miss_z           = AVD_NMAC_Z:get()
+local slew_dps              = DAA_SLEW_DPS:get()
+local slew_urg_s            = DAA_SLEW_URG:get()
+local side_hold_s           = DAA_SIDE_HOLD:get()
+local cpa_min_ms            = DAA_CPA_MIN:get()
 
 GRAVITY_MSS = 9.80665
 LOCATION_SCALING_FACTOR_INV = 89.83204953368922
@@ -590,6 +638,10 @@ local function get_vehicle_state()
         uav_clear_xy         = AVD_UAV_XY:get()
         near_miss_xy         = AVD_NMAC_XY:get()
         near_miss_z          = AVD_NMAC_Z:get()
+        slew_dps             = DAA_SLEW_DPS:get()
+        slew_urg_s           = DAA_SLEW_URG:get()
+        side_hold_s          = DAA_SIDE_HOLD:get()
+        cpa_min_ms           = DAA_CPA_MIN:get()
 
         now_params_ms       = now_ms
     end
@@ -1122,6 +1174,10 @@ local DAA = {
     local obstacle_avoiding = nil
     local aircraft_avoiding = nil
     local last_avoid_bearing_deg = nil
+    local committed_side_sign = 0       -- +1 = right of the direct bearing, -1 = left, 0 = not committed
+    local side_flip_pending  = false    -- true while the opposite side is being preferred (debounce a flip)
+    local side_flip_want_ms  = uint32_t(0)  -- time the opposite side first became preferred
+    local last_cmd_bearing_ms = uint32_t(0) -- time we last issued an avoidance heading (for the slew-rate dt)
     local previous_label    = ""
     local avoiding_label    = ""
     -- luacheck: ignore previous_aircraft
@@ -1239,6 +1295,41 @@ local DAA = {
         end
     end
 
+    -- DAAS: per-cycle avoidance-smoothing trace, logged every avoidance cycle for a
+    -- non-fixed (moving) obstacle.  It captures the bearing at each smoothing stage so
+    -- a flight log shows the raw wiggle and whether the smoothing damps it:
+    --   HdD = direct bearing to the target
+    --   HdR = raw bendy-ruler bearing (per-cycle, un-smoothed)
+    --   HdS = after clearance hysteresis (this is the pre-smoothing command)
+    --   HdC = final commanded bearing we fly (after side-commit + slew limit)
+    -- plus the decision state (Sid committed side, Flp side-flip pending, Urg slew
+    -- bypassed) and the motion assessment (Cls closing speed, CPA horizontal miss,
+    -- TTC time-to-conflict, PsB pass-behind side, Dst obstacle range, Typ type).
+    -- Compare HdR vs HdS vs HdC across time to see the wiggle and the smoothing effect.
+    local function log_smoothing(direct_deg, raw_deg, resisted_deg, final_deg, side, flip, urgent, motion, obstacle)
+        local status, err = pcall(logger.write, logger, "DAAS",
+            'HdD,HdR,HdS,HdC,Sid,Flp,Urg,Cls,CPA,TTC,PsB,Dst,Typ',
+            'ffffbBBfffbfB',                        -- Formats
+            'dddd---nms-m-',                        -- Units (d=deg, n=m/s, m=metre, s=second)
+            '-------------',                        -- Multipliers
+            wrap_360(direct_deg),                   -- HdD - direct bearing to target
+            wrap_360(raw_deg),                      -- HdR - raw bendy-ruler bearing
+            wrap_360(resisted_deg),                 -- HdS - after clearance hysteresis (pre-smoothing)
+            wrap_360(final_deg),                    -- HdC - final commanded bearing (flown)
+            side,                                   -- Sid - committed side (-1 left / 0 / +1 right)
+            (flip and 1 or 0),                      -- Flp - side-flip debounce pending
+            (urgent and 1 or 0),                    -- Urg - slew limit bypassed (urgent)
+            motion.closing_speed,                   -- Cls - closing speed
+            motion.cpa_miss,                        -- CPA - predicted horizontal miss distance
+            math.min(motion.ttc, 999.0),            -- TTC - time to closest approach (capped)
+            motion.pass_behind,                     -- PsB - side that passes behind the obstacle
+            obstacle.distance_m,                    -- Dst - range to the obstacle
+            obstacle.type)                          -- Typ - OBSTACLE_TYPE
+        if not status then
+            gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " log smoothing:" .. tostring(err))
+        end
+    end
+
     function DAA.disable()
         DAA.enabled = false
         gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. " disabled")
@@ -1345,6 +1436,130 @@ local DAA = {
             return bearing_orig_deg
         end
         return bearing_deg
+    end
+
+    --[[
+    Velocity-aware assessment of a (possibly moving) obstacle. Uses the obstacle's
+    ADS-B velocity plus our own velocity to reason about the encounter over time
+    rather than from its instantaneous position (which is what makes bendy ruler
+    wiggle against a moving target). Returns:
+      is_conflict   - false when a moving obstacle is opening range and its predicted
+                      closest approach stays beyond the well-clear distance (it is leaving)
+      pass_behind   - +1/-1 the side of the direct bearing that passes behind the
+                      obstacle's track (0 when it is not usefully moving)
+      ttc_s         - estimated time to closest approach, for the slew-rate urgency test
+    Static obstacles (fences, ~zero velocity) return (true, 0, closing-based ttc) so
+    their behaviour is unchanged.
+    --]]
+    local function assess_obstacle_motion(obstacle)
+        if obstacle == nil or current_loc == nil or obstacle.location == nil then
+            return true, 0, 0.0
+        end
+        local rel = current_loc:get_distance_NED(obstacle.location)  -- N,E,D metres to the obstacle
+        local rn, re = rel:x(), rel:y()
+        local range_h = math.sqrt(rn * rn + re * re)
+
+        local ov = obstacle.vel_NED_ms
+        local own = ahrs:get_velocity_NED()
+        local ovn = (ov ~= nil) and ov:x() or 0.0
+        local ove = (ov ~= nil) and ov:y() or 0.0
+        local rvn = ovn - ((own ~= nil) and own:x() or 0.0)   -- relative velocity (obstacle - own), North
+        local rve = ove - ((own ~= nil) and own:y() or 0.0)   -- East
+
+        local rel_dot_rv = rn * rvn + re * rve                -- < 0 => range decreasing (closing)
+        local rv2 = rvn * rvn + rve * rve
+        local closing_speed = (range_h > 0.1) and (-rel_dot_rv / range_h) or 0.0
+
+        -- horizontal closest point of approach
+        local t_cpa = (rv2 > 1e-4) and math.max(0.0, -rel_dot_rv / rv2) or 0.0
+        local miss_n = rn + rvn * t_cpa
+        local miss_e = re + rve * t_cpa
+        local cpa_miss_h = math.sqrt(miss_n * miss_n + miss_e * miss_e)
+        local ttc_s = (closing_speed > 0.1) and (range_h / closing_speed) or FLT_MAX
+
+        -- a moving obstacle that will miss us by more than well-clear and is not really
+        -- closing (and is not already close) is leaving: no manoeuvre needed
+        local is_conflict = true
+        if cpa_miss_h > well_clear_xy and closing_speed < cpa_min_ms and range_h > well_clear_xy then
+            is_conflict = false
+        end
+
+        -- side of the direct bearing that passes behind the obstacle's track
+        local pass_behind = 0
+        if ov ~= nil and (math.abs(ovn) + math.abs(ove)) > 0.5 then
+            local cross = rn * ove - re * ovn                 -- (rel x obstacle_vel) vertical component
+            if cross > 0.0 then pass_behind = -1 elseif cross < 0.0 then pass_behind = 1 end
+        end
+
+        return {
+            is_conflict   = is_conflict,
+            closing_speed = closing_speed,
+            cpa_miss      = cpa_miss_h,
+            ttc           = ttc_s,
+            pass_behind   = pass_behind,
+        }
+    end
+
+    --[[
+    Post-process the raw bendy-ruler heading into a smooth, committed command:
+      (1) resist_bearing_change() - existing clearance hysteresis
+      (2) side commitment - once a left/right side is chosen, hold it for DAA_SIDE_HOLD
+          before allowing a flip; seed the side to pass behind a moving obstacle
+      (3) heading slew-rate limit (DAA_SLEW_DPS), bypassed when time-to-conflict is
+          urgent (< DAA_SLEW_URG)
+    Together these stop the ~180 degree left/right wiggle without slowing a genuinely
+    urgent manoeuvre, and improve fixed-obstacle behaviour too.
+    --]]
+    local function refine_avoidance_bearing(direct_bearing_deg, raw_bearing_deg, raw_distance_m, motion, obstacle)
+        local pass_behind = motion.pass_behind
+        local ttc_s = motion.ttc
+
+        -- (1) clearance hysteresis
+        local resisted = resist_bearing_change(last_avoid_bearing_deg, current_lookahead, raw_bearing_deg, raw_distance_m)
+        local bearing = resisted
+
+        -- (2) side commitment
+        local off = wrap_180(bearing - direct_bearing_deg)
+        local side = 0
+        if off > 1.0 then side = 1 elseif off < -1.0 then side = -1 end
+        if side_hold_s > 0 then
+            if committed_side_sign == 0 then
+                -- fresh episode: commit; prefer passing behind a moving obstacle
+                committed_side_sign = (pass_behind ~= 0) and pass_behind or side
+                side_flip_pending = false
+            elseif side ~= 0 and side ~= committed_side_sign then
+                -- sweep wants the opposite side: only honour it once it has persisted
+                if not side_flip_pending then
+                    side_flip_pending = true
+                    side_flip_want_ms = now_ms
+                end
+                if (now_ms - side_flip_want_ms) < (side_hold_s * 1000) then
+                    bearing = wrap_360(direct_bearing_deg + committed_side_sign * math.abs(off))
+                else
+                    committed_side_sign = side
+                    side_flip_pending = false
+                end
+            else
+                side_flip_pending = false
+            end
+        end
+
+        -- (3) heading slew-rate limit (unless urgent)
+        local urgent = (ttc_s ~= nil) and (ttc_s < slew_urg_s)
+        if slew_dps > 0 and last_avoid_bearing_deg ~= nil and not urgent then
+            local dt = (now_ms - last_cmd_bearing_ms):tofloat() / 1000.0
+            local max_step = slew_dps * dt
+            if max_step > 0 then
+                local d = wrap_180(bearing - last_avoid_bearing_deg)
+                if d > max_step then d = max_step elseif d < -max_step then d = -max_step end
+                bearing = wrap_360(last_avoid_bearing_deg + d)
+            end
+        end
+        last_cmd_bearing_ms = now_ms
+
+        log_smoothing(direct_bearing_deg, raw_bearing_deg, resisted, bearing,
+                      committed_side_sign, side_flip_pending, urgent, motion, obstacle)
+        return bearing
     end
 
     -- calculates the second step of the bendy ruler test - look foward a 2nd "full_distance" to see if we can still avoid obstacles
@@ -1710,6 +1925,8 @@ local DAA = {
 
         if obstacle_avoiding == nil then
             last_avoid_bearing_deg = nil
+            committed_side_sign = 0
+            side_flip_pending = false
             if alt_obstacle ~= nil then
                 -- no horizontal threat, but we are approaching an altitude fence: keep heading to the
                 -- waypoint and let update_target_location() clamp the commanded altitude into the safe band
@@ -1728,8 +1945,37 @@ local DAA = {
             now_debug_ms = now_ms
         end
 
-        best_bearing_deg = resist_bearing_change(last_avoid_bearing_deg, current_lookahead, best_bearing_deg, best_distance_m)
-        last_avoid_bearing_deg = best_bearing_deg
+        local obstacle_type = obstacle_avoiding.type
+        local is_fence = obstacle_type ~= nil and (
+            (obstacle_type >= OBSTACLE_TYPE.FENCE_HOME and obstacle_type <= OBSTACLE_TYPE.FENCE_LUA)
+            or obstacle_type == OBSTACLE_TYPE.FENCE_ALT_MAX
+            or obstacle_type == OBSTACLE_TYPE.FENCE_ALT_MIN)
+
+        if is_fence then
+            -- Fences are fixed and containment is safety-critical: a heading slew limit or a
+            -- committed side could delay/deflect the turn at a hard boundary and breach it.
+            -- Keep the responsive bendy-ruler behaviour (clearance hysteresis only).
+            best_bearing_deg = resist_bearing_change(last_avoid_bearing_deg, current_lookahead, best_bearing_deg, best_distance_m)
+            last_avoid_bearing_deg = best_bearing_deg
+            committed_side_sign = 0
+            side_flip_pending = false
+        else
+            -- Non-fixed obstacles (aircraft, drones, birds, AIS, ...): velocity-aware smoothing.
+            -- First decide whether the obstacle is actually a conflict: one that is opening range
+            -- and whose predicted closest approach stays beyond well-clear is leaving, resume nav.
+            local motion = assess_obstacle_motion(obstacle_avoiding)
+            if not motion.is_conflict then
+                last_avoid_bearing_deg = nil
+                committed_side_sign = 0
+                side_flip_pending = false
+                return nil
+            end
+            -- Otherwise commit a side and slew-limit the heading so we track a smooth path
+            -- instead of wiggling as the obstacle (and the instantaneous geometry) moves.
+            -- refine_avoidance_bearing() also logs the DAAS smoothing trace each cycle.
+            best_bearing_deg = refine_avoidance_bearing(bearing_deg, best_bearing_deg, best_distance_m, motion, obstacle_avoiding)
+            last_avoid_bearing_deg = best_bearing_deg
+        end
 
         local proj_distance = math.max(distance_to_target_m, current_lookahead)   -- fix bug 2
         local new_target_loc = location_project(current_loc, best_bearing_deg, proj_distance, target_loc)
