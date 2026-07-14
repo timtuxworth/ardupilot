@@ -1501,58 +1501,76 @@ local DAA = {
     end
 
     --[[
-    Post-process the raw bendy-ruler heading into a smooth, committed command:
-      (1) resist_bearing_change() - existing clearance hysteresis
-      (2) side commitment - once a left/right side is chosen, hold it for DAA_SIDE_HOLD
-          before allowing a flip; seed the side to pass behind a moving obstacle
-      (3) heading slew-rate limit (DAA_SLEW_DPS), bypassed when time-to-conflict is
-          urgent (< DAA_SLEW_URG)
-    Together these stop the ~180 degree left/right wiggle without slowing a genuinely
-    urgent manoeuvre, and improve fixed-obstacle behaviour too.
+    Post-process the raw bendy-ruler heading into a smooth command for a MOVING
+    obstacle, WITHOUT ever overriding a turn the sweep needs to clear an obstacle.
+
+    resist_bearing_change() already produces a bearing that clears ALL obstacles
+    (fences included) and only makes a large change when the new side is clearly
+    clearer. So:
+      * A large change from the last command (> DAA_BR_ANGLE), or an urgent
+        encounter, is a genuine avoidance turn -> obey it exactly, no smoothing.
+        (This is the safety fix: previously the side-commit could mirror such a
+        turn onto the committed side and the slew limit could throttle it, flying
+        the aircraft into the very fence the sweep was turning away from.)
+      * Only SMALL residual changes (the left/right jitter) are damped, via a side
+        commitment and a heading slew-rate limit. When holding a committed side we
+        keep the LAST FLOWN bearing (known clear) rather than a mirrored one that
+        was never clearance-checked.
     --]]
     local function refine_avoidance_bearing(direct_bearing_deg, raw_bearing_deg, raw_distance_m, motion, obstacle)
         local pass_behind = motion.pass_behind
         local ttc_s = motion.ttc
 
-        -- (1) clearance hysteresis
+        -- (1) clearance hysteresis: the safe, multi-obstacle, anti-flip baseline
         local resisted = resist_bearing_change(last_avoid_bearing_deg, current_lookahead, raw_bearing_deg, raw_distance_m)
         local bearing = resisted
 
-        -- (2) side commitment
-        local off = wrap_180(bearing - direct_bearing_deg)
-        local side = 0
-        if off > 1.0 then side = 1 elseif off < -1.0 then side = -1 end
-        if side_hold_s > 0 then
-            if committed_side_sign == 0 then
-                -- fresh episode: commit; prefer passing behind a moving obstacle
-                committed_side_sign = (pass_behind ~= 0) and pass_behind or side
-                side_flip_pending = false
-            elseif side ~= 0 and side ~= committed_side_sign then
-                -- sweep wants the opposite side: only honour it once it has persisted
-                if not side_flip_pending then
-                    side_flip_pending = true
-                    side_flip_want_ms = now_ms
-                end
-                if (now_ms - side_flip_want_ms) < (side_hold_s * 1000) then
-                    bearing = wrap_360(direct_bearing_deg + committed_side_sign * math.abs(off))
+        local urgent = (ttc_s ~= nil) and (ttc_s < slew_urg_s)
+        local change = (last_avoid_bearing_deg ~= nil) and math.abs(wrap_180(resisted - last_avoid_bearing_deg)) or 999.0
+
+        if last_avoid_bearing_deg == nil or urgent or change > bendy_angle then
+            -- necessary avoidance turn (or first cycle): obey the sweep exactly and
+            -- (re)commit the side to it; never smooth this away
+            committed_side_sign = 0
+            side_flip_pending = false
+        else
+            -- small adjustment only: damp the jitter
+            -- (2) side commitment
+            local off = wrap_180(bearing - direct_bearing_deg)
+            local side = 0
+            if off > 1.0 then side = 1 elseif off < -1.0 then side = -1 end
+            if side_hold_s > 0 then
+                if committed_side_sign == 0 then
+                    -- fresh episode: commit; prefer passing behind a moving obstacle
+                    committed_side_sign = (pass_behind ~= 0) and pass_behind or side
+                    side_flip_pending = false
+                elseif side ~= 0 and side ~= committed_side_sign then
+                    -- sweep wants the opposite side: only honour it once it has persisted;
+                    -- meanwhile hold the last flown (clearance-proven) bearing, do NOT mirror
+                    if not side_flip_pending then
+                        side_flip_pending = true
+                        side_flip_want_ms = now_ms
+                    end
+                    if (now_ms - side_flip_want_ms) < (side_hold_s * 1000) then
+                        bearing = last_avoid_bearing_deg
+                    else
+                        committed_side_sign = side
+                        side_flip_pending = false
+                    end
                 else
-                    committed_side_sign = side
                     side_flip_pending = false
                 end
-            else
-                side_flip_pending = false
             end
-        end
 
-        -- (3) heading slew-rate limit (unless urgent)
-        local urgent = (ttc_s ~= nil) and (ttc_s < slew_urg_s)
-        if slew_dps > 0 and last_avoid_bearing_deg ~= nil and not urgent then
-            local dt = (now_ms - last_cmd_bearing_ms):tofloat() / 1000.0
-            local max_step = slew_dps * dt
-            if max_step > 0 then
-                local d = wrap_180(bearing - last_avoid_bearing_deg)
-                if d > max_step then d = max_step elseif d < -max_step then d = -max_step end
-                bearing = wrap_360(last_avoid_bearing_deg + d)
+            -- (3) heading slew-rate limit (small changes only; large turns bypassed above)
+            if slew_dps > 0 and last_avoid_bearing_deg ~= nil then
+                local dt = (now_ms - last_cmd_bearing_ms):tofloat() / 1000.0
+                local max_step = slew_dps * dt
+                if max_step > 0 then
+                    local d = wrap_180(bearing - last_avoid_bearing_deg)
+                    if d > max_step then d = max_step elseif d < -max_step then d = -max_step end
+                    bearing = wrap_360(last_avoid_bearing_deg + d)
+                end
             end
         end
         last_cmd_bearing_ms = now_ms
