@@ -8341,6 +8341,62 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         finally:
             self.disarm_vehicle(force=True)
 
+    def PlaneDAATrapNoFalseFire(self):
+        '''The trapped-failsafe (DAA_TRAP_ACT) must NOT fire during normal, successful
+        avoidance.  An exclusion circle sits across the path to a reachable waypoint;
+        the plane detours around it and reaches the waypoint.  With the failsafe
+        enabled (RTL, which would be obvious if it wrongly fired), the detour must
+        complete WITHOUT tripping the failsafe (no "TRAPPED", mission still runs).'''
+        self.install_applet_script_context("planedaa.lua")
+        self.install_script_module(
+            self.script_modules_source_path("mavlink_wrappers.lua"),
+            "mavlink_wrappers.lua",
+        )
+        self.set_parameters({
+            "SCR_ENABLE": 1,
+            "SCR_VM_I_COUNT": 1000000,
+            "AVD_ENABLE": 1,
+            "FENCE_ENABLE": 0,
+            "FENCE_ACTION": 0,
+            "FENCE_TYPE": 4,
+        })
+        home = self.home_position_as_mav_location()
+        excl = [(
+            mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION,
+            {"radius": 200, "loc": self.offset_location_ne(home, 1200, 0)},
+        )]
+        self.upload_fences_from_locations(excl)
+        self.upload_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 50),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 2000, 0, 80),
+            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+        ])
+        self.context_collect('STATUSTEXT')
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+        self.set_parameter("DAA_MARGIN_FENCE", 100)
+        self.set_parameter("DAA_TRAP_ACT", 1)   # RTL - obvious if it wrongly fired
+        self.set_parameter("DAA_TRAP_S", 5)
+        self.arm_vehicle()
+        try:
+            self.change_mode("AUTO")
+            self.wait_current_waypoint(2, timeout=120)
+            self.do_fence_enable()
+            self.wait_text("Plane DAA", check_context=True, timeout=60)
+            # the normal detour must reach the waypoint without the failsafe firing
+            self.wait_current_waypoint(3, timeout=400)
+            if self.statustext_in_collections("TRAPPED") is not None:
+                raise NotAchievedException("trapped-failsafe wrongly fired during normal avoidance")
+            # the no-false-fire check above is done; disable the failsafe and the fence for
+            # the return-home leg so the non-avoiding flaps.txt landing (which flies back
+            # through the exclusion circle) doesn't correctly trip it and fight the landing
+            self.set_parameter("DAA_TRAP_ACT", 0)
+            self.do_fence_disable()
+            self.fly_home_land_and_disarm()
+        finally:
+            self.do_fence_disable()
+            self.disarm_vehicle(force=True)
+
     def PlaneDAAFenceAvoidanceWind(self):
         '''planedaa wind-scaled fence margin.  In wind, DAA_WIND_MARG widens the
         commanded standoff from a fence (by DAA_WIND_MARG metres per m/s of wind above
@@ -9947,6 +10003,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             Test(self.PlaneDAAFenceAvoidance),
             Test(self.PlaneDAADroneAvoidance),
             Test(self.PlaneDAADroneCrossing),
+            Test(self.PlaneDAATrapNoFalseFire),
             Test(self.PlaneDAAFenceAvoidanceWind),
             Test(self.PlaneDAAFenceAltitude),
             Test(self.PlaneDAAFenceAltitudeTerrain),
