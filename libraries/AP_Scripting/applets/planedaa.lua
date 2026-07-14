@@ -150,7 +150,7 @@ function bind_add_param(name, idx, default_value)
 end
 
 -- setup follow mode specific parameters
-assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 32), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
+assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 35), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
 
 --[[
     // @Param: DAA_ACT_FN
@@ -449,6 +449,37 @@ DAA_SIDE_HOLD = bind_add_param('SIDE_HOLD', 31, 3)
 --]]
 DAA_CPA_MIN = bind_add_param('CPA_MIN', 32, 2)
 
+--[[
+    // @Param: DAA_TRAP_ACT
+    // @DisplayName: Trapped-failsafe action
+    // @Description: What to do when avoidance cannot find a way out (boxed in, or unable to keep clear of an obstacle for DAA_TRAP_S). 0 disables the trapped-failsafe entirely (avoidance just keeps trying). For a VTOL, QLOITER stops forward flight and hovers (zero turn radius) - the safest way out of a tight space. If the aircraft has no VTOL (Q_ENABLE=0) the VTOL options fall back to RTL. Trapped by a fixed obstacle (fence) is sticky (held until the pilot changes mode); trapped by a moving obstacle (drone/aircraft) recovers to the previous mode after DAA_TRAP_CLR_S.
+    // @Values: 0:Disabled,1:RTL,2:QRTL,3:QLOITER,4:QLAND
+    // @User: Standard
+--]]
+DAA_TRAP_ACT = bind_add_param('TRAP_ACT', 33, 0)
+
+--[[
+    // @Param: DAA_TRAP_S
+    // @DisplayName: Trapped-failsafe trigger time
+    // @Description: Avoidance must be unable to find a way out continuously for this long before the DAA_TRAP_ACT failsafe fires. Prevents transient clutter from triggering it.
+    // @Units: s
+    // @Range: 0 30
+    // @Increment: 0.5
+    // @User: Standard
+--]]
+DAA_TRAP_S = bind_add_param('TRAP_S', 34, 5)
+
+--[[
+    // @Param: DAA_TRAP_CLR_S
+    // @DisplayName: Trapped-failsafe recover time
+    // @Description: For a trap caused by a MOVING obstacle (drone/aircraft), resume the previous mode this long after the failsafe fired, on the assumption the obstacle has passed (if it has not, forward flight simply re-triggers the failsafe). A trap caused by a fixed obstacle (fence) is not auto-recovered - it is held until the pilot changes mode.
+    // @Units: s
+    // @Range: 1 60
+    // @Increment: 1
+    // @User: Standard
+--]]
+DAA_TRAP_CLR_S = bind_add_param('TRAP_CLR_S', 35, 4)
+
 WARN_DIST_XY                = bind_param("AVD_W_DIST_XY")
 WARN_ACTION                 = bind_param("AVD_W_ACTION")
 AVD_ENABLE                  = bind_param("AVD_ENABLE")
@@ -495,6 +526,9 @@ local slew_dps              = DAA_SLEW_DPS:get()
 local slew_urg_s            = DAA_SLEW_URG:get()
 local side_hold_s           = DAA_SIDE_HOLD:get()
 local cpa_min_ms            = DAA_CPA_MIN:get()
+local trap_act              = DAA_TRAP_ACT:get()
+local trap_s                = DAA_TRAP_S:get()
+local trap_clr_s            = DAA_TRAP_CLR_S:get()
 
 GRAVITY_MSS = 9.80665
 LOCATION_SCALING_FACTOR_INV = 89.83204953368922
@@ -642,6 +676,9 @@ local function get_vehicle_state()
         slew_urg_s           = DAA_SLEW_URG:get()
         side_hold_s          = DAA_SIDE_HOLD:get()
         cpa_min_ms           = DAA_CPA_MIN:get()
+        trap_act             = DAA_TRAP_ACT:get()
+        trap_s               = DAA_TRAP_S:get()
+        trap_clr_s           = DAA_TRAP_CLR_S:get()
 
         now_params_ms       = now_ms
     end
@@ -1178,6 +1215,12 @@ local DAA = {
     local side_flip_pending  = false    -- true while the opposite side is being preferred (debounce a flip)
     local side_flip_want_ms  = uint32_t(0)  -- time the opposite side first became preferred
     local last_cmd_bearing_ms = uint32_t(0) -- time we last issued an avoidance heading (for the slew-rate dt)
+    local trap_active       = false         -- trapped-failsafe is currently controlling the vehicle
+    local trap_since_ms     = uint32_t(0)   -- when the trap condition began (for DAA_TRAP_S)
+    local trap_trigger_ms   = uint32_t(0)   -- when the failsafe fired (for DAA_TRAP_CLR_S recovery)
+    local trap_dynamic      = false         -- trap from a moving obstacle (recoverable) vs a fence (sticky)
+    local trap_prev_mode    = -1            -- mode to restore on recovery
+    local trap_fs_mode      = -1            -- the failsafe mode we commanded
     local previous_label    = ""
     local avoiding_label    = ""
     -- luacheck: ignore previous_aircraft
@@ -2293,6 +2336,103 @@ local DAA = {
         end
     end
 
+    -- a moving obstacle (drone/aircraft/bird/AIS/proximity) may move out of the way;
+    -- a fence will not, so a fence trap is held until the pilot intervenes
+    local function obstacle_is_dynamic(obstacle_type)
+        if obstacle_type == nil then return true end
+        local is_fence = (obstacle_type >= OBSTACLE_TYPE.FENCE_HOME and obstacle_type <= OBSTACLE_TYPE.FENCE_LUA)
+            or obstacle_type == OBSTACLE_TYPE.FENCE_ALT_MAX
+            or obstacle_type == OBSTACLE_TYPE.FENCE_ALT_MIN
+        return not is_fence
+    end
+
+    -- map DAA_TRAP_ACT to a flight mode; VTOL modes fall back to RTL if there is no VTOL
+    local function resolve_trap_mode()
+        local have_vtol = (param:get('Q_ENABLE') or 0) > 0
+        if trap_act == 1 then return PLANE_MODE.RTL
+        elseif trap_act == 2 then return have_vtol and PLANE_MODE.QRTL or PLANE_MODE.RTL
+        elseif trap_act == 3 then return have_vtol and PLANE_MODE.QLOITER or PLANE_MODE.RTL
+        elseif trap_act == 4 then return have_vtol and PLANE_MODE.QLAND or PLANE_MODE.RTL
+        end
+        return PLANE_MODE.RTL
+    end
+
+    -- A "compromise" = the aircraft has penetrated an obstacle's inner danger line, which is
+    -- tighter than planedaa's avoidance standoff (so normal close-skirting avoidance never
+    -- reaches it, hence no false-trigger):
+    --   * fence  -> an actual AC_Fence breach (the real boundary at FENCE_MARGIN, well inside
+    --               planedaa's DAA_MARGIN_FENCE standoff)
+    --   * traffic (aircraft/drone/bird/AIS/proximity) -> within near-miss (AVD_NMAC_XY),
+    --               i.e. well-clear has been lost
+    -- Sustained (DAA_TRAP_S) this is a genuine trap. Altitude fences are vertical
+    -- (clamp-and-continue) and are covered by get_breaches, not the horizontal traffic check.
+    local function daa_compromised_now()
+        if fence ~= nil and fence:get_breaches() ~= 0 then
+            return true
+        end
+        if obstacle_avoiding == nil then return false end
+        local t = obstacle_avoiding.type
+        local is_fence = t ~= nil and (
+            (t >= OBSTACLE_TYPE.FENCE_HOME and t <= OBSTACLE_TYPE.FENCE_LUA)
+            or t == OBSTACLE_TYPE.FENCE_ALT_MAX or t == OBSTACLE_TYPE.FENCE_ALT_MIN)
+        if is_fence then return false end   -- fences are covered by get_breaches() above
+        return obstacle_avoiding.distance_xy ~= nil and obstacle_avoiding.distance_xy < near_miss_xy
+    end
+
+    -- Trapped-failsafe state machine. Returns true while the failsafe is controlling the
+    -- vehicle (so update() skips normal avoidance). See DAA_TRAP_ACT/S/CLR_S.
+    function DAA.trap_update()
+        if trap_act == 0 then
+            trap_active = false
+            trap_since_ms = uint32_t(0)
+            return false
+        end
+        local mode_now = vehicle:get_mode()
+
+        if not trap_active then
+            if daa_compromised_now() then
+                if trap_since_ms == uint32_t(0) then trap_since_ms = now_ms end
+                if (now_ms - trap_since_ms) >= (trap_s * 1000) and obstacle_avoiding ~= nil then
+                    trap_dynamic    = obstacle_is_dynamic(obstacle_avoiding.type)
+                    trap_prev_mode  = mode_now
+                    trap_fs_mode    = resolve_trap_mode()
+                    trap_trigger_ms = now_ms
+                    vehicle:set_mode(trap_fs_mode)
+                    trap_active     = true
+                    gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(
+                        ": TRAPPED (%s) -> %s", trap_dynamic and "moving" or "fence", get_mode_string(trap_fs_mode)))
+                    gcs:send_named_string("DAA-AVOID", "TRAPPED")
+                    return true
+                end
+            else
+                trap_since_ms = uint32_t(0)
+            end
+            return false
+        end
+
+        -- failsafe active
+        if mode_now ~= trap_fs_mode then
+            -- the pilot (or another failsafe) changed mode: release, never fight it
+            gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. ": trap released (mode changed)")
+            trap_active = false
+            trap_since_ms = uint32_t(0)
+            return false
+        end
+        if trap_dynamic and (now_ms - trap_trigger_ms) >= (trap_clr_s * 1000) then
+            -- transient moving-obstacle squeeze: resume the mission; if the obstacle is
+            -- still there, forward flight will simply re-trigger the failsafe
+            if trap_prev_mode > 0 then vehicle:set_mode(trap_prev_mode) end
+            gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(
+                ": trap clear -> resume %s", get_mode_string(trap_prev_mode)))
+            gcs:send_named_string("DAA-AVOID", "")
+            trap_active = false
+            trap_since_ms = uint32_t(0)
+            return false
+        end
+        -- fence (static) trap: hold the failsafe mode until the pilot intervenes
+        return true
+    end
+
 end) () -- DAA management class
 
 -------------------------------------------------------------------------------
@@ -2328,8 +2468,10 @@ local function update()
     if DAA.isactive() then
         local suggested_target_loc = DAA.detect()
         DAA.alert(suggested_target_loc)
-        -- currently we only do avoidance in FW mode
-        if vtol_state == MAV_VTOL_STATE.FW then
+        -- when avoidance can't find a way out, the trapped-failsafe takes over (and we
+        -- stop issuing avoidance); otherwise avoid, but only in FW forward flight
+        local trapped = DAA.trap_update()
+        if not trapped and vtol_state == MAV_VTOL_STATE.FW then
             DAA.avoid(suggested_target_loc)
         end
     end
