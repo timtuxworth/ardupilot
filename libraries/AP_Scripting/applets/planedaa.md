@@ -154,6 +154,53 @@ Collision volumes, and the `FENCE_*` parameters for the altitude/geo fences.
 | `DAA_WIND_MIN` | 2 | m/s | Minimum wind speed before the wind-aware avoidance behaviour engages. Below this, the still-air path is used so calm-air behaviour is unchanged. Gates both the wind-aware look-ahead projection and the wind-scaled fence margin. |
 | `DAA_WIND_MARG` | 5 | m per m/s | Extra fence avoidance margin added per m/s of wind above `DAA_WIND_MIN`. The standoff from fences is widened by `DAA_WIND_MARG * max(0, wind_speed - DAA_WIND_MIN)`, giving the controller buffer to absorb cross-track drift so the aircraft is less likely to be blown across the boundary in wind. Set to 0 to disable wind scaling. |
 
+## Tuning for your vehicle
+
+The margins and the bendy-ruler behaviour are not one-size-fits-all: the same
+fence is "tight" for a fast, agile aircraft and "roomy" for a slow one. Two
+airframe properties drive the tuning.
+
+**Turn radius.** The radius the aircraft actually flies while avoiding is set by
+L1 and the bank limit, roughly `R ≈ v² / (g·tan φ)` — it grows with the *square*
+of cruise speed (`AIRSPEED_CRUISE`) and shrinks with the achievable bank angle
+(`ROLL_LIMIT_DEG`). This is **not** `WP_LOITER_RAD`, which is only the
+loiter-circle radius and is usually far more conservative than the airframe can
+actually turn — do not size DAA margins from it. A very agile VTOL, for example,
+may fly a ~30 m avoidance turn while `WP_LOITER_RAD` is 90 m.
+
+**Command bandwidth.** How faithfully the airframe tracks a changing commanded
+heading. This is the property that decides how much the *command-stability*
+parameters matter.
+
+### Command stability and `DAA_BR_RATIO`
+
+`DAA_BR_RATIO` is the side-commit hysteresis: the bendy ruler only switches to
+the other side of an obstacle when the new side is this many times clearer.
+Because an agile, high-bandwidth airframe reproduces every commanded heading
+change immediately, any side-to-side indecision in the bendy ruler shows up as a
+**visible dogleg** — the aircraft banks hard one way, then the other. A slower
+airframe hides the same indecision because its own roll response low-passes it.
+So the more agile the aircraft, the more command stability matters — and,
+importantly, *"it looks smooth on the slow airframe"* does **not** mean the
+bendy ruler is well tuned; the airframe may just be masking it.
+
+When the aircraft is forced to hug a fence standoff (the geometry leaves no room
+to go wide), the left/right choice becomes bistable. The applet holds the
+committed escape direction through the hug rather than flip-flopping, and only
+switches to the far side if that side *genuinely* clears (positive clearance) —
+so containment is never traded away for smoothness. `DAA_BR_RATIO` still governs
+how much clearer the far side must be before a normal (non-hugging) side switch;
+raise it if you see doglegs when skirting fences, lower it if avoidance feels
+sluggish to re-plan.
+
+### Margins and look-ahead
+
+Size the fence standoff (`DAA_MARGIN_FENCE`) and `DAA_LKAHD` from how far the
+aircraft travels while reacting — i.e. from airspeed — rather than from the turn
+radius. Keep `DAA_LKAHD` at least a few times the turn radius (the startup check
+warns below 3×R); a very long look-ahead (10×+) can over-commit the far-field
+path. In wind, `DAA_WIND_MARG` widens the fence standoff automatically.
+
 ## Logging
 
 The script writes the following messages to the dataflash log to record its
