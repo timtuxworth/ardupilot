@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-033"
+SCRIPT_VERSION      = "4.8.0-034"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -150,7 +150,7 @@ function bind_add_param(name, idx, default_value)
 end
 
 -- setup follow mode specific parameters
-assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 35), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
+assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 36), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
 
 --[[
     // @Param: DAA_ACT_FN
@@ -480,6 +480,15 @@ DAA_TRAP_S = bind_add_param('TRAP_S', 34, 5)
 --]]
 DAA_TRAP_CLR_S = bind_add_param('TRAP_CLR_S', 35, 4)
 
+--[[
+    // @Param: DAA_TRAP_RTL_ACT
+    // @DisplayName: Trapped-failsafe escalation action
+    // @Description: Action to take when the DAA_TRAP_ACT action would leave the aircraft in the mode it is ALREADY in (e.g. DAA_TRAP_ACT=RTL and the aircraft is already in RTL) - commanding the same mode again would do nothing, so escalate to this instead. Typically the aircraft is trapped mid-RTL and this stops it: QRTL (VTOL return, zero turn radius) or QLOITER (stop & hover) or QLAND. VTOL actions fall back to RTL if there is no VTOL. Set equal to DAA_TRAP_ACT to disable escalation.
+    // @Values: 1:RTL,2:QRTL,3:QLOITER,4:QLAND
+    // @User: Standard
+--]]
+DAA_TRAP_RTL_ACT = bind_add_param('TRAP_RTL_ACT', 36, 2)
+
 WARN_DIST_XY                = bind_param("AVD_W_DIST_XY")
 WARN_ACTION                 = bind_param("AVD_W_ACTION")
 AVD_ENABLE                  = bind_param("AVD_ENABLE")
@@ -529,6 +538,7 @@ local cpa_min_ms            = DAA_CPA_MIN:get()
 local trap_act              = DAA_TRAP_ACT:get()
 local trap_s                = DAA_TRAP_S:get()
 local trap_clr_s            = DAA_TRAP_CLR_S:get()
+local trap_rtl_act          = DAA_TRAP_RTL_ACT:get()
 
 GRAVITY_MSS = 9.80665
 LOCATION_SCALING_FACTOR_INV = 89.83204953368922
@@ -679,6 +689,7 @@ local function get_vehicle_state()
         trap_act             = DAA_TRAP_ACT:get()
         trap_s               = DAA_TRAP_S:get()
         trap_clr_s           = DAA_TRAP_CLR_S:get()
+        trap_rtl_act         = DAA_TRAP_RTL_ACT:get()
 
         now_params_ms       = now_ms
     end
@@ -1373,13 +1384,72 @@ local DAA = {
         end
     end
 
+    -- Sanity-check the DAA parameters against each other and related vehicle params, and
+    -- flag disabled features. Advisory only (GCS text, nothing is changed). Fires on every
+    -- enable (incl. switch flips). Messages are kept short (STATUSTEXT truncates ~50 chars).
+    function DAA.warnings()
+        local turn_r = math.abs(wp_loiter_rad)
+        local function warn(sev, msg)
+            gcs:send_text(sev, SCRIPT_NAME_SHORT .. ": " .. msg)
+        end
+        local W = MAV_SEVERITY.WARNING
+        local I = MAV_SEVERITY.NOTICE
+        local function vtol_act(a) return a == 2 or a == 3 or a == 4 end
+        local have_vtol   = (param:get('Q_ENABLE') or 0) > 0
+        local fence_act   = param:get('FENCE_ACTION') or 0
+        local adsb_type   = param:get('ADSB_TYPE') or 0
+        local cruise_ms   = param:get('AIRSPEED_CRUISE') or 0
+
+        -- turn radius vs avoidance standoffs (WP_LOITER_RAD is the turn radius)
+        if turn_r > 0 and margin_fence < turn_r then
+            warn(W, string.format("MARGIN_FENCE %.0f < turn %.0f: fences may thrash", margin_fence, turn_r)) end
+        if turn_r > 0 and uav_clear_xy < turn_r then
+            warn(W, string.format("AVD_UAV_XY %.0f < turn %.0f: tight drone avoid", uav_clear_xy, turn_r)) end
+        -- margin ordering: the aircraft near-miss (NMAC) must sit inside the aircraft
+        -- well-clear standoff. NMAC is an aircraft-only boundary, so it is NOT compared
+        -- against the drone standoff (AVD_UAV_XY).
+        if near_miss_xy >= well_clear_xy then
+            warn(W, "NMAC_XY >= WCLR_XY: nearmiss outside wellclr") end
+        if near_miss_z >= well_clear_z then
+            warn(W, "NMAC_Z >= WCLR_Z: vert nearmiss>wellclr") end
+        -- lookahead must give room to react
+        if turn_r > 0 and lookahead_param < 3 * turn_r then
+            warn(W, string.format("LKAHD %.0f < 3x turn %.0f: reacts late", lookahead_param, turn_r)) end
+        if bendy_ratio > 1.8 then
+            warn(W, string.format("BR_RATIO %.1f > 1.8: fence-follow unstable", bendy_ratio)) end
+        -- trapped-failsafe consistency
+        if trap_act ~= 0 and not have_vtol and (vtol_act(trap_act) or vtol_act(trap_rtl_act)) then
+            warn(W, "trap VTOL action but Q_ENABLE=0 -> RTL") end
+        if trap_act ~= 0 and fence_act ~= 0 then
+            warn(W, string.format("TRAP + FENCE_ACTION %.0f: FA pre-empts trap", fence_act)) end
+        if trap_act ~= 0 and trap_rtl_act == trap_act then
+            warn(I, "TRAP_RTL_ACT = TRAP_ACT: no escalation") end
+        -- slew limit that can never bind (exceeds the achievable turn rate)
+        if turn_r > 0 and cruise_ms > 1 and slew_dps > 0 then
+            local turn_rate = math.deg(cruise_ms / turn_r)
+            if slew_dps > turn_rate * 1.5 then
+                warn(I, string.format("SLEW_DPS %.0f > turn rate %.0f: no effect", slew_dps, turn_rate)) end
+        end
+        -- disabled features
+        if (AVD_ENABLE:get() or 0) ~= 1 then
+            warn(W, "AVD_ENABLE != 1: traffic avoidance OFF")
+        elseif adsb_type == 0 then
+            warn(W, "ADSB_TYPE = 0: no traffic source")
+        end
+        if daa_action == 0 then warn(W, "AVD_ACTION = 0: avoidance manoeuvres OFF") end
+        if trap_act == 0 then warn(I, "TRAP_ACT = 0: trap failsafe OFF") end
+        if slew_dps == 0 and side_hold_s == 0 then warn(I, "smoothing OFF (SLEW_DPS=0 SIDE_HOLD=0)") end
+
+    end
+
     function DAA.disable()
         DAA.enabled = false
         gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. " disabled")
-    end 
+    end
     function DAA.enable()
         DAA.enabled = true
         gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. " enabled")
+        DAA.warnings()
     end
 
     --return true if we are in a state where DAA can apply
@@ -2347,36 +2417,45 @@ local DAA = {
     end
 
     -- map DAA_TRAP_ACT to a flight mode; VTOL modes fall back to RTL if there is no VTOL
-    local function resolve_trap_mode()
+    local function trap_act_to_mode(act)
         local have_vtol = (param:get('Q_ENABLE') or 0) > 0
-        if trap_act == 1 then return PLANE_MODE.RTL
-        elseif trap_act == 2 then return have_vtol and PLANE_MODE.QRTL or PLANE_MODE.RTL
-        elseif trap_act == 3 then return have_vtol and PLANE_MODE.QLOITER or PLANE_MODE.RTL
-        elseif trap_act == 4 then return have_vtol and PLANE_MODE.QLAND or PLANE_MODE.RTL
+        if act == 1 then return PLANE_MODE.RTL
+        elseif act == 2 then return have_vtol and PLANE_MODE.QRTL or PLANE_MODE.RTL
+        elseif act == 3 then return have_vtol and PLANE_MODE.QLOITER or PLANE_MODE.RTL
+        elseif act == 4 then return have_vtol and PLANE_MODE.QLAND or PLANE_MODE.RTL
         end
         return PLANE_MODE.RTL
+    end
+
+    -- the mode the trap should command: the DAA_TRAP_ACT action, but if that would just
+    -- re-command the mode we are already in (e.g. RTL while already RTL - a no-op), escalate
+    -- to DAA_TRAP_RTL_ACT (default QRTL) so a mid-RTL trap actually stops the aircraft
+    local function resolve_trap_mode(mode_now)
+        local mode = trap_act_to_mode(trap_act)
+        if mode == mode_now then
+            mode = trap_act_to_mode(trap_rtl_act)
+        end
+        return mode
     end
 
     -- A "compromise" = the aircraft has penetrated an obstacle's inner danger line, which is
     -- tighter than planedaa's avoidance standoff (so normal close-skirting avoidance never
     -- reaches it, hence no false-trigger):
-    --   * fence  -> an actual AC_Fence breach (the real boundary at FENCE_MARGIN, well inside
-    --               planedaa's DAA_MARGIN_FENCE standoff)
-    --   * traffic (aircraft/drone/bird/AIS/proximity) -> within near-miss (AVD_NMAC_XY),
-    --               i.e. well-clear has been lost
+    --   * fence    -> an actual AC_Fence breach (the real boundary at FENCE_MARGIN, well inside
+    --                 planedaa's DAA_MARGIN_FENCE standoff)
+    --   * aircraft -> a real aircraft inside near-miss (AVD_NMAC_XY/Z), i.e. well-clear lost.
+    --                 NMAC is an aircraft-only boundary (matches alert_aircraft): drones,
+    --                 proximity, AIS and birds are avoided but do not trip the trap here.
     -- Sustained (DAA_TRAP_S) this is a genuine trap. Altitude fences are vertical
-    -- (clamp-and-continue) and are covered by get_breaches, not the horizontal traffic check.
+    -- (clamp-and-continue) and are covered by get_breaches, not the aircraft near-miss check.
     local function daa_compromised_now()
         if fence ~= nil and fence:get_breaches() ~= 0 then
             return true
         end
-        if obstacle_avoiding == nil then return false end
-        local t = obstacle_avoiding.type
-        local is_fence = t ~= nil and (
-            (t >= OBSTACLE_TYPE.FENCE_HOME and t <= OBSTACLE_TYPE.FENCE_LUA)
-            or t == OBSTACLE_TYPE.FENCE_ALT_MAX or t == OBSTACLE_TYPE.FENCE_ALT_MIN)
-        if is_fence then return false end   -- fences are covered by get_breaches() above
-        return obstacle_avoiding.distance_xy ~= nil and obstacle_avoiding.distance_xy < near_miss_xy
+        return aircraft_avoiding ~= nil
+            and aircraft_avoiding.distance_xy ~= nil
+            and aircraft_avoiding.distance_xy < near_miss_xy
+            and aircraft_avoiding.distance_z < near_miss_z
     end
 
     -- Trapped-failsafe state machine. Returns true while the failsafe is controlling the
@@ -2392,10 +2471,12 @@ local DAA = {
         if not trap_active then
             if daa_compromised_now() then
                 if trap_since_ms == uint32_t(0) then trap_since_ms = now_ms end
-                if (now_ms - trap_since_ms) >= (trap_s * 1000) and obstacle_avoiding ~= nil then
-                    trap_dynamic    = obstacle_is_dynamic(obstacle_avoiding.type)
+                if (now_ms - trap_since_ms) >= (trap_s * 1000) then
+                    -- a fence breach can nil obstacle_avoiding (breach-escape) yet still be a
+                    -- compromise; treat "no current obstacle" as a static (fence) trap
+                    trap_dynamic    = (obstacle_avoiding ~= nil) and obstacle_is_dynamic(obstacle_avoiding.type) or false
                     trap_prev_mode  = mode_now
-                    trap_fs_mode    = resolve_trap_mode()
+                    trap_fs_mode    = resolve_trap_mode(mode_now)
                     trap_trigger_ms = now_ms
                     vehicle:set_mode(trap_fs_mode)
                     trap_active     = true
