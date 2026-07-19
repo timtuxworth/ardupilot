@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-034"
+SCRIPT_VERSION      = "4.8.0-035"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -960,6 +960,31 @@ local function populate_obstacle(distance_m, any_obstacle)
     end
 
     return obstacle
+end
+
+-- Real current horizontal distance (m) to the physical obstacle, for the AVOIDING message.
+-- distance_m is the bendy-ruler PROJECTED distance (along the lookahead ray), not a real range.
+-- Returns nil when we can't determine it simply (Lua fence, alt fence, no location) so the
+-- message omits the distance rather than mislead.  Called ONLY at announce time (not in the
+-- bendy-ruler sweep) so the per-call fence_distance loop stays out of the hot path.
+local function obstacle_report_distance(obstacle)
+    if current_loc == nil then return nil end
+    local t = obstacle.type
+    if t == OBSTACLE_TYPE.FENCE_HOME
+        or t == OBSTACLE_TYPE.FENCE_CIRCLE_INCLUSION
+        or t == OBSTACLE_TYPE.FENCE_CIRCLE_EXCLUSION
+        or t == OBSTACLE_TYPE.FENCE_POLYGON_INCLUSION
+        or t == OBSTACLE_TYPE.FENCE_POLYGON_EXCLUSION
+        or t == OBSTACLE_TYPE.FENCE_LUA then
+        -- horizontal fences carry no single usable "location"; ask C++ for the real edge distance
+        -- (returns the distance in metres, or nil if no polygon/circle fence is loaded)
+        return OAScripting:fence_distance(current_loc)
+    elseif t ~= OBSTACLE_TYPE.FENCE_ALT_MAX and t ~= OBSTACLE_TYPE.FENCE_ALT_MIN
+            and obstacle.location ~= nil then
+        -- point/traffic obstacle (aircraft/drone/bird/AIS/proximity): location is a real position
+        return obstacle.location:get_distance(current_loc)
+    end
+    return nil
 end
 
 local function find_closest_obstacle(loc1, loc2, lookahead_m, wind_ms)
@@ -2293,16 +2318,17 @@ local DAA = {
         if set_avoid_location(new_target_loc) and navigation_target_loc ~= nil then
             local avoid_dist = navigation_target_loc:get_distance(new_target_loc)
             if (now_ms - now_avoiding_ms) > 5000 and obstacle ~= nil and avoid_dist > 5 then
-                local obstacle_distance = obstacle.distance_m
-                if obstacle.location ~= nil then
-                    avoid_dist = navigation_target_loc:get_distance(obstacle.location)
+                local report_dist = obstacle_report_distance(obstacle)
+                if report_dist ~= nil then
+                    gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s dist: %.0fm", obstacle.label, report_dist))
+                    gcs:send_named_float("DAA-DIST", report_dist)
+                else
+                    -- distance not simply knowable for this obstacle (e.g. Lua fence) - label only
+                    gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s", obstacle.label))
                 end
-
-                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s dist: %.0fm", obstacle.label,  math.abs(obstacle_distance)))
                 avoiding_label = obstacle.label
                 gcs:send_named_string("DAA-AVOID", "obstacle")
                 gcs:send_named_string("DAA-OBSTCL", avoiding_label)
-                gcs:send_named_float("DAA-DIST", avoid_dist)
                 now_avoiding_ms = now_ms
                 current_state = STATE.avoiding
             end

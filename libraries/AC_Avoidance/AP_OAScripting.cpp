@@ -204,6 +204,73 @@ bool AP_OAScripting::find_aircraft(const Location &vehicle_loc, const float look
     return false;
 }
 
+// closest distance (metres) from a location to the nearest fence boundary edge — polygon or
+// circle, inclusion or exclusion — as a real geometric distance to the physical boundary.
+// Lets the AVOIDING message report a true distance for fence obstacles, which (unlike ADS-B
+// point obstacles) carry no single usable "location".  Returns true and sets distance_m if
+// any polygon/circle fence is loaded.
+//
+// The fence loader stores its points/centres as NE offsets in cm from the EKF origin; that cm
+// frame is confined to this function - everything handed back to the caller (Lua) is in metres.
+bool AP_OAScripting::fence_distance(const Location &loc, float &distance_m) const
+{
+#ifdef AP_FENCE_ENABLED
+    const AC_Fence *fence = AC_Fence::get_singleton();
+    if (fence == nullptr) {
+        return false;
+    }
+    Vector3f loc_NEU_m;
+    if (!loc.get_vector_from_origin_NEU_m(loc_NEU_m)) {
+        return false;
+    }
+    const Vector2f point_NE_cm(loc_NEU_m.x * 100.0f, loc_NEU_m.y * 100.0f);
+    const AC_PolyFence_loader &poly = fence->polyfence();
+
+    float closest_m = FLT_MAX;
+
+    // polygon fences (inclusion + exclusion): true geometric point-to-edge distance
+    Vector2f closest_vec_cm;
+    for (uint8_t i = 0; i < poly.get_exclusion_polygon_count(); i++) {
+        uint16_t num_points = 0;
+        const Vector2f *points = poly.get_exclusion_polygon(i, num_points);
+        if (points != nullptr && Polygon_closest_distance_point(points, num_points, point_NE_cm, closest_vec_cm)) {
+            closest_m = MIN(closest_m, closest_vec_cm.length() * 0.01f);
+        }
+    }
+    for (uint8_t i = 0; i < poly.get_inclusion_polygon_count(); i++) {
+        uint16_t num_points = 0;
+        const Vector2f *points = poly.get_inclusion_polygon(i, num_points);
+        if (points != nullptr && Polygon_closest_distance_point(points, num_points, point_NE_cm, closest_vec_cm)) {
+            closest_m = MIN(closest_m, closest_vec_cm.length() * 0.01f);
+        }
+    }
+
+    // circle fences (inclusion + exclusion): distance to the ring is |range-to-centre - radius|
+    Vector2f centre_cm;
+    float radius_m = 0.0f;
+    for (uint8_t i = 0; i < poly.get_exclusion_circle_count(); i++) {
+        if (poly.get_exclusion_circle(i, centre_cm, radius_m)) {
+            closest_m = MIN(closest_m, fabsf((point_NE_cm - centre_cm).length() * 0.01f - radius_m));
+        }
+    }
+    for (uint8_t i = 0; i < poly.get_inclusion_circle_count(); i++) {
+        if (poly.get_inclusion_circle(i, centre_cm, radius_m)) {
+            closest_m = MIN(closest_m, fabsf((point_NE_cm - centre_cm).length() * 0.01f - radius_m));
+        }
+    }
+
+    if (closest_m >= FLT_MAX) {
+        return false;
+    }
+    distance_m = closest_m;
+    return true;
+#else
+    (void)loc;
+    (void)distance_m;
+    return false;
+#endif
+}
+
 // Lua binding to be used in Object Detection to find the neareast fence, ADS-B object, or proximity obstacle
 //   the use of the word "obstacle" is intended to be generic, unfortunately one of the cases of ArduPilot is "Obstacles" stored in the AP_OAAvoidance library
 // Note that the distance is the distance to any margin around the obstacles. AP_OAAvoidance obstacles have this as do fences. So the distance can be negative if you are too close.

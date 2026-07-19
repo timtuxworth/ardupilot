@@ -4610,6 +4610,11 @@ function OAScripting:find_threats(start_loc, end_loc, lookahead_m) end
 ---@return OAObstacle_ud|nil aircraft -- the closest aircraft found
 function OAScripting:find_aircraft(vehicle_loc, lookahead_m) end
 
+-- closest distance to the nearest fence boundary edge (polygon or circle, inclusion or exclusion)
+---@param loc Location_ud -- Location to measure the distance from
+---@return number|nil distance_m -- distance in m to the nearest fence boundary edge, or nil if no polygon/circle fence is loaded
+function OAScripting:fence_distance(loc) end
+
 -- find the single obstacle closest to a line (start_loc, end_loc), returning its details
 ---@param start_loc Location_ud -- Location of the start of the line
 ---@param end_loc Location_ud -- Location of the end of the line to check
