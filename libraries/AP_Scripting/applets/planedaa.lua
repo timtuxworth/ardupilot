@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-035"
+SCRIPT_VERSION      = "4.8.0-036"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -1568,12 +1568,18 @@ local DAA = {
         local test_loc = current_loc:copy()
         test_loc:offset_bearing(bearing_orig_deg, avoid_step1_m)
         local distance_previous_m, _ = find_closest_obstacle(current_loc, test_loc, avoid_step1_m, wind_speed)
-        -- only switch sides if the new direction is significantly better (bendy_ratio times more clearance)
-        if distance_found_m < bendy_ratio * distance_previous_m then
-            -- new direction is not significantly better — stay the course
-            return bearing_orig_deg
+        -- Only switch sides if the new direction is significantly better: POSITIVE clearance
+        -- and bendy_ratio times clearer than continuing.  The positive-clearance requirement is
+        -- what makes this negative-aware: when hugging a boundary both clearances read near-zero
+        -- or negative and a plain ratio test flip-flops every cycle (the fence-skirt oscillation),
+        -- so we hold the committed escape direction through the hug.  It still switches away from
+        -- a committed side that is itself breaching (distance_previous_m < 0) towards a side that
+        -- actually clears (distance_found_m > 0), so containment is preserved.
+        if distance_found_m > 0 and distance_found_m >= bendy_ratio * distance_previous_m then
+            return bearing_deg
         end
-        return bearing_deg
+        -- new direction is not significantly better — stay the course
+        return bearing_orig_deg
     end
 
     --[[
