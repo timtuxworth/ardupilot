@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-036"
+SCRIPT_VERSION      = "4.8.0-037"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -2289,6 +2289,28 @@ local DAA = {
         return false
     end
 
+    -- Revert any in-progress avoidance and hand navigation back to the vehicle's real
+    -- target (the current waypoint / RTL-to-home).  Called from the main loop whenever
+    -- DAA is inactive (e.g. the pilot switched it off) while an avoidance target is still
+    -- commanded, so the vehicle does not keep flying to a now-stale avoidance waypoint.
+    -- Without this, disabling DAA mid-avoidance leaves the hijacked target in place and
+    -- the vehicle flies to it instead of home (e.g. RTL flying straight past home).
+    function DAA.clear_avoidance()
+        if daa_target_loc == nil then
+            return
+        end
+        -- set_avoid_location(nil) reverts to navigation_target_loc and, on success,
+        -- clears daa_target_loc so this only fires once.
+        set_avoid_location(nil)
+        if daa_target_loc == nil then
+            gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. ": avoidance cleared")
+            gcs:send_named_string("DAA-AVOID", "")
+            gcs:send_named_string("DAA-OBSTCL", "")
+            avoiding_label = ""
+            current_state = STATE.monitoring
+        end
+    end
+
     local function avoid_obstacle(new_target_loc, obstacle)
         if obstacle == nil then -- no obstacle, so clear any specific avoidance we might have been doing
             if current_state == STATE.loitering  and false then
@@ -2587,6 +2609,11 @@ local function update()
         if not trapped and vtol_state == MAV_VTOL_STATE.FW then
             DAA.avoid(suggested_target_loc)
         end
+    else
+        -- DAA is inactive (e.g. the pilot switched it off).  If it was mid-avoidance,
+        -- revert the commanded target so the vehicle resumes its real navigation
+        -- (e.g. RTL-to-home) instead of flying on to a stale avoidance waypoint.
+        DAA.clear_avoidance()
     end
 end
 
