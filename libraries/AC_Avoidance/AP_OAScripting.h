@@ -101,11 +101,14 @@ public:
                                     OAObstacle  &aircraft_obstacle
                             ) const;
 
-    // closest distance (metres) from a location to the nearest fence boundary edge — polygon or
-    // circle, inclusion or exclusion.  For Lua so the AVOIDING message can report a real distance
-    // to a fence obstacle (which, unlike ADS-B point obstacles, has no single usable "location").
-    // Returns true and sets distance_m if a polygon/circle fence is found, false otherwise.
-    bool fence_distance(const Location &loc, float &distance_m) const;
+    // closest distance (metres) from a location to the nearest fence boundary edge.  For Lua so
+    // the AVOIDING message can report a real distance to a fence obstacle (which, unlike ADS-B
+    // point obstacles, has no single usable "location").  fence_type scopes the search to the
+    // matching fence category (an AP_OAScripting::ObstacleType FENCE_* value) so the reported
+    // distance belongs to the same kind of fence the message names; pass 0 (GENERAL) or any
+    // non-fence value to search all polygon/circle fences.  Returns true and sets distance_m if a
+    // matching polygon/circle fence is found, false otherwise.
+    bool fence_distance(const Location &loc, uint8_t fence_type, float &distance_m) const;
     // This function fines the closed crude aircraft by checking the ADS-B database
     /*bool find_closest_aircraft(const Location &vehicle_loc, float lookahead_m,
                                             float &distance_m, 
