@@ -212,7 +212,7 @@ bool AP_OAScripting::find_aircraft(const Location &vehicle_loc, const float look
 //
 // The fence loader stores its points/centres as NE offsets in cm from the EKF origin; that cm
 // frame is confined to this function - everything handed back to the caller (Lua) is in metres.
-bool AP_OAScripting::fence_distance(const Location &loc, float &distance_m) const
+bool AP_OAScripting::fence_distance(const Location &loc, uint8_t fence_type, float &distance_m) const
 {
 #ifdef AP_FENCE_ENABLED
     const AC_Fence *fence = AC_Fence::get_singleton();
@@ -226,18 +226,32 @@ bool AP_OAScripting::fence_distance(const Location &loc, float &distance_m) cons
     const Vector2f point_NE_cm(loc_NEU_m.x * 100.0f, loc_NEU_m.y * 100.0f);
     const AC_PolyFence_loader &poly = fence->polyfence();
 
+    // scope the search to the fence category the caller is avoiding, so the returned distance
+    // belongs to the same kind of fence the AVOIDING message names (e.g. an "Excl. Circle" label
+    // no longer reports the distance to a nearer inclusion polygon).  Any non-fence-category value
+    // (0/GENERAL, FENCE_LUA, ...) falls back to searching every polygon/circle fence.
+    typedef AP_OAScripting::ObstacleType OT;
+    bool want_excl_poly = (fence_type == (uint8_t)OT::FENCE_POLYGON_EXCLUSION);
+    bool want_incl_poly = (fence_type == (uint8_t)OT::FENCE_POLYGON_INCLUSION);
+    bool want_excl_circ = (fence_type == (uint8_t)OT::FENCE_CIRCLE_EXCLUSION);
+    bool want_incl_circ = (fence_type == (uint8_t)OT::FENCE_CIRCLE_INCLUSION
+                           || fence_type == (uint8_t)OT::FENCE_HOME);
+    if (!(want_excl_poly || want_incl_poly || want_excl_circ || want_incl_circ)) {
+        want_excl_poly = want_incl_poly = want_excl_circ = want_incl_circ = true;
+    }
+
     float closest_m = FLT_MAX;
 
     // polygon fences (inclusion + exclusion): true geometric point-to-edge distance
     Vector2f closest_vec_cm;
-    for (uint8_t i = 0; i < poly.get_exclusion_polygon_count(); i++) {
+    for (uint8_t i = 0; want_excl_poly && i < poly.get_exclusion_polygon_count(); i++) {
         uint16_t num_points = 0;
         const Vector2f *points = poly.get_exclusion_polygon(i, num_points);
         if (points != nullptr && Polygon_closest_distance_point(points, num_points, point_NE_cm, closest_vec_cm)) {
             closest_m = MIN(closest_m, closest_vec_cm.length() * 0.01f);
         }
     }
-    for (uint8_t i = 0; i < poly.get_inclusion_polygon_count(); i++) {
+    for (uint8_t i = 0; want_incl_poly && i < poly.get_inclusion_polygon_count(); i++) {
         uint16_t num_points = 0;
         const Vector2f *points = poly.get_inclusion_polygon(i, num_points);
         if (points != nullptr && Polygon_closest_distance_point(points, num_points, point_NE_cm, closest_vec_cm)) {
@@ -248,12 +262,12 @@ bool AP_OAScripting::fence_distance(const Location &loc, float &distance_m) cons
     // circle fences (inclusion + exclusion): distance to the ring is |range-to-centre - radius|
     Vector2f centre_cm;
     float radius_m = 0.0f;
-    for (uint8_t i = 0; i < poly.get_exclusion_circle_count(); i++) {
+    for (uint8_t i = 0; want_excl_circ && i < poly.get_exclusion_circle_count(); i++) {
         if (poly.get_exclusion_circle(i, centre_cm, radius_m)) {
             closest_m = MIN(closest_m, fabsf((point_NE_cm - centre_cm).length() * 0.01f - radius_m));
         }
     }
-    for (uint8_t i = 0; i < poly.get_inclusion_circle_count(); i++) {
+    for (uint8_t i = 0; want_incl_circ && i < poly.get_inclusion_circle_count(); i++) {
         if (poly.get_inclusion_circle(i, centre_cm, radius_m)) {
             closest_m = MIN(closest_m, fabsf((point_NE_cm - centre_cm).length() * 0.01f - radius_m));
         }
@@ -266,6 +280,7 @@ bool AP_OAScripting::fence_distance(const Location &loc, float &distance_m) cons
     return true;
 #else
     (void)loc;
+    (void)fence_type;
     (void)distance_m;
     return false;
 #endif
