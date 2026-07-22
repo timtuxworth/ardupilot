@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-037"
+SCRIPT_VERSION      = "4.8.0-038"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -977,8 +977,9 @@ local function obstacle_report_distance(obstacle)
         or t == OBSTACLE_TYPE.FENCE_POLYGON_EXCLUSION
         or t == OBSTACLE_TYPE.FENCE_LUA then
         -- horizontal fences carry no single usable "location"; ask C++ for the real edge distance
-        -- (returns the distance in metres, or nil if no polygon/circle fence is loaded)
-        return OAScripting:fence_distance(current_loc)
+        -- to a fence of THIS type (so an "Excl. Circle" label reports the nearest exclusion
+        -- circle, not a nearer polygon).  Returns the distance in metres, or nil if none.
+        return OAScripting:fence_distance(current_loc, t)
     elseif t ~= OBSTACLE_TYPE.FENCE_ALT_MAX and t ~= OBSTACLE_TYPE.FENCE_ALT_MIN
             and obstacle.location ~= nil then
         -- point/traffic obstacle (aircraft/drone/bird/AIS/proximity): location is a real position
