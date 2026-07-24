@@ -531,28 +531,28 @@ ROLL_LIMIT_DEG              = bind_param("ROLL_LIMIT_DEG")
 WP_LOITER_RAD               = bind_param("WP_LOITER_RAD")
 
 local roll_limit_deg        = ROLL_LIMIT_DEG:get()
-local lookahead_param       = DAA_LKAHD:get()
-local margin_fence          = DAA_MARGIN_FENCE:get()
-local margin_alt            = DAA_MARGIN_ALT:get()
+local lookahead_param_m       = DAA_LKAHD:get()
+local margin_fence_m          = DAA_MARGIN_FENCE:get()
+local margin_alt_m            = DAA_MARGIN_ALT:get()
 local alt_hyst_m            = DAA_ALT_HYST_M:get()
 local alt_cool_ms           = DAA_ALT_COOL_S:get() * 1000
 local loiter_cool_ms        = DAA_LTR_COOL_S:get() * 1000
-local margin_aircraft       = DAA_MARGIN_GA:get()
-local margin_vertical       = DAA_MARGIN_GA_Z:get()
--- margin_bird/prey/weather are parked for planned obstacle types (see the
+local margin_aircraft_m       = DAA_MARGIN_GA:get()
+local margin_vertical_m       = DAA_MARGIN_GA_Z:get()
+-- margin_bird_m/prey/weather are parked for planned obstacle types (see the
 -- commented-out block in find_closest_obstacle); read but not yet consumed.
--- luacheck: ignore margin_bird margin_prey margin_weather
-local margin_bird           = DAA_MARGIN_BIRD:get()
-local margin_prey           = DAA_MARGIN_PREY:get()
-local margin_uav            = DAA_MARGIN_UAV:get()
-local margin_weather        = DAA_MARGIN_WTH:get()
-local margin_ais            = DAA_MARGIN_AIS:get()
-local margin_proximity      = DAA_MARGIN_PRX:get()
+-- luacheck: ignore margin_bird_m margin_prey_m margin_weather_m
+local margin_bird_m           = DAA_MARGIN_BIRD:get()
+local margin_prey_m           = DAA_MARGIN_PREY:get()
+local margin_uav_m            = DAA_MARGIN_UAV:get()
+local margin_weather_m        = DAA_MARGIN_WTH:get()
+local margin_ais_m            = DAA_MARGIN_AIS:get()
+local margin_proximity_m      = DAA_MARGIN_PRX:get()
 local refresh_rate          = 1000.0 / DAA_UPDATE_RATE:get()
 local bendy_ratio           = DAA_BR_RATIO:get()
 local bendy_angle           = DAA_BR_ANGLE:get()
-local wp_loiter_rad         = WP_LOITER_RAD:get()
-local ga_avoid_alt          = DAA_AVD_ALT:get()
+local wp_loiter_rad_m         = WP_LOITER_RAD:get()
+local ga_avoid_alt_m          = DAA_AVD_ALT:get()
 local ga_avoid_alt_frame    = DAA_AVD_ALT_TP:get()
 local daa_alert             = DAA_AVD_ALERT:get()
 local daa_action            = DAA_AVD_ACTION:get()
@@ -682,25 +682,25 @@ local function get_vehicle_state()
     if (now_ms - now_params_ms) > 5000 then
         --warn_act = WARN_ACTION:get()
         roll_limit_deg      = ROLL_LIMIT_DEG:get()
-        lookahead_param     = DAA_LKAHD:get()
-        margin_fence        = DAA_MARGIN_FENCE:get()
-        margin_alt          = DAA_MARGIN_ALT:get()
+        lookahead_param_m     = DAA_LKAHD:get()
+        margin_fence_m        = DAA_MARGIN_FENCE:get()
+        margin_alt_m          = DAA_MARGIN_ALT:get()
         alt_hyst_m          = DAA_ALT_HYST_M:get()
         alt_cool_ms         = DAA_ALT_COOL_S:get() * 1000
         loiter_cool_ms      = DAA_LTR_COOL_S:get() * 1000
-        margin_aircraft     = DAA_MARGIN_GA:get()
-        margin_vertical     = DAA_MARGIN_GA_Z:get()
-        margin_bird         = DAA_MARGIN_BIRD:get()
-        margin_prey         = DAA_MARGIN_PREY:get()
-        margin_uav          = DAA_MARGIN_UAV:get()
-        margin_weather      = DAA_MARGIN_WTH:get()
-        margin_ais          = DAA_MARGIN_AIS:get()
-        margin_proximity    = DAA_MARGIN_PRX:get()
+        margin_aircraft_m     = DAA_MARGIN_GA:get()
+        margin_vertical_m     = DAA_MARGIN_GA_Z:get()
+        margin_bird_m         = DAA_MARGIN_BIRD:get()
+        margin_prey_m         = DAA_MARGIN_PREY:get()
+        margin_uav_m          = DAA_MARGIN_UAV:get()
+        margin_weather_m      = DAA_MARGIN_WTH:get()
+        margin_ais_m          = DAA_MARGIN_AIS:get()
+        margin_proximity_m    = DAA_MARGIN_PRX:get()
         refresh_rate        = 1000.0 / DAA_UPDATE_RATE:get()
         bendy_ratio         = DAA_BR_RATIO:get()
         bendy_angle         = DAA_BR_ANGLE:get()
-        wp_loiter_rad       = WP_LOITER_RAD:get()
-        ga_avoid_alt        = DAA_AVD_ALT:get()
+        wp_loiter_rad_m       = WP_LOITER_RAD:get()
+        ga_avoid_alt_m        = DAA_AVD_ALT:get()
         ga_avoid_alt_frame  = DAA_AVD_ALT_TP:get()
         daa_alert           = DAA_AVD_ALERT:get()
         daa_action          = DAA_AVD_ACTION:get()
@@ -1050,28 +1050,28 @@ local function find_closest_obstacle(loc1, loc2, lookahead_m, wind_ms)
     --[[
     These are currently handled inside find_threats, it would be better if they could be parameterized
     if obstacle_type_val == OBSTACLE_TYPE.GENERAL_AVIATION then
-        obstacle_margin = margin_aircraft
+        obstacle_margin = margin_aircraft_m
     elseif obstacle_type_val == OBSTACLE_TYPE.MAV_SYSID then
-        obstacle_margin = margin_uav
+        obstacle_margin = margin_uav_m
     elseif obstacle_type_val == OBSTACLE_TYPE.BIRD_MIGRATORY then
-        obstacle_margin = margin_bird
+        obstacle_margin = margin_bird_m
     elseif obstacle_type_val == OBSTACLE_TYPE.BIRD_OF_PREY then
-        obstacle_margin = margin_prey
+        obstacle_margin = margin_prey_m
     elseif obstacle_type_val == OBSTACLE_TYPE.WEATHER then
-        obstacle_margin = margin_weather
+        obstacle_margin = margin_weather_m
     else
     --]]
     if obstacle_type_val == OBSTACLE_TYPE.GENERAL_AVIATION then
-        obstacle_margin = well_clear_xy + margin_aircraft
+        obstacle_margin = well_clear_xy + margin_aircraft_m
     elseif obstacle_type_val == OBSTACLE_TYPE.MAV_SYSID then
         -- drone/UAV (ADSB emitter 14): mirrors the GA line but with the UAV horizontal
         -- reference (AVD_UAV_XY) instead of the aircraft "well clear" (AVD_WCLR_XY), and
         -- no aircraft loiter-to-alt; bendy ruler handles it via obstacle_avoiding
-        obstacle_margin = uav_clear_xy + margin_uav
+        obstacle_margin = uav_clear_xy + margin_uav_m
     elseif obstacle_type_val == OBSTACLE_TYPE.AIS then
-        obstacle_margin = well_clear_xy + margin_ais
+        obstacle_margin = well_clear_xy + margin_ais_m
     elseif obstacle_type_val == OBSTACLE_TYPE.PROXIMITY then
-        obstacle_margin = margin_proximity
+        obstacle_margin = margin_proximity_m
     elseif obstacle_type_val == OBSTACLE_TYPE.FENCE_CIRCLE_EXCLUSION
         or obstacle_type_val == OBSTACLE_TYPE.FENCE_CIRCLE_INCLUSION
         or obstacle_type_val == OBSTACLE_TYPE.FENCE_POLYGON_INCLUSION
@@ -1079,7 +1079,7 @@ local function find_closest_obstacle(loc1, loc2, lookahead_m, wind_ms)
         or obstacle_type_val == OBSTACLE_TYPE.FENCE_HOME
         or obstacle_type_val == OBSTACLE_TYPE.FENCE_LUA
         then
-        obstacle_margin = margin_fence
+        obstacle_margin = margin_fence_m
         -- widen the standoff in wind so the controller has buffer to absorb cross-track
         -- drift and is less likely to be blown across the fence (DAA_WIND_MARG = 0 disables)
         if wind_ms ~= nil and wind_ms > wind_min_ms then
@@ -1186,7 +1186,7 @@ local loiteralt = {
 
         -- use the configured loiter radius (a groundspeed-based "standard turn"
         -- radius, (60.0 * speed) / math.pi, was tried previously but not used)
-        local radius_m = wp_loiter_rad
+        local radius_m = wp_loiter_rad_m
         local loiteralt_loc = current_loc:copy()
         if direction_right then
             direction = "right"
@@ -1319,7 +1319,7 @@ local DAA = {
     local daa_target_loc = nil                                  -- this is where the DAA is currently trying to go in order to avoid obstacles (nil if not avoiding)
 
     -- the distance we look ahead is adjusted dynamically based on avoidance results
-    local current_lookahead = lookahead_param
+    local current_lookahead = lookahead_param_m
 
     local function calculate_windspeed()
                 -- Get wind estimate and convert to 2D
@@ -1460,7 +1460,7 @@ local DAA = {
     -- flag disabled features. Advisory only (GCS text, nothing is changed). Fires on every
     -- enable (incl. switch flips). Messages are kept short (STATUSTEXT truncates ~50 chars).
     function DAA.warnings()
-        local turn_r = math.abs(wp_loiter_rad)
+        local turn_r = math.abs(wp_loiter_rad_m)
         local function warn(sev, msg)
             gcs:send_text(sev, SCRIPT_NAME_SHORT .. ": " .. msg)
         end
@@ -1473,8 +1473,8 @@ local DAA = {
         local cruise_ms   = param:get('AIRSPEED_CRUISE') or 0
 
         -- turn radius vs avoidance standoffs (WP_LOITER_RAD is the turn radius)
-        if turn_r > 0 and margin_fence < turn_r then
-            warn(W, string.format("MARGIN_FENCE %.0f < turn %.0f: fences may thrash", margin_fence, turn_r)) end
+        if turn_r > 0 and margin_fence_m < turn_r then
+            warn(W, string.format("MARGIN_FENCE %.0f < turn %.0f: fences may thrash", margin_fence_m, turn_r)) end
         if turn_r > 0 and uav_clear_xy < turn_r then
             warn(W, string.format("AVD_UAV_XY %.0f < turn %.0f: tight drone avoid", uav_clear_xy, turn_r)) end
         -- margin ordering: the aircraft near-miss (NMAC) must sit inside the aircraft
@@ -1485,8 +1485,8 @@ local DAA = {
         if near_miss_z >= well_clear_z then
             warn(W, "NMAC_Z >= WCLR_Z: vert nearmiss>wellclr") end
         -- lookahead must give room to react
-        if turn_r > 0 and lookahead_param < 3 * turn_r then
-            warn(W, string.format("LKAHD %.0f < 3x turn %.0f: reacts late", lookahead_param, turn_r)) end
+        if turn_r > 0 and lookahead_param_m < 3 * turn_r then
+            warn(W, string.format("LKAHD %.0f < 3x turn %.0f: reacts late", lookahead_param_m, turn_r)) end
         if bendy_ratio > 1.8 then
             warn(W, string.format("BR_RATIO %.1f > 1.8: fence-follow unstable", bendy_ratio)) end
         -- trapped-failsafe consistency
@@ -1583,7 +1583,7 @@ local DAA = {
 
     local function calc_avoidance_distance(avoid_step1_m, target_distance)
         -- test for flying past the waypoint, so if we are close, we have room to dodge after the waypoint
-        return math.min(avoid_step1_m, target_distance + math.min(margin_fence / 2, 100))
+        return math.min(avoid_step1_m, target_distance + math.min(margin_fence_m / 2, 100))
     end
 
     --[[
@@ -1887,7 +1887,7 @@ local DAA = {
         local distance_to_target_m = from_loc:get_distance(to_loc)
 
         if (math.abs(wrap_180(bearing_deg - ground_course_deg)) > bendy_angle * 2) then
-            distance_to_target_m = wp_loiter_rad * 3
+            distance_to_target_m = wp_loiter_rad_m * 3
         end
 
         return distance_to_target_m
@@ -1908,7 +1908,7 @@ local DAA = {
         local enabled = fence:get_enabled_fences()
         if (enabled & FENCE_TYPE_ALT_MAX) ~= 0 then
             local safe_max, frame_max = fence:get_safe_alt_max()
-            local ceiling = safe_max - margin_alt
+            local ceiling = safe_max - margin_alt_m
             local cur = loc:get_alt_m(frame_max)
             if cur ~= nil and cur > ceiling then
                 loc:set_alt_m(ceiling, frame_max)
@@ -1916,7 +1916,7 @@ local DAA = {
         end
         if (enabled & FENCE_TYPE_ALT_MIN) ~= 0 then
             local safe_min, frame_min = fence:get_safe_alt_min()
-            local floor_alt = safe_min + margin_alt
+            local floor_alt = safe_min + margin_alt_m
             local cur = loc:get_alt_m(frame_min)
             if cur ~= nil and cur < floor_alt then
                 loc:set_alt_m(floor_alt, frame_min)
@@ -1976,7 +1976,7 @@ local DAA = {
             climb_rate_ms = -vel_ned:z()
         end
         -- project over the time to fly the lookahead distance, capped to a sensible vertical horizon
-        local horizon_s = lookahead_param / math.max(groundspeed_ms, 1.0)
+        local horizon_s = lookahead_param_m / math.max(groundspeed_ms, 1.0)
         horizon_s = math.min(math.max(horizon_s, 1.0), 20.0)
 
         -- pick whichever enabled altitude fence currently needs (or is already taking) action.
@@ -1987,7 +1987,7 @@ local DAA = {
             local safe_max, frame_max = fence:get_safe_alt_max()
             local cur = current_loc:get_alt_m(frame_max)
             if cur ~= nil then
-                local ceiling = safe_max - margin_alt
+                local ceiling = safe_max - margin_alt_m
                 local projected = cur + climb_rate_ms * horizon_s
                 local enter = cur > ceiling or projected > ceiling
                 local clear = cur < ceiling - alt_hyst_m and projected < ceiling - alt_hyst_m
@@ -2001,7 +2001,7 @@ local DAA = {
             local safe_min, frame_min = fence:get_safe_alt_min()
             local cur = current_loc:get_alt_m(frame_min)
             if cur ~= nil then
-                local floor_alt = safe_min + margin_alt
+                local floor_alt = safe_min + margin_alt_m
                 local projected = cur + climb_rate_ms * horizon_s
                 local enter = cur < floor_alt or projected < floor_alt
                 local clear = cur > floor_alt + alt_hyst_m and projected > floor_alt + alt_hyst_m
@@ -2019,13 +2019,13 @@ local DAA = {
         -- trigger drop-outs during a long climb/descent into a single notice; the steady clamp is silent.
         -- The reported distance is the steady-state clearance the plane settles at (DAA_MARGIN_ALT),
         -- not the trigger headroom.
-        local near = now_active and headroom_m ~= nil and headroom_m <= (margin_alt + alt_hyst_m)
+        local near = now_active and headroom_m ~= nil and headroom_m <= (margin_alt_m + alt_hyst_m)
         if near and not alt_fence_near and (now_ms - last_alt_alert_ms) > alt_cool_ms then
             gcs:send_named_string("DAA-ALERT", "alt-fence")
             gcs:send_named_string("DAA-OBSTCL", label_str)
             gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. string.format(" levelling off %.0fm from %s",
-                                margin_alt, label_str))
-            gcs:send_named_float("DAA-DISTZ", margin_alt)
+                                margin_alt_m, label_str))
+            gcs:send_named_float("DAA-DISTZ", margin_alt_m)
             last_alt_alert_ms = now_ms
         end
 
@@ -2061,9 +2061,9 @@ local DAA = {
         -- treatment in the bendy ruler path, so aircraft are detected and logged at a
         -- useful range rather than only once they are within DAA_MARGIN_GA of us
         -- pass the full gate distance for each axis (computed here, applied in C++): the
-        -- horizontal gate is well_clear_xy + margin_aircraft, the vertical gate is
-        -- well_clear_z + margin_vertical
-        local distance_m, aircraft_obstacle = OAScripting:find_aircraft(current_loc, well_clear_xy + margin_aircraft, well_clear_z + margin_vertical)
+        -- horizontal gate is well_clear_xy + margin_aircraft_m, the vertical gate is
+        -- well_clear_z + margin_vertical_m
+        local distance_m, aircraft_obstacle = OAScripting:find_aircraft(current_loc, well_clear_xy + margin_aircraft_m, well_clear_z + margin_vertical_m)
 
         if distance_m == nil then
             aircraft_avoiding = nil
@@ -2221,7 +2221,7 @@ local DAA = {
             -- detect_altitude_fence(); don't also raise the generic obstacle ALERT
             return
         end
-        if obstacle_avoiding == nil or alert_target_loc == nil  or obstacle_avoiding.distance_xy > lookahead_param then
+        if obstacle_avoiding == nil or alert_target_loc == nil  or obstacle_avoiding.distance_xy > lookahead_param_m then
             previous_label = ""
             return
         end
@@ -2398,14 +2398,14 @@ local DAA = {
                 return
             end
 
-            loiteralt.start(ga_avoid_alt, ga_avoid_alt_frame, true, airspeed_ms)
+            loiteralt.start(ga_avoid_alt_m, ga_avoid_alt_frame, true, airspeed_ms)
             current_state = STATE.loitering
 
             gcs:send_named_string("DAA-AVOID", "loiter")
             if aircraft_avoiding ~= nil then
                 gcs:send_named_string("DAA-ARCRFT", aircraft_avoiding.label)
             end
-            gcs:send_named_float("DAA-LOITER", ga_avoid_alt)
+            gcs:send_named_float("DAA-LOITER", ga_avoid_alt_m)
 
             return
         end
@@ -2445,13 +2445,13 @@ local DAA = {
             return
         end
         -- Release the loiter only when the aircraft is no longer detected at all. The
-        -- "gone" distance must match the DETECTION distance (well_clear_xy + margin_aircraft),
-        -- NOT the bare margin_aircraft: a plane sitting steadily inside the detection volume
+        -- "gone" distance must match the DETECTION distance (well_clear_xy + margin_aircraft_m),
+        -- NOT the bare margin_aircraft_m: a plane sitting steadily inside the detection volume
         -- (e.g. 200 m out, well within ~660 m but far beyond 50 m) would otherwise satisfy
         -- both "still detected" (start) and "far enough to stop" (stop) every cycle and flip
         -- GUIDED<->AUTO. Hysteresis is provided by the 10 s aircraft_seen() dwell in
         -- loiteralt.stop(false), so a plane at the boundary cannot thrash the mode.
-        if aircraft_avoiding == nil or (current_loc:get_distance(aircraft_avoiding.location) > (well_clear_xy + margin_aircraft)) then
+        if aircraft_avoiding == nil or (current_loc:get_distance(aircraft_avoiding.location) > (well_clear_xy + margin_aircraft_m)) then
             if loiteralt.stop(false) then
                 -- gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": loiteralt.stop NO aircraft" ))
                 current_state = STATE.monitoring
@@ -2461,7 +2461,7 @@ local DAA = {
         if aircraft_avoiding ~= nil then
             loiteralt.aircraft_seen()
             if (now_ms - now_loitering_ms) > 5000 then
-                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITERING to %.0f m for AIRCRAFT: %s", ga_avoid_alt, aircraft_avoiding.label))
+                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITERING to %.0f m for AIRCRAFT: %s", ga_avoid_alt_m, aircraft_avoiding.label))
                 now_loitering_ms = now_ms
             end
         end
@@ -2486,11 +2486,11 @@ local DAA = {
             -- do nothing for now
         elseif aircraft_avoiding ~= nil then
             gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITER AIRCRAFT: %s", aircraft_avoiding.label))
-            loiteralt.start(ga_avoid_alt, ga_avoid_alt_frame, true, airspeed_ms)
+            loiteralt.start(ga_avoid_alt_m, ga_avoid_alt_frame, true, airspeed_ms)
             current_state = STATE.loitering
 
             gcs:send_named_string("DAA-AVOID", "LOITER")
-            gcs:send_named_float("DAA-LOITER", ga_avoid_alt)
+            gcs:send_named_float("DAA-LOITER", ga_avoid_alt_m)
             gcs:send_named_string("DAA-ARCRFT", aircraft_avoiding.label)
             gcs:send_named_float("DAA-DIST", aircraft_avoiding.distance_m)
 
@@ -2516,11 +2516,11 @@ local DAA = {
             -- do nothing for now
         elseif aircraft_avoiding ~= nil then
             gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITER AIRCRAFT: %s", aircraft_avoiding.label))
-            loiteralt.start(ga_avoid_alt, ga_avoid_alt_frame, true, airspeed_ms)
+            loiteralt.start(ga_avoid_alt_m, ga_avoid_alt_frame, true, airspeed_ms)
             current_state = STATE.loitering
 
             gcs:send_named_string("DAA-AVOID", "LOITER")
-            gcs:send_named_float("DAA-LOITER", ga_avoid_alt)
+            gcs:send_named_float("DAA-LOITER", ga_avoid_alt_m)
             gcs:send_named_string("DAA-ARCRFT", aircraft_avoiding.label)
             gcs:send_named_float("DAA-DIST", aircraft_avoiding.distance_m)
 
