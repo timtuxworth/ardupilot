@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-038"
+SCRIPT_VERSION      = "4.8.0-039"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -150,7 +150,7 @@ function bind_add_param(name, idx, default_value)
 end
 
 -- setup follow mode specific parameters
-assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 36), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
+assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 37), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
 
 --[[
     // @Param: DAA_ACT_FN
@@ -489,6 +489,16 @@ DAA_TRAP_CLR_S = bind_add_param('TRAP_CLR_S', 35, 4)
 --]]
 DAA_TRAP_RTL_ACT = bind_add_param('TRAP_RTL_ACT', 36, 2)
 
+--[[
+    // @Param: DAA_STALE_S
+    // @DisplayName: Traffic-feed staleness warning threshold
+    // @Description: When avoiding a network-sourced moving obstacle (ADS-B drone/aircraft) whose position has not been updated for longer than this, a "traffic stale" warning is sent to the GCS - the DAA is acting on lagged data, e.g. from an intermittent telemetry/ADS-B link. A "lost" warning is sent if such an obstacle then disappears (pruned). Fences are on-board and never go stale. Set to 0 to disable the warnings.
+    // @Units: s
+    // @Range: 0 30
+    // @User: Standard
+--]]
+DAA_STALE_S = bind_add_param('STALE_S', 37, 3)
+
 WARN_DIST_XY                = bind_param("AVD_W_DIST_XY")
 WARN_ACTION                 = bind_param("AVD_W_ACTION")
 AVD_ENABLE                  = bind_param("AVD_ENABLE")
@@ -539,6 +549,7 @@ local trap_act              = DAA_TRAP_ACT:get()
 local trap_s                = DAA_TRAP_S:get()
 local trap_clr_s            = DAA_TRAP_CLR_S:get()
 local trap_rtl_act          = DAA_TRAP_RTL_ACT:get()
+local stale_s               = DAA_STALE_S:get()
 
 GRAVITY_MSS = 9.80665
 LOCATION_SCALING_FACTOR_INV = 89.83204953368922
@@ -690,6 +701,7 @@ local function get_vehicle_state()
         trap_s               = DAA_TRAP_S:get()
         trap_clr_s           = DAA_TRAP_CLR_S:get()
         trap_rtl_act         = DAA_TRAP_RTL_ACT:get()
+        stale_s              = DAA_STALE_S:get()
 
         now_params_ms       = now_ms
     end
@@ -939,6 +951,7 @@ local function populate_obstacle(distance_m, any_obstacle)
     obstacle.sysid        = any_obstacle:src_id()
     obstacle.icao_code    = any_obstacle:icao_code()
     obstacle.type         = any_obstacle:obstacle_type()
+    obstacle.timestamp_ms = any_obstacle:timestamp_ms()    -- last update time (millis); stale = laggy feed
     obstacle.label        = pretty_label(any_obstacle)
     obstacle.location     = any_obstacle:location()
     obstacle.pos_NED_m    = any_obstacle:position_NED_m()
@@ -1260,6 +1273,11 @@ local DAA = {
     local trap_fs_mode      = -1            -- the failsafe mode we commanded
     local previous_label    = ""
     local avoiding_label    = ""
+    -- laggy/dropped traffic-feed watchdog (network-fed moving obstacles carry an update
+    -- timestamp; a fence's is always fresh).  Threshold is DAA_STALE_S (0 disables).
+    local feed_watch_label  = ""            -- label of the moving obstacle we are tracking ("" = none)
+    local feed_is_stale     = false         -- its last-seen update was stale
+    local feed_stale_warn_ms = uint32_t(0)  -- throttle for the "traffic stale" GCS text
     -- luacheck: ignore previous_aircraft
     local previous_aircraft = ""
     local STATE             = {monitoring = 1, avoiding = 2, loitering = 3, loitering_avoiding = 4, hovering = 5, landing  = 6}
@@ -1357,10 +1375,10 @@ local DAA = {
         end
         local status, err = pcall(logger.write, logger, "DAAV",
         --logger:write('DAAV',                        -- V for aVoid
-            'DstO,TLat,TLng,TAlt,TFra,DstH,DstZ,ObjT',
-            'fLLfBffB',                             -- Formats (L for Lat/Lng, f for Alt)
-            'mDUm-mm-',                             -- Units (D=lat deg, U=lng deg, m=meter)
-            '-GG-----',                             -- Multipliers (G=1e-7 for L types)
+            'DstO,TLat,TLng,TAlt,TFra,DstH,DstZ,ObjT,Age',
+            'fLLfBffBf',                            -- Formats (L for Lat/Lng, f for Alt)
+            'mDUm-mm-s',                            -- Units (D=lat deg, U=lng deg, m=meter, s=second)
+            '-GG------',                            -- Multipliers (G=1e-7 for L types)
             obstacle.distance_m,                    -- DstO - Distance to found obstacle in meters
             target_loc:lat(),                       -- TLat - Latitude of DAA target in degrees
             target_loc:lng(),                       -- TLng - Longitude of DAA target in degrees
@@ -1368,7 +1386,8 @@ local DAA = {
             target_loc:get_alt_frame(),    -- TFrm - Frame of the ALtitlde: 0: AMSL, 1: Home Relative, 3: Terrain Relative
             obstacle.distance_xy,                   -- DstH - Horizontal distance to the obstacle
             obstacle.distance_z,                    -- DstZ - Vertical distance to the aircraft (+ve is up),
-            obstacle.type                           -- ObjT - the type of the obstacle as an OBSTACLE_TYPE
+            obstacle.type,                          -- ObjT - the type of the obstacle as an OBSTACLE_TYPE
+            obstacle.timestamp_ms and ((now_ms:tofloat() - obstacle.timestamp_ms) * 0.001) or 0  -- Age - obstacle position age in s (0 = fresh/on-board)
         )
         if not status then
             gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " log avoid:" .. tostring(err) )
@@ -2471,6 +2490,35 @@ local DAA = {
         return not is_fence
     end
 
+    -- Watchdog for a laggy/dropped traffic feed.  A network-sourced moving obstacle (ADS-B
+    -- drone/aircraft) carries an update timestamp; if we are avoiding one whose position has
+    -- gone stale (> DAA_STALE_S) we warn the pilot that the DAA is acting on old data, and warn
+    -- again if it then disappears (feed dropped / pruned).  Fences are on-board and never stale.
+    function DAA.feed_watch()
+        if stale_s <= 0 then return end
+        local mv = aircraft_avoiding
+        if mv == nil and obstacle_avoiding ~= nil and obstacle_is_dynamic(obstacle_avoiding.type) then
+            mv = obstacle_avoiding
+        end
+        if mv ~= nil and mv.timestamp_ms ~= nil then
+            local age_s = (now_ms:tofloat() - mv.timestamp_ms) / 1000.0
+            feed_is_stale = age_s > stale_s
+            if feed_is_stale and (now_ms - feed_stale_warn_ms) > 3000 then
+                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(": traffic stale %.0fs", age_s))
+                feed_stale_warn_ms = now_ms
+            end
+            feed_watch_label = mv.label
+        else
+            -- the monitored moving obstacle is gone: if it was stale when last seen, the feed
+            -- dropped it (pruned) rather than the plane clearing it
+            if feed_watch_label ~= "" and feed_is_stale then
+                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. ": lost " .. feed_watch_label)
+            end
+            feed_watch_label = ""
+            feed_is_stale = false
+        end
+    end
+
     -- map DAA_TRAP_ACT to a flight mode; VTOL modes fall back to RTL if there is no VTOL
     local function trap_act_to_mode(act)
         local have_vtol = (param:get('Q_ENABLE') or 0) > 0
@@ -2604,6 +2652,7 @@ local function update()
     if DAA.isactive() then
         local suggested_target_loc = DAA.detect()
         DAA.alert(suggested_target_loc)
+        DAA.feed_watch()
         -- when avoidance can't find a way out, the trapped-failsafe takes over (and we
         -- stop issuing avoidance); otherwise avoid, but only in FW forward flight
         local trapped = DAA.trap_update()
