@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-039"
+SCRIPT_VERSION      = "4.8.0-040"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -150,7 +150,7 @@ function bind_add_param(name, idx, default_value)
 end
 
 -- setup follow mode specific parameters
-assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 37), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
+assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 38), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
 
 --[[
     // @Param: DAA_ACT_FN
@@ -499,6 +499,16 @@ DAA_TRAP_RTL_ACT = bind_add_param('TRAP_RTL_ACT', 36, 2)
 --]]
 DAA_STALE_S = bind_add_param('STALE_S', 37, 3)
 
+--[[
+    // @Param: DAA_MARGIN_GA_Z
+    // @DisplayName: Vertical margin for General Aviation
+    // @Description: Vertical avoidance margin for Fixed Wing aircraft/General Aviation, over and above the Well Clear vertical separation AVD_WCLR_Z. An aircraft is detected (and the loiter-to-altitude triggered) only while the altitude difference between it and the vehicle is less than AVD_WCLR_Z + this margin. This is the vertical mirror of the horizontal DAA_MARGIN_GA.
+    // @Units: m
+    // @Range: 0 200
+    // @User: Standard
+--]]
+DAA_MARGIN_GA_Z = bind_add_param('MARGIN_GA_Z', 38, 30)
+
 WARN_DIST_XY                = bind_param("AVD_W_DIST_XY")
 WARN_ACTION                 = bind_param("AVD_W_ACTION")
 AVD_ENABLE                  = bind_param("AVD_ENABLE")
@@ -517,6 +527,7 @@ local margin_alt            = DAA_MARGIN_ALT:get()
 local alt_hyst_m            = DAA_ALT_HYST_M:get()
 local alt_cool_ms           = DAA_ALT_COOL_S:get() * 1000
 local margin_aircraft       = DAA_MARGIN_GA:get()
+local margin_vertical       = DAA_MARGIN_GA_Z:get()
 -- margin_bird/prey/weather are parked for planned obstacle types (see the
 -- commented-out block in find_closest_obstacle); read but not yet consumed.
 -- luacheck: ignore margin_bird margin_prey margin_weather
@@ -666,6 +677,7 @@ local function get_vehicle_state()
         alt_hyst_m          = DAA_ALT_HYST_M:get()
         alt_cool_ms         = DAA_ALT_COOL_S:get() * 1000
         margin_aircraft     = DAA_MARGIN_GA:get()
+        margin_vertical     = DAA_MARGIN_GA_Z:get()
         margin_bird         = DAA_MARGIN_BIRD:get()
         margin_prey         = DAA_MARGIN_PREY:get()
         margin_uav          = DAA_MARGIN_UAV:get()
@@ -2031,7 +2043,10 @@ local DAA = {
         -- search out to the well clear distance (plus the GA margin), matching the GA
         -- treatment in the bendy ruler path, so aircraft are detected and logged at a
         -- useful range rather than only once they are within DAA_MARGIN_GA of us
-        local distance_m, aircraft_obstacle = OAScripting:find_aircraft(current_loc, well_clear_xy + margin_aircraft)
+        -- pass the full gate distance for each axis (computed here, applied in C++): the
+        -- horizontal gate is well_clear_xy + margin_aircraft, the vertical gate is
+        -- well_clear_z + margin_vertical
+        local distance_m, aircraft_obstacle = OAScripting:find_aircraft(current_loc, well_clear_xy + margin_aircraft, well_clear_z + margin_vertical)
 
         if distance_m == nil then
             aircraft_avoiding = nil
@@ -2397,7 +2412,14 @@ local DAA = {
             -- no current position to measure against, keep loitering until we have one
             return
         end
-        if aircraft_avoiding == nil or (current_loc:get_distance(aircraft_avoiding.location) > margin_aircraft) then
+        -- Release the loiter only when the aircraft is no longer detected at all. The
+        -- "gone" distance must match the DETECTION distance (well_clear_xy + margin_aircraft),
+        -- NOT the bare margin_aircraft: a plane sitting steadily inside the detection volume
+        -- (e.g. 200 m out, well within ~660 m but far beyond 50 m) would otherwise satisfy
+        -- both "still detected" (start) and "far enough to stop" (stop) every cycle and flip
+        -- GUIDED<->AUTO. Hysteresis is provided by the 10 s aircraft_seen() dwell in
+        -- loiteralt.stop(false), so a plane at the boundary cannot thrash the mode.
+        if aircraft_avoiding == nil or (current_loc:get_distance(aircraft_avoiding.location) > (well_clear_xy + margin_aircraft)) then
             if loiteralt.stop(false) then
                 -- gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": loiteralt.stop NO aircraft" ))
                 current_state = STATE.monitoring
