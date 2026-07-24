@@ -894,7 +894,7 @@ float AP_Avoidance::distance_to_obstacle(const Vector3f &start_NED_m, const Vect
 }
 
 // For AP_AOScripting to check for crude aircraft and return the closest one
-float AP_Avoidance::distance_to_aircraft(const Vector3f &vehicle_NED_m, const float lookahead_m,
+float AP_Avoidance::distance_to_aircraft(const Vector3f &vehicle_NED_m, const float lookahead_m, const float vertical_lookahead_m,
                                             // return values
                                             Obstacle &avoid_obstacle
                                         ) const
@@ -927,8 +927,11 @@ float AP_Avoidance::distance_to_aircraft(const Vector3f &vehicle_NED_m, const fl
             // height difference is the difference in the height between the vehicle and the obstacle
             float height_difference_m = fabsf(vehicle_NED_m.z - obstacle_NED_m.z);
 
-            // this finds the nearest aircraft iff it is within the height limits for 
-            if (distance_msq < distance_new_msq && height_difference_m < get_obstacle_height_m(obstacle.emitter_type)) {
+            // this finds the nearest aircraft iff it is within the caller-supplied vertical
+            // gate (metres). The caller passes the full vertical separation (e.g. AVD_WCLR_Z +
+            // margin from the scripting layer), mirroring the full horizontal lookahead, so the
+            // gate policy lives with the caller rather than the per-emitter get_obstacle_height_m() table.
+            if (distance_msq < distance_new_msq && height_difference_m < vertical_lookahead_m) {
                 distance_new_msq    = distance_msq;
                 avoid_obstacle      = obstacle;
             }
