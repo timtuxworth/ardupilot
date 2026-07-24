@@ -1221,7 +1221,7 @@ userdata OAObstacle field margin_m float read
 singleton AP_OAScripting rename OAScripting
 singleton AP_OAScripting depends AP_OA_SCRIPTING_ENABLED
 singleton AP_OAScripting method find_threats boolean Location Location float'skip_check float'Null OAObstacle'Null OAObstacle'Null OAObstacle'Null OAObstacle'Null
-singleton AP_OAScripting method find_aircraft boolean Location float'skip_check float'Null OAObstacle'Null
+singleton AP_OAScripting method find_aircraft boolean Location float'skip_check float'skip_check float'Null OAObstacle'Null
 singleton AP_OAScripting method fence_distance boolean Location uint8_t 0 255 float'Null
 singleton AP_OAScripting method find_closest_obstacle boolean Location Location float'skip_check float'Null uint16_t'Null string'Null uint32_t'Null Location'Null Vector3f'Null Vector3f'Null
 -- singleton AP_OAScripting method find_closest_aircraft boolean Location float'skip_check float'Null uint16_t'Null string'Null uint32_t'Null Location'Null Vector3f'Null Vector3f'Null

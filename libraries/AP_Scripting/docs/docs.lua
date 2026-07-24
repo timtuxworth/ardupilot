@@ -4605,10 +4605,11 @@ function OAScripting:find_threats(start_loc, end_loc, lookahead_m) end
 
 -- find the aircraft closest to a Location
 ---@param vehicle_loc Location_ud -- Location to search for aircraft
----@param lookahead_m number -- the furthest distance out from vehicle_loc to check
+---@param lookahead_m number -- the furthest horizontal distance out from vehicle_loc to check
+---@param vertical_lookahead_m number -- the largest altitude difference (m) to accept, i.e. the full vertical gate (e.g. AVD_WCLR_Z + margin)
 ---@return number|nil distance_min_m -- distance to the closest aircraft found, or nil if none
 ---@return OAObstacle_ud|nil aircraft -- the closest aircraft found
-function OAScripting:find_aircraft(vehicle_loc, lookahead_m) end
+function OAScripting:find_aircraft(vehicle_loc, lookahead_m, vertical_lookahead_m) end
 
 -- closest distance to the nearest fence boundary edge of the given fence category
 ---@param loc Location_ud -- Location to measure the distance from
