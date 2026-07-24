@@ -96,7 +96,7 @@ public:
                                     Vector3f &velocity_NED_ms
                                 ) const;
     
-    bool find_aircraft(const Location &vehicle_loc, const float lookahead_m,
+    bool find_aircraft(const Location &vehicle_loc, const float lookahead_m, const float vertical_lookahead_m,
                                     float       &distance_m,
                                     OAObstacle  &aircraft_obstacle
                             ) const;
@@ -133,7 +133,7 @@ private:
 
     float _distance_to_avoidance(const Vector3f &start_NED_cm, const Vector3f &end_NED_cm, OAObstacle &script_obstacle, OAObstacle &aircraft_obstacle) const;
     float _distance_to_object(const Vector3f &start_NED_m, const Vector3f end_NED_m, OAObstacle &script_obstacle) const;
-    float _distance_to_aircraft(const Vector3f &vehicle_NED_cm, const float lookahead_m, OAObstacle &script_obstacle) const;
+    float _distance_to_aircraft(const Vector3f &vehicle_NED_cm, const float lookahead_m, const float vertical_lookahead_m, OAObstacle &script_obstacle) const;
 
     // create a "Scripting Obstacle" to easily pass info about an obstacle to Lua
     static void _populate_scripting_obstacle(OAObstacle &scripting_obstacle, const AP_Avoidance::Obstacle *avoidance_obstacle);
