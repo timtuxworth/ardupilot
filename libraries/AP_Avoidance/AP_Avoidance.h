@@ -117,7 +117,7 @@ public:
                                 Obstacle &avoid_obstacle,
                                 Obstacle &closest_aircraft
                                 ) const;
-    float distance_to_aircraft(const Vector3f &vehicle_NED_m, const float lookahead_m,
+    float distance_to_aircraft(const Vector3f &vehicle_NED_m, const float lookahead_m, const float vertical_lookahead_m,
                                 // return values
                                 Obstacle &avoid_obstacle
                                 ) const;
