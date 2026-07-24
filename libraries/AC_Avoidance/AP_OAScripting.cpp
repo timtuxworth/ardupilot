@@ -168,8 +168,8 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
 
 // Lua binding to find the nearest crude aircraft (GA/GENERAL_AVIATION) 
 // this is needed because avoiding aircraft is often a higher priority than avoiding other obstacles
-bool AP_OAScripting::find_aircraft(const Location &vehicle_loc, const float lookahead_m,
-                                            float       &distance_m, 
+bool AP_OAScripting::find_aircraft(const Location &vehicle_loc, const float lookahead_m, const float vertical_lookahead_m,
+                                            float       &distance_m,
                                             OAObstacle  &aircraft_obstacle
                                     ) const
 {
@@ -189,7 +189,7 @@ bool AP_OAScripting::find_aircraft(const Location &vehicle_loc, const float look
     // "obstacles" are stored in AP_Avoidance - the are typically populated by MAVLink (ADSB, GLOBAL_POSITION, FOLLOW_TARGET)
     // These have priority over all other obstacles, especially if they are ADSB messages representing crude aircraft
     OAObstacle obstacle_found;
-    distance_new_m = _distance_to_aircraft(vehicle_NED_m, distance_m, obstacle_found);
+    distance_new_m = _distance_to_aircraft(vehicle_NED_m, distance_m, vertical_lookahead_m, obstacle_found);
     if (distance_new_m < distance_m) {
         obstacle = obstacle_found;
         distance_m  = distance_new_m;
@@ -562,7 +562,7 @@ float AP_OAScripting::_distance_to_avoidance(const Vector3f &start_NED_cm, const
 }
 
 // Closest Distance to aircraft in the AP_Avoidance database from a single point
-float AP_OAScripting::_distance_to_aircraft(const Vector3f &vehicle_NED_cm, const float lookahead_m,
+float AP_OAScripting::_distance_to_aircraft(const Vector3f &vehicle_NED_cm, const float lookahead_m, const float vertical_lookahead_m,
                                                 // return values
                                                 OAObstacle &script_obstacle
                                                 ) const
@@ -570,7 +570,7 @@ float AP_OAScripting::_distance_to_aircraft(const Vector3f &vehicle_NED_cm, cons
     AP_Avoidance *avoid = AP_Avoidance::get_singleton();
     AP_Avoidance::Obstacle avoid_obstacle;
 
-    float distance_m = avoid->distance_to_aircraft(vehicle_NED_cm, FLT_MAX, avoid_obstacle);
+    float distance_m = avoid->distance_to_aircraft(vehicle_NED_cm, FLT_MAX, vertical_lookahead_m, avoid_obstacle);
     if (distance_m < lookahead_m) {
         _populate_scripting_obstacle(script_obstacle, &avoid_obstacle);
     }
