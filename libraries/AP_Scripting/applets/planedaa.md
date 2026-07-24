@@ -135,6 +135,7 @@ Collision volumes, and the `FENCE_*` parameters for the altitude/geo fences.
 | `DAA_UPDATE_RATE` | 10 | Hz | Rate at which avoidance is processed. |
 | `DAA_HEIGHT_USE` | 0 | | Whether to consider height differences when calculating collisions (0: use height, 1: ignore height). |
 | `DAA_MARGIN_GA` | 50 | m | Avoidance margin for fixed-wing/General Aviation aircraft, over and above the Well Clear margin `AVD_WCLR_XY`. |
+| `DAA_MARGIN_GA_Z` | 30 | m | Vertical avoidance margin for fixed-wing/General Aviation aircraft, over and above the Well Clear vertical separation `AVD_WCLR_Z`. An aircraft triggers the loiter-to-altitude only while its altitude difference from the vehicle is below `AVD_WCLR_Z + DAA_MARGIN_GA_Z`. The vertical mirror of `DAA_MARGIN_GA`. |
 | `DAA_MARGIN_WTH` | 173 | m | Avoidance radius for weather/clouds/rain. |
 | `DAA_MARGIN_BIRD` | 100 | m | Avoidance margin for migratory birds. |
 | `DAA_MARGIN_PREY` | 200 | m | Avoidance radius for birds of prey. |
