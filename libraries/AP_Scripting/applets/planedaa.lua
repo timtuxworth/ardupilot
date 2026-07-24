@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-040"
+SCRIPT_VERSION      = "4.8.0-041"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -150,7 +150,7 @@ function bind_add_param(name, idx, default_value)
 end
 
 -- setup follow mode specific parameters
-assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 38), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
+assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 39), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
 
 --[[
     // @Param: DAA_ACT_FN
@@ -509,6 +509,16 @@ DAA_STALE_S = bind_add_param('STALE_S', 37, 3)
 --]]
 DAA_MARGIN_GA_Z = bind_add_param('MARGIN_GA_Z', 38, 30)
 
+--[[
+    // @Param: DAA_LTR_COOL_S
+    // @DisplayName: Aircraft loiter release delay
+    // @Description: Time the aircraft loiter-to-altitude is held after the aircraft was last detected, before releasing back to the mission. Acts as hysteresis so a briefly-dropped or laggy ADS-B feed cannot thrash the vehicle between GUIDED (loiter) and AUTO (mission). Set to 0 to release as soon as the aircraft is no longer detected.
+    // @Units: s
+    // @Range: 0 60
+    // @User: Standard
+--]]
+DAA_LTR_COOL_S = bind_add_param('LTR_COOL_S', 39, 10)
+
 WARN_DIST_XY                = bind_param("AVD_W_DIST_XY")
 WARN_ACTION                 = bind_param("AVD_W_ACTION")
 AVD_ENABLE                  = bind_param("AVD_ENABLE")
@@ -526,6 +536,7 @@ local margin_fence          = DAA_MARGIN_FENCE:get()
 local margin_alt            = DAA_MARGIN_ALT:get()
 local alt_hyst_m            = DAA_ALT_HYST_M:get()
 local alt_cool_ms           = DAA_ALT_COOL_S:get() * 1000
+local loiter_cool_ms        = DAA_LTR_COOL_S:get() * 1000
 local margin_aircraft       = DAA_MARGIN_GA:get()
 local margin_vertical       = DAA_MARGIN_GA_Z:get()
 -- margin_bird/prey/weather are parked for planned obstacle types (see the
@@ -676,6 +687,7 @@ local function get_vehicle_state()
         margin_alt          = DAA_MARGIN_ALT:get()
         alt_hyst_m          = DAA_ALT_HYST_M:get()
         alt_cool_ms         = DAA_ALT_COOL_S:get() * 1000
+        loiter_cool_ms      = DAA_LTR_COOL_S:get() * 1000
         margin_aircraft     = DAA_MARGIN_GA:get()
         margin_vertical     = DAA_MARGIN_GA_Z:get()
         margin_bird         = DAA_MARGIN_BIRD:get()
@@ -1211,8 +1223,9 @@ local loiteralt = {
 
     function loiteralt.stop(force_stop)
         if not force_stop then
-            -- we wait for 10 seconds to make sure that we really want to stop
-            if (now_ms - aircraft_seen_now_ms) < 10000 then
+            -- hold the loiter for DAA_LTR_COOL_S after the aircraft was last seen, so a
+            -- briefly-dropped or laggy feed cannot thrash GUIDED<->AUTO
+            if (now_ms - aircraft_seen_now_ms) < loiter_cool_ms then
                 return false
             end
         end
@@ -1272,6 +1285,8 @@ local DAA = {
     local wind_speed        = 0.0
     local obstacle_avoiding = nil
     local aircraft_avoiding = nil
+    local last_aircraft_ts_ms = nil     -- timestamp_ms of the last aircraft fix acted on (detect de-bounce)
+    local last_aircraft_obstacle = nil  -- obstacle populated from it, reused between fresh fixes
     local last_avoid_bearing_deg = nil
     local committed_side_sign = 0       -- +1 = right of the direct bearing, -1 = left, 0 = not committed
     local side_flip_pending  = false    -- true while the opposite side is being preferred (debounce a flip)
@@ -2037,6 +2052,8 @@ local DAA = {
 
         if current_loc == nil then
             aircraft_avoiding = nil
+            last_aircraft_obstacle = nil
+            last_aircraft_ts_ms = nil
             return
         end
 
@@ -2050,6 +2067,19 @@ local DAA = {
 
         if distance_m == nil then
             aircraft_avoiding = nil
+            last_aircraft_obstacle = nil
+            last_aircraft_ts_ms = nil
+            return
+        end
+
+        -- De-bounce the oversampled ADS-B feed: AP_Avoidance re-reports the same fix many
+        -- times between genuine updates (~63% of DAAG records were duplicate lat/lng in
+        -- log_102). Act only on a fresh fix (new timestamp_ms); on a repeat, reuse the last
+        -- obstacle so the loiter latch holds without re-populating or re-logging every
+        -- cycle. The timestamp change is the true (~1 Hz) fix rate.
+        local ts_ms = aircraft_obstacle:timestamp_ms()
+        if last_aircraft_obstacle ~= nil and ts_ms == last_aircraft_ts_ms then
+            aircraft_avoiding = last_aircraft_obstacle
             return
         end
 
@@ -2057,6 +2087,8 @@ local DAA = {
         --gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" FOUND AIRCRAFT: %s dist: %.0f m alt: %.0f m", obstacle.label, obstacle.distance_m, obstacle.location:alt() * 0.01 ))
 
         aircraft_avoiding = obstacle
+        last_aircraft_obstacle = obstacle
+        last_aircraft_ts_ms = ts_ms
 
         log_detect_aircraft(aircraft_avoiding)
         --gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(" DETECTED AIRCRAFT: xy %.0f z %.0f", aircraft_avoiding.distance_xy,aircraft_avoiding.distance_z) )
