@@ -153,6 +153,7 @@ Collision volumes, and the `FENCE_*` parameters for the altitude/geo fences.
 | `DAA_HEADING_INC` | 1.5 | deg | Angular step used when searching candidate headings around the target bearing for a collision-free path. The search sweeps a full circle in increments of this size, alternating left and right. Smaller values search more finely but cost more CPU per update. |
 | `DAA_WIND_MIN` | 2 | m/s | Minimum wind speed before the wind-aware avoidance behaviour engages. Below this, the still-air path is used so calm-air behaviour is unchanged. Gates both the wind-aware look-ahead projection and the wind-scaled fence margin. |
 | `DAA_WIND_MARG` | 5 | m per m/s | Extra fence avoidance margin added per m/s of wind above `DAA_WIND_MIN`. The standoff from fences is widened by `DAA_WIND_MARG * max(0, wind_speed - DAA_WIND_MIN)`, giving the controller buffer to absorb cross-track drift so the aircraft is less likely to be blown across the boundary in wind. Set to 0 to disable wind scaling. |
+| `DAA_STALE_S` | 3 | s | Traffic-feed staleness warning threshold. When avoiding a network-sourced moving obstacle (ADS-B drone/aircraft) whose position has not updated for longer than this, a `traffic stale Ns` warning is sent to the GCS (the DAA is acting on lagged data, e.g. from an intermittent telemetry/ADS-B link), and a `lost <label>` warning if it then disappears. Fences are on-board and never go stale. Set to 0 to disable. |
 
 ## Tuning for your vehicle
 
