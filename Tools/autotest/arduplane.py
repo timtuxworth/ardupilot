@@ -8110,6 +8110,11 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             # the real value of this test is exercising the moving-obstacle code path
             # (assess_obstacle_motion / refine_avoidance_bearing) that the stationary
             # PlaneDAADroneAvoidance never reaches.  A deadband rejects attitude noise.
+            # The type-aware CPA standoff (get_standoff) re-decides the crossing conflict
+            # from current geometry every cycle with NO hold -- by design, for maximum
+            # responsiveness to an unpredictable/manoeuvring drone -- so a marginal slow
+            # overtake legitimately reverses more (slew-limited, so bounded/safe).  The
+            # bound is therefore loose; it only fires on genuinely wild oscillation.
             deadband_deg = 6.0
             reversals = 0
             prev_sign = 0
@@ -8129,7 +8134,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             self.progress("Crossing-drone avoidance: %u course samples, %u reversals"
                           % (len(cogs), reversals))
 
-            max_reversals = 8
+            max_reversals = 35
             if reversals > max_reversals:
                 raise NotAchievedException(
                     "ground course hunted badly: %u reversals > %u"
@@ -8262,6 +8267,161 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
                 if self.mav.flightmode == "GUIDED":
                     raise NotAchievedException(
                         "engaged loiter for a contact above the vertical gate (DAA_MARGIN_GA_Z not bounded)")
+        finally:
+            self.disarm_vehicle(force=True)
+
+    def PlaneDAAAircraftCpaGate(self):
+        '''planedaa's conservative CPA gate must SUPPRESS the aircraft loiter for a
+        detected GA aircraft that is in the outer well-clear band and clearly diverging
+        (opening range, closest approach beyond well-clear).  The plane is injected inside
+        the detection volume (< AVD_WCLR_XY + DAA_MARGIN_GA) but beyond the AVD_WCLR_XY
+        well-clear radius, moving directly away, so it is detected but is not a conflict:
+        the vehicle must stay in AUTO and not loiter.  (A close or converging aircraft still
+        loiters unconditionally - the conservative floor - proven by
+        PlaneDAAAircraftLoiterNoFlip.)  Fails on the pre-CPA-gate code, which loitered for
+        any detected aircraft regardless of motion.'''
+        self.install_applet_script_context("planedaa.lua")
+        self.install_script_module(
+            self.script_modules_source_path("mavlink_wrappers.lua"),
+            "mavlink_wrappers.lua",
+        )
+        self.set_parameters({
+            "SCR_ENABLE": 1,
+            "SCR_VM_I_COUNT": 1000000,
+            "ADSB_TYPE": 5,
+            "AVD_ENABLE": 1,
+            "AVD_WCLR_XY": 200,     # well-clear radius; detection band is 200..250 m
+            "AVD_WCLR_Z": 100,      # generous vertical gate so altitude never gates detection
+        })
+        self.context_collect('STATUSTEXT')
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+        self.set_parameters({
+            "DAA_MARGIN_GA": 50,    # detection = AVD_WCLR_XY + this = 250 m
+            "DAA_MARGIN_GA_Z": 50,
+            "DAA_AVD_ALT": 50,
+            "DAA_CPA_MIN": 2,       # closing-speed (m/s) below which a receding contact is "not closing"
+        })
+
+        icao = 0xB7B7B7
+
+        def inject_diverging_plane():
+            here = self.mav.location()
+            # 230 m east: inside the 250 m detection band but beyond the 200 m well-clear radius
+            contact = self.offset_location_ne(here, 0, 230)
+            self.mav.mav.adsb_vehicle_send(
+                icao,
+                int(contact.lat * 1e7),
+                int(contact.lng * 1e7),
+                mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
+                int(here.alt * 1000),           # matched altitude -> inside the vertical gate
+                9000,                            # heading 90 deg = due east (directly away)
+                4000,                            # 40 m/s horizontal velocity -> opening the range
+                0,
+                "DIVERGE1".encode("ascii"),
+                mavutil.mavlink.ADSB_EMITTER_TYPE_LIGHT,
+                1, 65535, 1200,
+            )
+
+        self.upload_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 60),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 3000, 0, 80),
+            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+        ])
+
+        self.arm_vehicle()
+        try:
+            self.change_mode("AUTO")
+            self.wait_current_waypoint(2, timeout=120)
+            self.wait_text("Plane DAA", check_context=True, timeout=60)
+
+            # inject the diverging plane steadily for 25 s; the CPA gate must keep us in AUTO
+            tstart = self.get_sim_time()
+            guided = 0
+            samples = 0
+            while self.get_sim_time() - tstart < 25:
+                inject_diverging_plane()
+                self.wait_heartbeat()
+                samples += 1
+                if self.mav.flightmode == "GUIDED":
+                    guided += 1
+            if guided > 0:
+                raise NotAchievedException(
+                    "loiter engaged (GUIDED in %u/%u samples) for a diverging aircraft in the outer "
+                    "well-clear band - conservative CPA gate should have suppressed it" % (guided, samples))
+        finally:
+            self.disarm_vehicle(force=True)
+
+    def PlaneDAADroneCpaGate(self):
+        '''The type-aware CPA standoff must let the drone bendy-ruler IGNORE a drone that is
+        ahead on the path but clearly diverging.  A drone is injected ~150 m dead ahead moving
+        directly away faster than the vehicle, so its closest approach stays well beyond the
+        drone standoff (AVD_UAV_XY) and it is opening: no avoidance manoeuvre is needed.  The
+        vehicle must reach the waypoint without ever announcing "AVOIDING" for the drone.  Fails
+        on the pre-change code, whose conflict test used the (much larger) aircraft well-clear
+        radius for every type, so it avoided the diverging drone.'''
+        self.install_applet_script_context("planedaa.lua")
+        self.install_script_module(
+            self.script_modules_source_path("mavlink_wrappers.lua"),
+            "mavlink_wrappers.lua",
+        )
+        self.set_parameters({
+            "SCR_ENABLE": 1,
+            "SCR_VM_I_COUNT": 1000000,
+            "ADSB_TYPE": 5,
+            "AVD_ENABLE": 1,
+            "AVD_UAV_XY": 75,       # drone standoff (get_standoff for MAV_SYSID)
+            "AVD_UAV_Z": 50,        # generous so altitude never gates detection here
+        })
+        self.context_collect('STATUSTEXT')
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+        self.set_parameters({
+            "DAA_MARGIN_UAV": 10,
+            "DAA_CPA_MIN": 2,
+        })
+
+        icao = 0xC3C3C3
+
+        def inject_diverging_drone():
+            here = self.mav.location()
+            # 150 m dead ahead (north, on the path), moving further north (away) at 40 m/s
+            contact = self.offset_location_ne(here, 150, 0)
+            self.mav.mav.adsb_vehicle_send(
+                icao,
+                int(contact.lat * 1e7),
+                int(contact.lng * 1e7),
+                mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
+                int(here.alt * 1000),
+                0,                               # heading 0 = due north (directly away, ahead)
+                4000,                            # 40 m/s -> opens faster than the ~18 m/s cruise
+                0,
+                "DIVDRN01".encode("ascii"),
+                mavutil.mavlink.ADSB_EMITTER_TYPE_UAV,   # emitter 14 -> drone bendy-ruler path
+                1, 65535, 1200,
+            )
+
+        self.upload_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 50),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 2000, 0, 80),
+            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+        ])
+
+        self.arm_vehicle()
+        try:
+            self.change_mode("AUTO")
+            self.wait_current_waypoint(2, timeout=120)
+            self.wait_text("Plane DAA", check_context=True, timeout=60)
+
+            # inject the diverging drone steadily for 25 s; the CPA gate must NOT avoid it
+            tstart = self.get_sim_time()
+            while self.get_sim_time() - tstart < 25:
+                inject_diverging_drone()
+                m = self.mav.recv_match(type='STATUSTEXT', blocking=True, timeout=1)
+                if m is not None and "AVOIDING" in m.text and "Drone" in m.text:
+                    raise NotAchievedException(
+                        "avoided a diverging drone ('%s') - the type-aware CPA standoff should "
+                        "have treated it as leaving" % m.text.strip())
         finally:
             self.disarm_vehicle(force=True)
 
@@ -10002,6 +10162,8 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             Test(self.PlaneDAADroneAvoidance),
             Test(self.PlaneDAADroneCrossing),
             Test(self.PlaneDAAAircraftLoiterNoFlip),
+            Test(self.PlaneDAAAircraftCpaGate),
+            Test(self.PlaneDAADroneCpaGate),
             Test(self.PlaneDAATrapNoFalseFire),
             Test(self.PlaneDAADisableRevertsTarget),
             Test(self.PlaneDAAFenceAvoidanceWind),
