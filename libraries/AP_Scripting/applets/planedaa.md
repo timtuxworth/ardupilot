@@ -204,6 +204,34 @@ radius. Keep `DAA_LKAHD` at least a few times the turn radius (the startup check
 warns below 3×R); a very long look-ahead (10×+) can over-commit the far-field
 path. In wind, `DAA_WIND_MARG` widens the fence standoff automatically.
 
+The look-ahead also explains why an `AVOIDING:` distance can be much larger than
+the obstacle's standoff. The bendy-ruler projects your path forward up to
+`DAA_LKAHD` (e.g. 1000 m) and starts deviating as soon as that projected path
+would pass within the standoff of the obstacle (for a drone, `AVD_UAV_XY +
+DAA_MARGIN_UAV`; for a fence, `DAA_MARGIN_FENCE`). So with an obstacle sitting on
+or near your path, the aircraft begins avoiding — and the `AVOIDING:` message
+reports the true range — while the obstacle is still hundreds of metres ahead.
+The standoff is the *lateral* clearance held around the obstacle, not the range
+at which avoidance begins.
+
+### Moving obstacles and closest-approach
+
+Moving obstacles (drones, birds, AIS) are gated by a closest-point-of-approach
+(CPA) test as well as position: one that is opening range and whose predicted
+miss stays beyond its keep-out radius (for a drone, `AVD_UAV_XY`) is treated as
+*leaving* and is not avoided — this is what stops the aircraft from manoeuvring
+for traffic that is already past or diverging. A crude aircraft uses the same
+test with the `AVD_WCLR_XY` well-clear radius, and inside that radius it is always
+treated as a conflict (a missing or uncertain velocity therefore always errs
+toward avoiding — safer first).
+
+This CPA decision is re-made from the obstacle's **current** geometry every
+update cycle, with no hold, so a manoeuvring or unpredictable drone is always
+tracked on fresh data. Near a marginal crossing that can cost a few extra heading
+reversals; this is deliberate — the heading is slew-rate limited (`DAA_SLEW_DPS`)
+so the motion stays bounded, and responsiveness is preferred over a smoother but
+laggier committed path.
+
 ## Logging
 
 The script writes the following messages to the dataflash log to record its
