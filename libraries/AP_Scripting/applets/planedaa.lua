@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-041"
+SCRIPT_VERSION      = "4.8.0-042"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -1025,6 +1025,28 @@ local function obstacle_report_distance(obstacle)
     return nil
 end
 
+-- Keep-out ("well clear") radius (m) for the CPA conflict test, per obstacle type. This is the
+-- miss distance below which a moving obstacle is treated as a conflict; because the range check in
+-- assess_obstacle_motion uses the same value, it is also the range inside which avoidance is
+-- unconditional (the conservative "safer is better" floor). Distinct from the detection margin in
+-- find_closest_obstacle, which adds a look-ahead buffer on top so obstacles are picked up earlier.
+-- Aircraft/drone/plane share one CPA calculation; only this standoff differs.
+local function get_standoff(obstacle_type)
+    if obstacle_type == OBSTACLE_TYPE.MAV_SYSID then
+        return uav_clear_xy                 -- drone/UAV: AVD_UAV_XY
+    elseif obstacle_type == OBSTACLE_TYPE.BIRD_MIGRATORY then
+        return margin_bird_m
+    elseif obstacle_type == OBSTACLE_TYPE.BIRD_OF_PREY then
+        return margin_prey_m
+    elseif obstacle_type == OBSTACLE_TYPE.WEATHER then
+        return margin_weather_m
+    elseif obstacle_type == OBSTACLE_TYPE.PROXIMITY then
+        return margin_proximity_m
+    end
+    -- GENERAL_AVIATION, AIS and anything else: the aircraft well-clear radius (AVD_WCLR_XY)
+    return well_clear_xy
+end
+
 local function find_closest_obstacle(loc1, loc2, lookahead_m, wind_ms)
     -- By projecting 1m along the line we avoid a problem with the
     -- exclusion avoidance being happy to skirt along a line parallel
@@ -1644,7 +1666,8 @@ local DAA = {
     --]]
     local function assess_obstacle_motion(obstacle)
         if obstacle == nil or current_loc == nil or obstacle.location == nil then
-            return true, 0, 0.0
+            -- no geometry to assess: treat as a conflict (the safe default is to avoid)
+            return { is_conflict = true, closing_speed = 0.0, cpa_miss = 0.0, ttc = FLT_MAX, pass_behind = 0 }
         end
         local rel = current_loc:get_distance_NED(obstacle.location)  -- N,E,D metres to the obstacle
         local rn, re = rel:x(), rel:y()
@@ -1668,10 +1691,13 @@ local DAA = {
         local cpa_miss_h = math.sqrt(miss_n * miss_n + miss_e * miss_e)
         local ttc_s = (closing_speed > 0.1) and (range_h / closing_speed) or FLT_MAX
 
-        -- a moving obstacle that will miss us by more than well-clear and is not really
-        -- closing (and is not already close) is leaving: no manoeuvre needed
+        -- Type-aware keep-out radius: the miss distance below which this obstacle is a conflict.
+        -- The range check uses the same value, so any obstacle already inside the keep-out radius
+        -- is unconditionally a conflict (the conservative floor); only one that will miss beyond it
+        -- AND is not closing AND is already beyond it is treated as leaving (no manoeuvre needed).
+        local standoff_m = get_standoff(obstacle.type)
         local is_conflict = true
-        if cpa_miss_h > well_clear_xy and closing_speed < cpa_min_ms and range_h > well_clear_xy then
+        if cpa_miss_h > standoff_m and closing_speed < cpa_min_ms and range_h > standoff_m then
             is_conflict = false
         end
 
@@ -2194,6 +2220,13 @@ local DAA = {
             -- and whose predicted closest approach stays beyond well-clear is leaving, resume nav.
             local motion = assess_obstacle_motion(obstacle_avoiding)
             if not motion.is_conflict then
+                -- the obstacle is leaving (opening range, predicted miss beyond its keep-out
+                -- radius): drop it so avoid_obstacle() does not steer or announce for it. Any
+                -- avoidance already in progress reverts cleanly (avoid_obstacle(nil)). This is
+                -- re-decided every cycle from current geometry (no hold) so a manoeuvring obstacle
+                -- is always tracked on fresh data; near a marginal crossing that can cost a few
+                -- extra (slew-limited) heading reversals, which is the safe trade.
+                obstacle_avoiding = nil
                 last_avoid_bearing_deg = nil
                 committed_side_sign = 0
                 side_flip_pending = false
@@ -2514,7 +2547,12 @@ local DAA = {
             do_loitering()
         elseif current_state == STATE.hovering or current_state == STATE.avoiding or current_state == STATE.hovering or current_state == STATE.landing then -- luacheck: ignore 542
             -- do nothing for now
-        elseif aircraft_avoiding ~= nil then
+        elseif aircraft_avoiding ~= nil and assess_obstacle_motion(aircraft_avoiding).is_conflict then
+            -- CONSERVATIVE CPA gate on the loiter trigger: an aircraft inside the well-clear
+            -- radius is always a conflict (assess_obstacle_motion's range check), so the loiter
+            -- still fires unconditionally at close range - safer-first. Only a plane in the outer
+            -- detection band that will miss beyond well-clear AND is not closing is skipped, and it
+            -- then falls through to normal monitoring. A missing/uncertain velocity => conflict.
             gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITER AIRCRAFT: %s", aircraft_avoiding.label))
             loiteralt.start(ga_avoid_alt_m, ga_avoid_alt_frame, true, airspeed_ms)
             current_state = STATE.loitering
