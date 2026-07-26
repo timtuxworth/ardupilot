@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-042"
+SCRIPT_VERSION      = "4.8.0-043"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -481,13 +481,13 @@ DAA_TRAP_S = bind_add_param('TRAP_S', 34, 5)
 DAA_TRAP_CLR_S = bind_add_param('TRAP_CLR_S', 35, 4)
 
 --[[
-    // @Param: DAA_TRAP_RTL_ACT
+    // @Param: DAA_TRAP_ESC_ACT
     // @DisplayName: Trapped-failsafe escalation action
     // @Description: Action to take when the DAA_TRAP_ACT action would leave the aircraft in the mode it is ALREADY in (e.g. DAA_TRAP_ACT=RTL and the aircraft is already in RTL) - commanding the same mode again would do nothing, so escalate to this instead. Typically the aircraft is trapped mid-RTL and this stops it: QRTL (VTOL return, zero turn radius) or QLOITER (stop & hover) or QLAND. VTOL actions fall back to RTL if there is no VTOL. Set equal to DAA_TRAP_ACT to disable escalation.
     // @Values: 1:RTL,2:QRTL,3:QLOITER,4:QLAND
     // @User: Standard
 --]]
-DAA_TRAP_RTL_ACT = bind_add_param('TRAP_RTL_ACT', 36, 2)
+DAA_TRAP_ESC_ACT = bind_add_param('TRAP_ESC_ACT', 36, 2)
 
 --[[
     // @Param: DAA_STALE_S
@@ -570,7 +570,7 @@ local cpa_min_ms            = DAA_CPA_MIN:get()
 local trap_act              = DAA_TRAP_ACT:get()
 local trap_s                = DAA_TRAP_S:get()
 local trap_clr_s            = DAA_TRAP_CLR_S:get()
-local trap_rtl_act          = DAA_TRAP_RTL_ACT:get()
+local trap_esc_act          = DAA_TRAP_ESC_ACT:get()
 local stale_s               = DAA_STALE_S:get()
 
 GRAVITY_MSS = 9.80665
@@ -724,7 +724,7 @@ local function get_vehicle_state()
         trap_act             = DAA_TRAP_ACT:get()
         trap_s               = DAA_TRAP_S:get()
         trap_clr_s           = DAA_TRAP_CLR_S:get()
-        trap_rtl_act         = DAA_TRAP_RTL_ACT:get()
+        trap_esc_act         = DAA_TRAP_ESC_ACT:get()
         stale_s              = DAA_STALE_S:get()
 
         now_params_ms       = now_ms
@@ -1512,12 +1512,12 @@ local DAA = {
         if bendy_ratio > 1.8 then
             warn(W, string.format("BR_RATIO %.1f > 1.8: fence-follow unstable", bendy_ratio)) end
         -- trapped-failsafe consistency
-        if trap_act ~= 0 and not have_vtol and (vtol_act(trap_act) or vtol_act(trap_rtl_act)) then
+        if trap_act ~= 0 and not have_vtol and (vtol_act(trap_act) or vtol_act(trap_esc_act)) then
             warn(W, "trap VTOL action but Q_ENABLE=0 -> RTL") end
         if trap_act ~= 0 and fence_act ~= 0 then
             warn(W, string.format("TRAP + FENCE_ACTION %.0f: FA pre-empts trap", fence_act)) end
-        if trap_act ~= 0 and trap_rtl_act == trap_act then
-            warn(I, "TRAP_RTL_ACT = TRAP_ACT: no escalation") end
+        if trap_act ~= 0 and trap_esc_act == trap_act then
+            warn(I, "TRAP_ESC_ACT = TRAP_ACT: no escalation") end
         -- slew limit that can never bind (exceeds the achievable turn rate)
         if turn_r > 0 and cruise_ms > 1 and slew_dps > 0 then
             local turn_rate = math.deg(cruise_ms / turn_r)
@@ -2624,11 +2624,11 @@ local DAA = {
 
     -- the mode the trap should command: the DAA_TRAP_ACT action, but if that would just
     -- re-command the mode we are already in (e.g. RTL while already RTL - a no-op), escalate
-    -- to DAA_TRAP_RTL_ACT (default QRTL) so a mid-RTL trap actually stops the aircraft
+    -- to DAA_TRAP_ESC_ACT (default QRTL) so a mid-RTL trap actually stops the aircraft
     local function resolve_trap_mode(mode_now)
         local mode = trap_act_to_mode(trap_act)
         if mode == mode_now then
-            mode = trap_act_to_mode(trap_rtl_act)
+            mode = trap_act_to_mode(trap_esc_act)
         end
         return mode
     end
