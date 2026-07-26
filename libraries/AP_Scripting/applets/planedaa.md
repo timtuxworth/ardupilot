@@ -156,6 +156,10 @@ Collision volumes, and the `FENCE_*` parameters for the altitude/geo fences.
 | `DAA_WIND_MIN` | 2 | m/s | Minimum wind speed before the wind-aware avoidance behaviour engages. Below this, the still-air path is used so calm-air behaviour is unchanged. Gates both the wind-aware look-ahead projection and the wind-scaled fence margin. |
 | `DAA_WIND_MARG` | 5 | m per m/s | Extra fence avoidance margin added per m/s of wind above `DAA_WIND_MIN`. The standoff from fences is widened by `DAA_WIND_MARG * max(0, wind_speed - DAA_WIND_MIN)`, giving the controller buffer to absorb cross-track drift so the aircraft is less likely to be blown across the boundary in wind. Set to 0 to disable wind scaling. |
 | `DAA_STALE_S` | 3 | s | Traffic-feed staleness warning threshold. When avoiding a network-sourced moving obstacle (ADS-B drone/aircraft) whose position has not updated for longer than this, a `traffic stale Ns` warning is sent to the GCS (the DAA is acting on lagged data, e.g. from an intermittent telemetry/ADS-B link), and a `lost <label>` warning if it then disappears. Fences are on-board and never go stale. Set to 0 to disable. |
+| `DAA_TRAP_ACT` | 0 | | Trapped-failsafe action when avoidance cannot find a way out (boxed in, or unable to keep clear of an obstacle for `DAA_TRAP_S`). `0`: disabled (avoidance just keeps trying), `1`: RTL, `2`: QRTL, `3`: QLOITER, `4`: QLAND. QLOITER/QRTL/QLAND have zero turn radius (safest in a tight space); the VTOL options fall back to RTL if `Q_ENABLE=0`. See _Trapped failsafe_ below. |
+| `DAA_TRAP_S` | 5 | s | Avoidance must be unable to find a way out continuously for this long before `DAA_TRAP_ACT` fires. Rejects transient clutter. |
+| `DAA_TRAP_CLR_S` | 4 | s | For a trap caused by a MOVING obstacle (drone/aircraft), resume the previous mode this long after the failsafe fired (if the obstacle has not passed, forward flight simply re-triggers it). A trap caused by a fixed obstacle (fence) is not auto-recovered — it is held until the pilot changes mode. |
+| `DAA_TRAP_ESC_ACT` | 2 | | Escalation action for when `DAA_TRAP_ACT` would command the mode the aircraft is ALREADY in (e.g. trapped mid-RTL with `DAA_TRAP_ACT=RTL`) — commanding it again would do nothing, so it escalates to this. `1`: RTL, `2`: QRTL, `3`: QLOITER, `4`: QLAND (VTOL options fall back to RTL). Set equal to `DAA_TRAP_ACT` to disable escalation. |
 
 ## Tuning for your vehicle
 
@@ -231,6 +235,30 @@ tracked on fresh data. Near a marginal crossing that can cost a few extra headin
 reversals; this is deliberate — the heading is slew-rate limited (`DAA_SLEW_DPS`)
 so the motion stays bounded, and responsiveness is preferred over a smoother but
 laggier committed path.
+
+### Trapped failsafe
+
+If avoidance cannot find any clear heading — boxed in by fences, or unable to
+keep clear of an obstacle — continuously for `DAA_TRAP_S` seconds, `DAA_TRAP_ACT`
+fires a failsafe mode. The recommended actions have zero turn radius so they get
+the aircraft out of a tight space without needing room to turn: `QLOITER` (stop
+and hover), `QRTL` (VTOL return) or `QLAND`. On a non-VTOL airframe (`Q_ENABLE=0`)
+these fall back to `RTL`. Set `DAA_TRAP_ACT=0` to disable the failsafe entirely
+(avoidance just keeps trying). The vehicle's own `FENCE_ACTION`, if set, pre-empts
+the trapped-failsafe on a fence breach.
+
+Recovery depends on what caused the trap:
+
+- **Fixed obstacle (fence)** — sticky: held until the pilot changes mode, because
+  a fence will not move out of the way.
+- **Moving obstacle (drone/aircraft)** — auto-recovers to the previous mode after
+  `DAA_TRAP_CLR_S`, on the assumption it has passed. If it has not, resuming
+  forward flight simply re-triggers the failsafe.
+
+If `DAA_TRAP_ACT` would command the mode the aircraft is *already* in (e.g.
+trapped mid-`RTL` with `DAA_TRAP_ACT=RTL`), commanding it again would do nothing,
+so it escalates to `DAA_TRAP_ESC_ACT` (default `QRTL`) to actually stop the
+aircraft. Set `DAA_TRAP_ESC_ACT` equal to `DAA_TRAP_ACT` to disable escalation.
 
 ## Logging
 
