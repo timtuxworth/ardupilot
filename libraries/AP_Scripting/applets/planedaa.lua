@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-044"
+SCRIPT_VERSION      = "4.8.0-045"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -163,10 +163,10 @@ DAA_ACT_FN = bind_add_param("ACT_FN", 1, 308)
 --[[
   // @Param: DAA_MARGIN_FENCE
   // @DisplayName: fence margin 
-  // @Description: Avoidance margin for fence
+  // @Description: Avoidance margin (m) kept clear of fences. 0 (default) uses the turn radius WP_LOITER_RAD, so the standoff matches a single loiter circle and fences do not thrash.
   // @Units: m
 --]]
-DAA_MARGIN_FENCE = bind_add_param('MARGIN_FENCE', 2, 50)
+DAA_MARGIN_FENCE = bind_add_param('MARGIN_FENCE', 2, 0)
 
 --[[
   // @Param: DAA_MARGIN_DYN
@@ -533,6 +533,7 @@ WP_LOITER_RAD               = bind_param("WP_LOITER_RAD")
 local roll_limit_deg        = ROLL_LIMIT_DEG:get()
 local lookahead_param_m       = DAA_LKAHD:get()
 local margin_fence_m          = DAA_MARGIN_FENCE:get()
+if margin_fence_m <= 0 then margin_fence_m = math.abs(WP_LOITER_RAD:get()) end   -- 0 => use the turn radius so the fence standoff = one loiter circle
 local margin_alt_m            = DAA_MARGIN_ALT:get()
 local alt_hyst_m            = DAA_ALT_HYST_M:get()
 local alt_cool_ms           = DAA_ALT_COOL_S:get() * 1000
@@ -684,6 +685,7 @@ local function get_vehicle_state()
         roll_limit_deg      = ROLL_LIMIT_DEG:get()
         lookahead_param_m     = DAA_LKAHD:get()
         margin_fence_m        = DAA_MARGIN_FENCE:get()
+        if margin_fence_m <= 0 then margin_fence_m = math.abs(WP_LOITER_RAD:get()) end   -- 0 => use the turn radius
         margin_alt_m          = DAA_MARGIN_ALT:get()
         alt_hyst_m          = DAA_ALT_HYST_M:get()
         alt_cool_ms         = DAA_ALT_COOL_S:get() * 1000
