@@ -86,7 +86,7 @@ them only with good reason:
 |-----------|-------|-------|
 | `FENCE_ENABLE` | `1` | **Required** for any fence avoidance — `find_threats()` only walks fences when the fence subsystem is enabled. |
 | `FENCE_TYPE` | bitmask | Selects which fences are active. Altitude-fence avoidance specifically needs **bit 0 (`ALT_MAX`)** and/or **bit 3 (`ALT_MIN`)**. |
-| `FENCE_ACTION` | `0` (report) | DAA performs the avoidance itself, so report-only is usually wanted to stop the flight controller *also* triggering its own RTL/Brake on a breach. |
+| `FENCE_ACTION` | non-zero (autopilot default RTL) | The autopilot's own breach response, active in **all** modes. It fires immediately on a fence breach and **pre-empts** planedaa's trapped-failsafe for the fence case. planedaa adds proactive avoidance and a `DAA_TRAP_ACT` backstop, but only in nav modes (AUTO/GUIDED/RTL/LOITER/CRUISE/FBWB), so keeping `FENCE_ACTION` non-zero is recommended as the all-mode backstop. Set `0` (report-only) only if planedaa should own the fence trap and you never rely on fence protection while hand-flying. |
 | `FENCE_ALT_MAX_TP` / `FENCE_ALT_MIN_TP` | frame | Frame of the altitude fences; set to match your intent (see terrain note below). |
 
 When flying near fences in wind, `DAA_WIND_MARG` widens the standoff in proportion
@@ -248,8 +248,11 @@ fires a failsafe mode. The recommended actions have zero turn radius so they get
 the aircraft out of a tight space without needing room to turn: `QLOITER` (stop
 and hover), `QRTL` (VTOL return) or `QLAND`. On a non-VTOL airframe (`Q_ENABLE=0`)
 these fall back to `RTL`. Set `DAA_TRAP_ACT=0` to disable the failsafe entirely
-(avoidance just keeps trying). The vehicle's own `FENCE_ACTION`, if set, pre-empts
-the trapped-failsafe on a fence breach.
+(avoidance just keeps trying). The trap fires on a sustained fence breach **or**
+aircraft near-miss. Because the autopilot's own `FENCE_ACTION` (if non-zero) acts
+first on a fence breach in every mode, it pre-empts the trap's fence case — leaving
+the trap as the nav-mode backstop for aircraft (and for fences too when
+`FENCE_ACTION=0`).
 
 Recovery depends on what caused the trap:
 
