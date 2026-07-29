@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-045"
+SCRIPT_VERSION      = "4.8.0-046"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -1519,7 +1519,7 @@ local DAA = {
         if trap_act ~= 0 and not have_vtol and (vtol_act(trap_act) or vtol_act(trap_esc_act)) then
             warn(W, "trap VTOL action but Q_ENABLE=0 -> RTL") end
         if trap_act ~= 0 and fence_act ~= 0 then
-            warn(W, string.format("TRAP + FENCE_ACTION %.0f: FA pre-empts trap", fence_act)) end
+            warn(I, string.format("TRAP + FENCE_ACTION %.0f: FA pre-empts trap", fence_act)) end
         if trap_act ~= 0 and trap_esc_act == trap_act then
             warn(I, "TRAP_ESC_ACT = TRAP_ACT: no escalation") end
         -- slew limit that can never bind (exceeds the achievable turn rate)
