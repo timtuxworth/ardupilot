@@ -126,7 +126,7 @@ Collision volumes, and the `FENCE_*` parameters for the altitude/geo fences.
 | Parameter | Default | Units | Description |
 |-----------|---------|-------|-------------|
 | `DAA_ACT_FN` | 308 | | RC option / scripting function used to activate the DAA capability. |
-| `DAA_MARGIN_FENCE` | 50 | m | Avoidance margin for the geofence. |
+| `DAA_MARGIN_FENCE` | 0 | m | Avoidance margin kept clear of the geofence. `0` (default) uses `WP_LOITER_RAD`, so the standoff equals one loiter circle and fences don't thrash; set a non-zero value to override. |
 | `DAA_MARGIN_DYN` | 20 | m | Avoidance margin for dynamic objects. |
 | `DAA_MARGIN_EXCL` | 20 | m | Avoidance margin for exclusion zones. |
 | `DAA_MARGIN_WIDE` | 30 | m | Avoidance margin for wide avoidance. |
@@ -202,11 +202,15 @@ sluggish to re-plan.
 
 ### Margins and look-ahead
 
-Size the fence standoff (`DAA_MARGIN_FENCE`) and `DAA_LKAHD` from how far the
-aircraft travels while reacting — i.e. from airspeed — rather than from the turn
-radius. Keep `DAA_LKAHD` at least a few times the turn radius (the startup check
-warns below 3×R); a very long look-ahead (10×+) can over-commit the far-field
-path. In wind, `DAA_WIND_MARG` widens the fence standoff automatically.
+The fence standoff (`DAA_MARGIN_FENCE`) defaults to `0`, which uses the turn
+radius `WP_LOITER_RAD` — one loiter circle, and never below the turn radius so
+fences don't thrash (the startup check warns if a non-zero margin is set below
+the turn radius). To override, size it from how far the aircraft travels while
+reacting — i.e. from airspeed — but keep it at least the turn radius. Size
+`DAA_LKAHD` the same way and keep it at least a few times the turn radius (the
+startup check warns below 3×R); a very long look-ahead (10×+) can over-commit
+the far-field path. In wind, `DAA_WIND_MARG` widens the fence standoff
+automatically.
 
 The look-ahead also explains why an `AVOIDING:` distance can be much larger than
 the obstacle's standoff. The bendy-ruler projects your path forward up to
