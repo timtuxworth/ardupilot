@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-043"
+SCRIPT_VERSION      = "4.8.0-044"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -1345,10 +1345,12 @@ local DAA = {
 
     local function calculate_windspeed()
                 -- Get wind estimate and convert to 2D
-        local wind_3d = ahrs:wind_estimate()
+        local wind_3d = ahrs:get_wind()
         local wind_2d = Vector2f()
-        wind_2d:x(wind_3d:x())
-        wind_2d:y(wind_3d:y())
+        if wind_3d ~= nil then          -- get_wind returns nil when there is no valid estimate: treat as calm
+            wind_2d:x(wind_3d:x())
+            wind_2d:y(wind_3d:y())
+        end
 
         return  wind_2d:length(), wind_2d:angle()
     end
@@ -2091,7 +2093,7 @@ local DAA = {
         -- well_clear_z + margin_vertical_m
         local distance_m, aircraft_obstacle = OAScripting:find_aircraft(current_loc, well_clear_xy + margin_aircraft_m, well_clear_z + margin_vertical_m)
 
-        if distance_m == nil then
+        if distance_m == nil or aircraft_obstacle == nil then
             aircraft_avoiding = nil
             last_aircraft_obstacle = nil
             last_aircraft_ts_ms = nil
