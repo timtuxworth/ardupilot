@@ -890,7 +890,7 @@ uint8_t AC_Fence::check(bool disable_auto_fences)
         print_fence_message("auto-disabled", fences_to_disable);
     }
 
-#if HAL_LOGGING_ENABLED
+#if 0   // FENC is a dev-only diagnostic; keep it off (matches upstream). Flip locally when debugging fences. Logging it at ~26 Hz on every vehicle bloats logs and breaks Copter.DataFlashErase.
     /*
       this debug log message is very useful both when developing tests
       and doing manual SITL fence testing
