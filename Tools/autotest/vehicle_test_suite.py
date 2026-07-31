@@ -5876,6 +5876,7 @@ class TestSuite(abc.ABC):
                 target_sysid=target_system,
                 target_compid=target_component,
                 check_afterwards=False,
+                mav=mav,
             )
         return len(wpoints_int)
 
