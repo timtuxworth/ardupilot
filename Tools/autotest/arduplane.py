@@ -8410,7 +8410,7 @@ return update()
 
         # exclusion circle centred 200 m north of home, radius 400 m.
         # home is 200 m from the centre — well inside the exclusion.
-        home = self.home_position_as_mav_location()
+        home = self.home_position_as_location()
         circle_centre = self.offset_location_ne(home, 200, 0)
         self.upload_fences_from_locations([(
             mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION,
@@ -8466,7 +8466,7 @@ return update()
             "FENCE_ACTION": 0,   # report only — a breach must fail the test, not RTL
         })
 
-        home = self.home_position_as_mav_location()
+        home = self.home_position_as_location()
 
         # the takeoff climb covers several hundred metres before the mission
         # navigation (and with it DAA avoidance) takes over, so the obstacles
@@ -8591,7 +8591,7 @@ return update()
             "FENCE_ACTION": 0,   # report only - a breach fails the test rather than RTL
             "FENCE_TYPE": 4,
         })
-        home = self.home_position_as_mav_location()
+        home = self.home_position_as_location()
         fences = [
             # exclusion circle sitting across the WP-A -> WP-B leg (the plane detours it)
             (mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION,
@@ -8672,7 +8672,7 @@ return update()
         self.reboot_sitl()
         self.wait_ready_to_arm()
 
-        home = self.home_position_as_mav_location()
+        home = self.home_position_as_location()
         # the drone sits on the northbound leg, ~1 km ahead of home, directly on
         # the path so it is a guaranteed threat once the plane turns towards WP2
         drone_loc = self.offset_location_ne(home, 1000, 0)
@@ -8697,13 +8697,13 @@ return update()
             tstart = self.get_sim_time()
             avoided = False
             while self.get_sim_time() - tstart < 120:
-                here = self.mav.location()
+                here = self.get_location()
                 self.mav.mav.adsb_vehicle_send(
                     icao,
                     int(drone_loc.lat * 1e7),
                     int(drone_loc.lng * 1e7),
                     mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
-                    int(here.alt * 1000 + 10000),   # 10 m up, well inside the 25 m gate
+                    int(here.get_alt_m(AltFrame.ABSOLUTE) * 1000 + 10000),   # 10 m up, well inside the 25 m gate
                     0,      # heading cdeg
                     0,      # horizontal velocity cm/s
                     0,      # vertical velocity cm/s
@@ -8765,7 +8765,7 @@ return update()
         self.reboot_sitl()
         self.wait_ready_to_arm()
 
-        home = self.home_position_as_mav_location()
+        home = self.home_position_as_location()
         icao = 0xF00099
 
         self.upload_simple_relhome_mission([
@@ -8806,13 +8806,13 @@ return update()
                 drone_north = drone_north0 + drone_vn * elapsed
                 drone_east = drone_east0 - drone_vw * elapsed
                 drone_loc = self.offset_location_ne(home, int(round(drone_north)), int(round(drone_east)))
-                here = self.mav.location()
+                here = self.get_location()
                 self.mav.mav.adsb_vehicle_send(
                     icao,
                     int(drone_loc.lat * 1e7),
                     int(drone_loc.lng * 1e7),
                     mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
-                    int(here.alt * 1000 + 10000),   # 10 m up, inside the 25 m gate
+                    int(here.get_alt_m(AltFrame.ABSOLUTE) * 1000 + 10000),   # 10 m up, inside the 25 m gate
                     int(round(drone_hdg_deg * 100)),  # heading cdeg
                     int(round(drone_speed * 100)),    # horizontal velocity cm/s
                     0,                              # vertical velocity cm/s
@@ -8942,14 +8942,14 @@ return update()
         def inject_aircraft(dalt_m):
             # place the contact 120 m east of wherever the vehicle is now, so as it
             # loiters the horizontal separation stays ~120 m (inside 250 m, beyond 50 m)
-            here = self.mav.location()
+            here = self.get_location()
             contact = self.offset_location_ne(here, 0, 120)
             self.mav.mav.adsb_vehicle_send(
                 icao,
                 int(contact.lat * 1e7),
                 int(contact.lng * 1e7),
                 mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
-                int(here.alt * 1000 + dalt_m * 1000),
+                int(here.get_alt_m(AltFrame.ABSOLUTE) * 1000 + dalt_m * 1000),
                 0,      # heading cdeg
                 0,      # horizontal velocity cm/s (stationary)
                 0,      # vertical velocity cm/s
@@ -9054,7 +9054,7 @@ return update()
         icao = 0xB7B7B7
 
         def inject_diverging_plane():
-            here = self.mav.location()
+            here = self.get_location()
             # 230 m east: inside the 250 m detection band but beyond the 200 m well-clear radius
             contact = self.offset_location_ne(here, 0, 230)
             self.mav.mav.adsb_vehicle_send(
@@ -9062,7 +9062,7 @@ return update()
                 int(contact.lat * 1e7),
                 int(contact.lng * 1e7),
                 mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
-                int(here.alt * 1000),           # matched altitude -> inside the vertical gate
+                int(here.get_alt_m(AltFrame.ABSOLUTE) * 1000),           # matched altitude -> inside the vertical gate
                 9000,                            # heading 90 deg = due east (directly away)
                 4000,                            # 40 m/s horizontal velocity -> opening the range
                 0,
@@ -9145,14 +9145,14 @@ return update()
             # mirror of PlaneDAAAircraftCpaGate: 230 m east (outer band, beyond the 200 m
             # well-clear radius), but heading WEST (at the vehicle) at 40 m/s, matched
             # altitude -> a closing contact whose CPA falls inside well-clear = conflict.
-            here = self.mav.location()
+            here = self.get_location()
             contact = self.offset_location_ne(here, 0, 230)
             self.mav.mav.adsb_vehicle_send(
                 icao,
                 int(contact.lat * 1e7),
                 int(contact.lng * 1e7),
                 mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
-                int(here.alt * 1000),           # matched altitude -> inside the vertical gate
+                int(here.get_alt_m(AltFrame.ABSOLUTE) * 1000),           # matched altitude -> inside the vertical gate
                 27000,                           # heading 270 deg = due west (toward the vehicle)
                 4000,                            # 40 m/s horizontal velocity -> closing the range
                 0,
@@ -9245,7 +9245,7 @@ return update()
         icao = 0xC3C3C3
 
         def inject_diverging_drone():
-            here = self.mav.location()
+            here = self.get_location()
             # 150 m dead ahead (north, on the path), moving further north (away) at 40 m/s
             contact = self.offset_location_ne(here, 150, 0)
             self.mav.mav.adsb_vehicle_send(
@@ -9253,7 +9253,7 @@ return update()
                 int(contact.lat * 1e7),
                 int(contact.lng * 1e7),
                 mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
-                int(here.alt * 1000),
+                int(here.get_alt_m(AltFrame.ABSOLUTE) * 1000),
                 0,                               # heading 0 = due north (directly away, ahead)
                 4000,                            # 40 m/s -> opens faster than the ~18 m/s cruise
                 0,
@@ -9305,7 +9305,7 @@ return update()
             "FENCE_ACTION": 0,
             "FENCE_TYPE": 4,
         })
-        home = self.home_position_as_mav_location()
+        home = self.home_position_as_location()
         excl = [(
             mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION,
             {"radius": 200, "loc": self.offset_location_ne(home, 1200, 0)},
@@ -9373,7 +9373,7 @@ return update()
             "RTL_RADIUS": 60,    # tight, predictable home loiter for the distance assertions
         })
 
-        home = self.home_position_as_mav_location()
+        home = self.home_position_as_location()
         # exclusion circle on the home<->waypoint line, so it is crossed on the way
         # out and again on the RTL return leg.
         excl = [(
@@ -9462,7 +9462,7 @@ return update()
             "SIM_WIND_DIR": 90,
         })
 
-        home = self.home_position_as_mav_location()
+        home = self.home_position_as_location()
         # exclusion circle across the track; the detour standoff (closest approach to the
         # centre) is what we measure, so the side taken does not matter.
         excl_radius = 250
@@ -9506,7 +9506,7 @@ return update()
                 while self.get_sim_time() - tstart < 400:
                     self.mav.recv_match(type='GLOBAL_POSITION_INT',
                                         blocking=True, timeout=2)
-                    here = self.mav.location()
+                    here = self.get_location()
                     d = self.get_distance(circle_centre, here)
                     if d < min_dist_m:
                         min_dist_m = d
@@ -9590,7 +9590,7 @@ return update()
         if terrain:
             self.set_parameter("TERRAIN_ENABLE", 1)
 
-        home = self.home_position_as_mav_location()
+        home = self.home_position_as_location()
 
         def wait_terrain_ready():
             '''wait until the autopilot has terrain data along the flight path'''
