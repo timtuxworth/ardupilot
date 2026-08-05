@@ -1,7 +1,7 @@
 # Plane DAA
 
 This script implements DAA (Detect, Alert, Avoid) for fixed wing and VTOL/quadplanes
-using the "Bendy Ruler" algorithm. 
+using the "Bendy Ruler" algorithm.
 
 Rather than using the Bendy Ruler implementation for Copter enshrined in the AC_Avoidance library,
 this implementation tries to make minimial changes to the c++ core libraries required to surface
@@ -168,7 +168,7 @@ fence is "tight" for a fast, agile aircraft and "roomy" for a slow one. Two
 airframe properties drive the tuning.
 
 **Turn radius.** The radius the aircraft actually flies while avoiding is set by
-L1 and the bank limit, roughly `R ≈ v² / (g·tan φ)` — it grows with the *square*
+L1 and the bank limit, roughly `R ≈ v² / (g·tan φ)` — it grows with the _square_
 of cruise speed (`AIRSPEED_CRUISE`) and shrinks with the achievable bank angle
 (`ROLL_LIMIT_DEG`). This is **not** `WP_LOITER_RAD`, which is only the
 loiter-circle radius and is usually far more conservative than the airframe can
@@ -176,7 +176,7 @@ actually turn — do not size DAA margins from it. A very agile VTOL, for exampl
 may fly a ~30 m avoidance turn while `WP_LOITER_RAD` is 90 m.
 
 **Command bandwidth.** How faithfully the airframe tracks a changing commanded
-heading. This is the property that decides how much the *command-stability*
+heading. This is the property that decides how much the _command-stability_
 parameters matter.
 
 ### Command stability and `DAA_BR_RATIO`
@@ -188,13 +188,13 @@ change immediately, any side-to-side indecision in the bendy ruler shows up as a
 **visible dogleg** — the aircraft banks hard one way, then the other. A slower
 airframe hides the same indecision because its own roll response low-passes it.
 So the more agile the aircraft, the more command stability matters — and,
-importantly, *"it looks smooth on the slow airframe"* does **not** mean the
+importantly, _"it looks smooth on the slow airframe"_ does **not** mean the
 bendy ruler is well tuned; the airframe may just be masking it.
 
 When the aircraft is forced to hug a fence standoff (the geometry leaves no room
 to go wide), the left/right choice becomes bistable. The applet holds the
 committed escape direction through the hug rather than flip-flopping, and only
-switches to the far side if that side *genuinely* clears (positive clearance) —
+switches to the far side if that side _genuinely_ clears (positive clearance) —
 so containment is never traded away for smoothness. `DAA_BR_RATIO` still governs
 how much clearer the far side must be before a normal (non-hugging) side switch;
 raise it if you see doglegs when skirting fences, lower it if avoidance feels
@@ -219,7 +219,7 @@ would pass within the standoff of the obstacle (for a drone, `AVD_UAV_XY +
 DAA_MARGIN_UAV`; for a fence, `DAA_MARGIN_FENCE`). So with an obstacle sitting on
 or near your path, the aircraft begins avoiding — and the `AVOIDING:` message
 reports the true range — while the obstacle is still hundreds of metres ahead.
-The standoff is the *lateral* clearance held around the obstacle, not the range
+The standoff is the _lateral_ clearance held around the obstacle, not the range
 at which avoidance begins.
 
 ### Moving obstacles and closest-approach
@@ -227,7 +227,7 @@ at which avoidance begins.
 Moving obstacles (drones, birds, AIS) are gated by a closest-point-of-approach
 (CPA) test as well as position: one that is opening range and whose predicted
 miss stays beyond its keep-out radius (for a drone, `AVD_UAV_XY`) is treated as
-*leaving* and is not avoided — this is what stops the aircraft from manoeuvring
+_leaving_ and is not avoided — this is what stops the aircraft from manoeuvring
 for traffic that is already past or diverging. A crude aircraft uses the same
 test with the `AVD_WCLR_XY` well-clear radius, and inside that radius it is always
 treated as a conflict (a missing or uncertain velocity therefore always errs
@@ -262,7 +262,7 @@ Recovery depends on what caused the trap:
   `DAA_TRAP_CLR_S`, on the assumption it has passed. If it has not, resuming
   forward flight simply re-triggers the failsafe.
 
-If `DAA_TRAP_ACT` would command the mode the aircraft is *already* in (e.g.
+If `DAA_TRAP_ACT` would command the mode the aircraft is _already_ in (e.g.
 trapped mid-`RTL` with `DAA_TRAP_ACT=RTL`), commanding it again would do nothing,
 so it escalates to `DAA_TRAP_ESC_ACT` (default `QRTL`) to actually stop the
 aircraft. Set `DAA_TRAP_ESC_ACT` equal to `DAA_TRAP_ACT` to disable escalation.
