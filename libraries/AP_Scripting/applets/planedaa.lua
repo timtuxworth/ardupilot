@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-046"
+SCRIPT_VERSION      = "4.8.0-047"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -54,7 +54,6 @@ MAV_CMD_INT         = {DO_SET_MODE = 176, DO_CHANGE_SPEED = 178, DO_REPOSITION =
 MAV_SPEED_TYPE      = {AIRSPEED = 0, GROUNDSPEED = 1, CLIMB_SPEED = 2, DESCENT_SPEED = 3}
 MAV_HEADING_TYPE    = {COG = 0, HEADING = 1} -- COG = Course over Ground, i.e. where you want to go, HEADING = which way the vehicle points 
 
-MAV_VTOL_STATE      = {UNDEFINED = 0, TRANSITION_TO_FW = 1, TRANSITION_TO_MC = 2, MC = 3, FW = 4 }
 
 -- MAV_COLLISION_THREAT_LEVEL
 MAV_COLLISION_THREAT_LEVEL = {
@@ -592,7 +591,7 @@ FLT_MAX = 3.402823466e+38
 
 local current_loc           = ahrs:get_position()
 local current_mode          = vehicle:get_mode()
-local vtol_state            = MAV_VTOL_STATE.UNDEFINED
+local in_fw_flight          = true
 
 local now_ms                = millis()
 local now_params_ms         = now_ms
@@ -660,9 +659,10 @@ local function get_mode_string(mode)
     return string.format("mode: %d", mode)
 end
 
--- the quadplane singleton is non-nil even when Q_ENABLE is 0, but calling
--- get_mav_vtol_state() in that state dereferences a null pointer and crashes,
--- so also require Q_ENABLE to be set
+-- the QuadPlane singleton exists only on quadplane builds (nil on a plain plane).
+-- in_vtol_mode()/in_assisted_flight() are available()-guarded, so they are safe to
+-- call even at Q_ENABLE=0; requiring Q_ENABLE also treats a Q_ENABLE=0 plane as
+-- always fixed-wing.
 local quadplane_enabled = quadplane ~= nil and (param:get('Q_ENABLE') or 0) > 0
 
 -- keep local copies of parameter values that the user might change so update ever 5 seconds
@@ -671,10 +671,14 @@ local function get_vehicle_state()
     current_loc         = ahrs:get_position()
     current_mode        = vehicle:get_mode()
     if quadplane_enabled then
-        vtol_state      = quadplane:get_mav_vtol_state()
+        -- avoid only in clean fixed-wing forward flight: NOT a VTOL mode and NOT under
+        -- VTOL assist. During a transition or Q_ASSIST the vehicle flies forward but the
+        -- transition state reports TRANSITION_TO_FW, where hijacking the nav target is
+        -- unsafe; in_assisted_flight() covers both. (== the old MAV_VTOL_STATE == FW.)
+        in_fw_flight    = not quadplane:in_vtol_mode() and not quadplane:in_assisted_flight()
     else
         -- not a quadplane, so we are always in fixed wing flight
-        vtol_state      = MAV_VTOL_STATE.FW
+        in_fw_flight    = true
     end
 
     now_ms = millis()
@@ -2752,7 +2756,7 @@ local function update()
         -- when avoidance can't find a way out, the trapped-failsafe takes over (and we
         -- stop issuing avoidance); otherwise avoid, but only in FW forward flight
         local trapped = DAA.trap_update()
-        if not trapped and vtol_state == MAV_VTOL_STATE.FW then
+        if not trapped and in_fw_flight then
             DAA.avoid(suggested_target_loc)
         end
     else
