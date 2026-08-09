@@ -2243,10 +2243,6 @@ MAV_VTOL_STATE_TRANSITION_TO_MC = 2
 MAV_VTOL_STATE_MC = 3
 MAV_VTOL_STATE_FW = 4
 
--- Return the current VTOL state of the aircraft as a MAV_VTOL_STATE enum
----@return integer
-function quadplane:get_mav_vtol_state() end
-
 -- desc
 LED = {}
 
