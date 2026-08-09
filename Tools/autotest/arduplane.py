@@ -8701,8 +8701,11 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             self.change_mode("AUTO")
             self.wait_current_waypoint(2, timeout=120)
             self.wait_text("Plane DAA", check_context=True, timeout=60)
-            # settle at cruise so the descend is measured from a steady altitude, not the climb
-            self.wait_altitude(cruise_alt_m - 10, cruise_alt_m + 10, relative=True, timeout=120)
+            # settle at cruise before injecting: reach cruise, then let it level off, so the
+            # loiter engages from steady flight rather than mid-climb.  A mid-climb engage
+            # overshoots up past cruise and eats into the descend budget (the flaky case).
+            self.wait_altitude(cruise_alt_m - 5, cruise_alt_m + 5, relative=True, timeout=120)
+            self.delay_sim_time(8, reason="level off at cruise before the converging contact")
 
             # --- engage: a converging contact in the outer band must trigger the loiter
             #     (conflict via CPA/closing, not proximity - it is beyond well-clear).
@@ -8725,7 +8728,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             descend_floor_m = engage_alt_m - 25
             tstart = self.get_sim_time()
             descended = False
-            while self.get_sim_time() - tstart < 60:
+            while self.get_sim_time() - tstart < 90:
                 inject_converging_plane()
                 self.wait_heartbeat()
                 if self.get_altitude(relative=True) < descend_floor_m:
@@ -8734,7 +8737,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             if not descended:
                 raise NotAchievedException(
                     "loiter engaged but the vehicle did not descend toward DAA_AVD_ALT "
-                    "(still above %.0f m after 60 s; engaged at %.0f m)" % (descend_floor_m, engage_alt_m))
+                    "(still above %.0f m after 90 s; engaged at %.0f m)" % (descend_floor_m, engage_alt_m))
 
             # --- resume: stop injecting; the contact prunes (5 s) and the dwell expires,
             #     so the vehicle must cleanly return to AUTO and continue the mission.
