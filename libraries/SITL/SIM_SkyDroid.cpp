@@ -30,30 +30,48 @@ using namespace SITL;
 
 void SkyDroid::update(const Aircraft &aircraft)
 {
-    // Drive GimbalSim toward the angles commanded via the GAM/GAR packets.
-    // Wire encoding: pitch_cd = pitch_deg * 100, yaw_cd = yaw_deg * 100, roll_cd =
-    // roll_deg * 100 (no sign flip anywhere; SkyDroid's own protocol is
-    // pitch-up-positive, matching AP_Mount's convention directly).  Roll is only
-    // driven towards its target on models with a roll axis; _commanded_roll_cd
-    // stays at 0 (its initial value) otherwise, which is the same as commanding
-    // a level roll, so there is no behavioural difference either way
-    {
+    Vector3f ja;
+    gimbal.get_joint_angles(ja);
+
+    Matrix3f gimbal_dcm;
+    gimbal.get_dcm(gimbal_dcm);
+    const Vector3f vehicle_rate_gimbal = gimbal_dcm.transposed() * aircraft.get_dcm() * aircraft.get_gyro();
+
+    if (uses_individual_axis_speed_commands()) {
+        // Confirmed on real C11 hardware: GAM/GSM/GAY/GAP are silently ignored, only
+        // the individual-axis GSY/GSP speed commands actually move the gimbal, and
+        // are genuinely proportional (unlike PTZ's fixed-speed jog, which was tried
+        // first and found not to move yaw at all).  Real-world calibration (measured
+        // via precise before/after MAVLink telemetry): see
+        // AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_DPS_PER_LSB in AP_Mount_SkyDroid.cpp for
+        // the ~0.03125deg/s-per-LSB scale this mirrors.  GSY's sign is also inverted
+        // vs the doc on real hardware; this simulation reproduces that same inversion
+        // so it cancels out correctly against the driver's compensating negation in
+        // send_target_rates_individual_axis(), exactly like the real gimbal does
+        const float dps_per_lsb = 0.03125f;
+        const float pitch_rate = radians(_commanded_pitch_speed_lsb * dps_per_lsb);
+        const float yaw_rate = -radians(_commanded_yaw_speed_lsb * dps_per_lsb);
+        gimbal.set_demanded_rates(Vector3f(
+            vehicle_rate_gimbal.x,
+            vehicle_rate_gimbal.y + pitch_rate,
+            vehicle_rate_gimbal.z + yaw_rate));
+    } else {
+        // Drive GimbalSim toward the angles commanded via the GAM/GAR packets.
+        // Wire encoding: pitch_cd = pitch_deg * 100, yaw_cd = yaw_deg * 100, roll_cd =
+        // roll_deg * 100 (no sign flip anywhere; SkyDroid's own protocol is
+        // pitch-up-positive, matching AP_Mount's convention directly).  Roll is only
+        // driven towards its target on models with a roll axis; _commanded_roll_cd
+        // stays at 0 (its initial value) otherwise, which is the same as commanding
+        // a level roll, so there is no behavioural difference either way
         const float target_pitch_rad = radians(_commanded_pitch_cd * 0.01f);
         const float target_yaw_rad   = radians(_commanded_yaw_cd   * 0.01f);
         const float target_roll_rad  = _has_roll_axis ? radians(_commanded_roll_cd * 0.01f) : 0.0f;
 
-        Vector3f ja;
-        gimbal.get_joint_angles(ja);
-
-        Matrix3f gimbal_dcm;
-        gimbal.get_dcm(gimbal_dcm);
-        const Vector3f vehicle_rate_gimbal = gimbal_dcm.transposed() * aircraft.get_dcm() * aircraft.get_gyro();
-
-        static constexpr float GAIN = 10.0f;
+        const float gain = 10.0f;
         gimbal.set_demanded_rates(Vector3f(
-            vehicle_rate_gimbal.x + (_has_roll_axis ? (target_roll_rad - ja.x) * GAIN : 0.0f),
-            vehicle_rate_gimbal.y + (target_pitch_rad - ja.y) * GAIN,
-            vehicle_rate_gimbal.z + (target_yaw_rad   - ja.z) * GAIN));
+            vehicle_rate_gimbal.x + (_has_roll_axis ? (target_roll_rad - ja.x) * gain : 0.0f),
+            vehicle_rate_gimbal.y + (target_pitch_rad - ja.y) * gain,
+            vehicle_rate_gimbal.z + (target_yaw_rad   - ja.z) * gain));
     }
 
     gimbal.update(aircraft);
@@ -223,8 +241,24 @@ void SkyDroid::handle_packet(uint8_t data_len)
         if (hex_chars_to_uint32((const char*)&_buf[10], 4, tmp)) {
             _commanded_roll_cd = (int16_t)tmp;
         }
+
+    } else if (strncmp(id, "GSY", 3) == 0 && data_len >= 2 && uses_individual_axis_speed_commands()) {
+        // individual-axis yaw speed command (the "C11" instance only - confirmed on
+        // real hardware to be the only thing that actually moves yaw on that model):
+        // signed 8bit hex value, LSB units calibrated in update() above
+        uint32_t tmp;
+        if (hex_chars_to_uint32((const char*)&_buf[10], 2, tmp)) {
+            _commanded_yaw_speed_lsb = (int8_t)tmp;
+        }
+
+    } else if (strncmp(id, "GSP", 3) == 0 && data_len >= 2 && uses_individual_axis_speed_commands()) {
+        // individual-axis pitch speed command (same model restriction as GSY above)
+        uint32_t tmp;
+        if (hex_chars_to_uint32((const char*)&_buf[10], 2, tmp)) {
+            _commanded_pitch_speed_lsb = (int8_t)tmp;
+        }
     }
-    // all other commands (GSM, GSR, PTZ, FAE, FAI, CAP, REC, DZM etc.) absorbed silently
+    // all other commands (GSM, GSR, FAE, FAI, CAP, REC, DZM, PTZ etc.) absorbed silently
 }
 
 void SkyDroid::send_packet(char addr2, const char id[3], bool write, const uint8_t *data, uint8_t len)

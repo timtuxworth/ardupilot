@@ -15,14 +15,21 @@ extern const AP_HAL::HAL& hal;
 #define AP_MOUNT_SKYDROID_HEALTH_TIMEOUT_MS  1000                // timeout for health (based on attitude reports from gimbal)
 #define AP_MOUNT_SKYDROID_PACKETLEN_MIN      12                  // packet length not including the data segment
 #define AP_MOUNT_SKYDROID_DATALEN_MAX        (AP_MOUNT_SKYDROID_PACKETLEN_MAX - AP_MOUNT_SKYDROID_PACKETLEN_MIN) // data segment len can be no more than this
-#define AP_MOUNT_SKYDROID_ATTITUDE_RATE_HZ   10                  // rate we ask the gimbal to stream its attitude to us
+#define AP_MOUNT_SKYDROID_ATTITUDE_RATE_HZ   50                  // rate we ask the gimbal to stream its attitude to us (matches the 50hz rate AP_Mount::update() is actually called at; doc allows up to 100hz)
 
 // 3 character identifiers
 #define AP_MOUNT_SKYDROID_ID3CHAR_GIMBAL_MODE       "PTZ"        // discrete gimbal control, data bytes: 00:stop, 01:up, 02:down, 03:left, 04:right, 05:center, 06:follow, 07:lock head
-#define AP_MOUNT_SKYDROID_ID3CHAR_SPEED_YAW_PITCH   "GSM"        // rate control, data bytes: yaw speed then pitch speed, each signed 8bit hex, units of 0.5deg/s
-#define AP_MOUNT_SKYDROID_ID3CHAR_ANGLE_YAW_PITCH   "GAM"        // angle control, data bytes: yaw angle(4hex,0.01deg)+yaw speed(2hex)+pitch angle(4hex,0.01deg)+pitch speed(2hex)
+#define AP_MOUNT_SKYDROID_ID3CHAR_SPEED_YAW_PITCH   "GSM"        // combined rate control, data bytes: yaw speed then pitch speed, each signed 8bit hex, units of 0.5deg/s.  Confirmed non-functional on the real C11 - use GSY/GSP instead
+#define AP_MOUNT_SKYDROID_ID3CHAR_ANGLE_YAW_PITCH   "GAM"        // combined angle control, data bytes: yaw angle(4hex,0.01deg)+yaw speed(2hex)+pitch angle(4hex,0.01deg)+pitch speed(2hex).  Confirmed non-functional on the real C11
 #define AP_MOUNT_SKYDROID_ID3CHAR_ANGLE_ROLL         "GAR"       // roll angle control (models with a roll axis, e.g. C13), data bytes: angle(4hex,0.01deg)+speed(2hex)
 #define AP_MOUNT_SKYDROID_ID3CHAR_SPEED_ROLL         "GSR"       // roll rate control (models with a roll axis, e.g. C13), data bytes: signed 8bit hex, units of 0.5deg/s
+#define AP_MOUNT_SKYDROID_ID3CHAR_SPEED_YAW          "GSY"       // individual-axis yaw rate control, data bytes: signed 8bit hex.  The only command confirmed to move yaw on the real C11 (GAM/GSM/GAY all silently ignored); its sign is also inverted vs the doc - see send_target_rates_individual_axis()
+#define AP_MOUNT_SKYDROID_ID3CHAR_SPEED_PITCH        "GSP"       // individual-axis pitch rate control, data bytes: signed 8bit hex.  Confirmed functional on the real C11, sign matches the doc
+// real-world calibrated scale for GSY/GSP on the C11, measured via precise before/after
+// MAVLink telemetry: ~1/16th of the doc's stated 0.5deg/s per LSB, and confirmed linear
+// (not saturated) up to the max wire value of 127
+#define AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_DPS_PER_LSB 0.03125f
+#define AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_MAX_DPS    (127 * AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_DPS_PER_LSB)
 #define AP_MOUNT_SKYDROID_ID3CHAR_ATTITUDE_ENABLE   "GAA"        // enable/disable gimbal->us attitude streaming, data bytes: 00:off, 01-64:rate in Hz
 #define AP_MOUNT_SKYDROID_ID3CHAR_ATTITUDE_DATA     "GAC"        // unsolicited attitude data from gimbal, data bytes: yaw+pitch+roll, each 4hex 0.01deg
 #define AP_MOUNT_SKYDROID_ID3CHAR_FC_ATTITUDE_ENABLE "FAE"       // enable/disable us->gimbal attitude streaming, data bytes: 00:off, 01:on
@@ -51,6 +58,15 @@ void AP_Mount_SkyDroid::update()
 
     // reading incoming packets from gimbal
     read_incoming_packets();
+
+    // update based on mount mode, and send target angles or rates depending on the
+    // target type.  Deliberately NOT gated by the 10hz throttle below - AP_Mount::update()
+    // is actually called at 50hz (see ArduPlane/ArduCopter's SCHED_TASK entry), and the
+    // closed-loop angle control used by models with only individual-axis speed commands
+    // (see uses_individual_axis_speed_commands()) benefits from running its P-controller
+    // at the full rate rather than being throttled down further
+    update_mnt_target();
+    send_target_to_gimbal();
 
     // everything below updates at 10hz
     uint32_t now_ms = AP_HAL::millis();
@@ -94,12 +110,6 @@ void AP_Mount_SkyDroid::update()
         }
         break;
     }
-
-    // update based on mount mode
-    update_mnt_target();
-
-    // send target angles or rates depending on the target type
-    send_target_to_gimbal();
 }
 
 // return true if healthy
@@ -418,6 +428,12 @@ bool AP_Mount_SkyDroid::send_attitude_to_gimbal()
 // send angle target in radians to gimbal
 void AP_Mount_SkyDroid::send_target_angles(const MountAngleTarget& angle_rad)
 {
+    // the C11 doesn't respond to GAM at all - drive it with GSY/GSP instead
+    if (uses_individual_axis_speed_commands()) {
+        send_target_angles_individual_axis(angle_rad);
+        return;
+    }
+
     // set gimbal's lock state (follow the body-frame target)
     if (!set_gimbal_lock(false)) {
         return;
@@ -459,6 +475,12 @@ void AP_Mount_SkyDroid::send_target_angles(const MountAngleTarget& angle_rad)
 // send rate target in rad/s to gimbal
 void AP_Mount_SkyDroid::send_target_rates(const MountRateTarget& rate_rads)
 {
+    // the C11 doesn't respond to GSM at all - drive it with GSY/GSP instead
+    if (uses_individual_axis_speed_commands()) {
+        send_target_rates_individual_axis(rate_rads);
+        return;
+    }
+
     // set gimbal's lock state if it has changed
     if (!set_gimbal_lock(rate_rads.yaw_is_ef)) {
         return;
@@ -481,6 +503,64 @@ void AP_Mount_SkyDroid::send_target_rates(const MountRateTarget& rate_rads)
         hal.util->snprintf((char*)roll_databuff, ARRAY_SIZE(roll_databuff), "%02X", (uint8_t)roll_speed);
         send_variablelen_packet(HeaderType::VARIABLE_LEN, AddressByte::GIMBAL, AP_MOUNT_SKYDROID_ID3CHAR_SPEED_ROLL, true, roll_databuff, ARRAY_SIZE(roll_databuff)-1);
     }
+}
+
+// send angle target by closing the loop ourselves (models where GAM is confirmed
+// non-functional, e.g. C11) using GAC attitude feedback and driving GSY/GSP as the
+// rate actuator - there is no absolute-angle command that works on this model
+void AP_Mount_SkyDroid::send_target_angles_individual_axis(const MountAngleTarget& angle_rad)
+{
+    // set gimbal's lock state (follow the body-frame target)
+    set_gimbal_lock(false);
+
+    // clamp to the configured MNT1_YAW/PITCH_MIN/MAX range, same as the GAM path -
+    // AP_Mount's frontend does not clamp the target itself before calling us
+    const float yaw_target_rad = radians(constrain_float(degrees(angle_rad.get_bf_yaw()),
+                                                           _params.yaw_angle_min, _params.yaw_angle_max));
+    const float pitch_target_rad = radians(constrain_float(degrees(angle_rad.pitch),
+                                                             _params.pitch_angle_min, _params.pitch_angle_max));
+
+    // simple P-controller driving GSY/GSP as the rate actuator, using the GAC
+    // attitude feedback already parsed by gimbal_angle_analyse().  Gain chosen so
+    // full-scale rate (~4deg/s, see AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_MAX_DPS) is
+    // reached by about 2deg of error - comfortably inside the travel range while
+    // still slowing down smoothly on approach rather than a bang-bang overshoot
+    constexpr float kP = 2.0;  // (deg/s of rate command) per (deg of angle error)
+    const float yaw_error_deg = degrees(wrap_PI(yaw_target_rad - _current_angle_rad.z));
+    const float pitch_error_deg = degrees(pitch_target_rad - _current_angle_rad.y);
+    const float yaw_rate_dps = constrain_float(yaw_error_deg * kP,
+                                                -AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_MAX_DPS,
+                                                AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_MAX_DPS);
+    const float pitch_rate_dps = constrain_float(pitch_error_deg * kP,
+                                                  -AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_MAX_DPS,
+                                                  AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_MAX_DPS);
+
+    // GSY's sign is inverted vs AP_Mount's convention (see send_individual_axis_rate below)
+    send_individual_axis_rate(AP_MOUNT_SKYDROID_ID3CHAR_SPEED_YAW, -yaw_rate_dps);
+    send_individual_axis_rate(AP_MOUNT_SKYDROID_ID3CHAR_SPEED_PITCH, pitch_rate_dps);
+}
+
+// send rate target directly via GSY/GSP (models where GSM is confirmed non-functional, e.g. C11)
+void AP_Mount_SkyDroid::send_target_rates_individual_axis(const MountRateTarget& rate_rads)
+{
+    // set gimbal's lock state if it has changed
+    set_gimbal_lock(rate_rads.yaw_is_ef);
+
+    // GSY's sign is inverted vs AP_Mount's convention (confirmed on real hardware: a
+    // positive GSY value moves yaw LEFT, not right) - negate here so callers of this
+    // function keep using AP_Mount's normal yaw-right-positive convention.  GSP's
+    // sign matches AP_Mount's convention (pitch-up-positive) so is passed straight through
+    send_individual_axis_rate(AP_MOUNT_SKYDROID_ID3CHAR_SPEED_YAW, -degrees(rate_rads.yaw));
+    send_individual_axis_rate(AP_MOUNT_SKYDROID_ID3CHAR_SPEED_PITCH, degrees(rate_rads.pitch));
+}
+
+// send a single-axis rate command (GSY or GSP) for rate_dps, converted to the wire's
+// signed 8bit LSB units using the real-world calibrated scale.  Caller is responsible
+// for any axis-specific sign compensation (see send_target_rates_individual_axis() above)
+void AP_Mount_SkyDroid::send_individual_axis_rate(const Identifier id, float rate_dps)
+{
+    const int8_t rate_lsb = constrain_int16(roundf(rate_dps / AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_DPS_PER_LSB), -127, 127);
+    send_fixedlen_packet(AddressByte::GIMBAL, id, true, (uint8_t)rate_lsb);
 }
 
 // attitude information analysis of gimbal (arrives as "GAC" in response to our "GAA" enable request)

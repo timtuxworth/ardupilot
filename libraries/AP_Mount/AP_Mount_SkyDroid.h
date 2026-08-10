@@ -31,6 +31,10 @@
     matches AP_Mount's own convention (no sign flip needed, unlike Topotek's protocol)
   - the connected model (e.g. "C11", "C13") is queried at runtime via the "MOD"
     command and reported through CAMERA_INFORMATION
+  - confirmed on real C11 hardware: the combined/absolute-angle commands (GAM, GSM,
+    GAY, GAP) are silently ignored - only the individual-axis speed commands (GSY,
+    GSP) actually move that model, so both rate and (closed-loop) angle control for
+    the C11 are driven through those instead - see uses_individual_axis_speed_commands()
  */
 
 #pragma once
@@ -189,6 +193,33 @@ private:
 
     // send rate target in rad/s to gimbal
     void send_target_rates(const MountRateTarget& rate_rads) override;
+
+    // true if the connected model is known to only respond to the individual-axis
+    // GSY/GSP speed commands (confirmed on the C11; GAM/GSM/GAY/GAP - i.e. every
+    // combined or absolute-angle command - are silently ignored on that model).
+    // Unknown models (including before the "MOD" response has arrived) default to
+    // false and use the normal GAM/GSM angle/rate commands, since that's the
+    // documented behaviour and is confirmed working on at least the C10/C10Pro/C12/C20
+    // family
+    bool uses_individual_axis_speed_commands() const {
+        return _got_model_name && strncmp(_model_name, "C11", 3) == 0;
+    }
+
+    // send angle target by closing the loop ourselves (P-controller) using GAC
+    // attitude feedback and driving GSY/GSP as the rate actuator - there is no
+    // absolute-angle command that works on this model
+    void send_target_angles_individual_axis(const MountAngleTarget& angle_rad);
+
+    // send rate target directly via GSY/GSP, the only commands confirmed to move
+    // this model
+    void send_target_rates_individual_axis(const MountRateTarget& rate_rads);
+
+    // send a single-axis rate command (GSY or GSP) for rate_dps, converted to the
+    // wire's signed 8bit LSB units using the real-world calibrated scale (see
+    // AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_DPS_PER_LSB).  Caller is responsible for any
+    // axis-specific sign compensation (GSY's sign is inverted vs AP_Mount's convention
+    // - see send_target_rates_individual_axis())
+    void send_individual_axis_rate(const Identifier id, float rate_dps);
 
     // attitude information analysis of gimbal (response to GAA, arrives as "GAC")
     void gimbal_angle_analyse();
