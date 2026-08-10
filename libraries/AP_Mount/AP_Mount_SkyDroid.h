@@ -19,12 +19,18 @@
   Check Bit                     2           sum of all preceding bytes, output as 2 ASCII hex
                                             characters (high nibble first)
 
-  Notes specific to the C11:
+  This one driver covers every model in SkyDroid's "TOP protocol" gimbal camera
+  family (they all share the same wire protocol; only axis ranges and a few
+  optional features differ per model):
   - control is over UDP only (no direct UART), source address is always 'U'
-  - the C11 has only two controllable axes: pitch (-90 to +10 deg) and yaw (-90 to +90 deg).
-    There is no roll axis, so roll is never sent or expected in received packets.
+  - axis ranges vary by model, e.g. the C11 has only pitch (-90 to +10 deg) and
+    yaw (-90 to +90 deg), no roll axis; the C13 additionally has roll (-45 to
+    +45 deg).  Configure MNT1_PITCH/YAW/ROLL_MIN/MAX to match your hardware -
+    this driver does not hardcode any model's limits itself
   - SkyDroid's documented sign convention is yaw-right-positive, pitch-up-positive, which
     matches AP_Mount's own convention (no sign flip needed, unlike Topotek's protocol)
+  - the connected model (e.g. "C11", "C13") is queried at runtime via the "MOD"
+    command and reported through CAMERA_INFORMATION
  */
 
 #pragma once
@@ -39,7 +45,7 @@
 #include <AP_Common/AP_Common.h>
 
 #define AP_MOUNT_SKYDROID_PACKETLEN_MAX     28      // maximum number of bytes in a packet sent to or received from the gimbal
-#define AP_MOUNT_SKYDROID_CMD_CATEGORIES_NUM 4       // number of gimbal message types we parse
+#define AP_MOUNT_SKYDROID_CMD_CATEGORIES_NUM 5       // number of gimbal message types we parse
 
 class AP_Mount_SkyDroid : public AP_Mount_Backend_Serial
 {
@@ -78,9 +84,15 @@ public:
     bool has_camera_information() const override { return true; }
     // return camera vendor name
     void get_camera_vendor_name(char *buf, uint8_t buflen) const override { strncpy(buf, "SkyDroid", buflen); }
-    // return camera model name.  hardcoded rather than parsed from the "MOD" command since
-    // the protocol doc marks MOD as still under development for this model
-    void get_camera_model_name(char *buf, uint8_t buflen) const override { strncpy(buf, "C11", buflen); }
+    // return camera model name (e.g. "C11", "C13"), queried from the gimbal via the "MOD" command.
+    // this same driver supports every model in SkyDroid's "TOP protocol" gimbal camera family;
+    // the model name lets the GCS show which one is actually connected
+    void get_camera_model_name(char *buf, uint8_t buflen) const override {
+        if (!_got_model_name) {
+            return;
+        }
+        strncpy(buf, _model_name, buflen);
+    }
     // return camera firmware version
     uint32_t get_camera_firmware_version() const override { return _firmware_ver; }
     // return camera capability flags
@@ -163,6 +175,9 @@ private:
     // request gimbal version
     void request_gimbal_version();
 
+    // request gimbal model name (e.g. "C11", "C13")
+    void request_gimbal_model();
+
     // enable the gimbal to receive our attitude (FAE) and send it to us (GAA)
     bool send_attitude_enable();
 
@@ -186,6 +201,9 @@ private:
 
     // gimbal basic information analysis
     void gimbal_version_analyse();
+
+    // gimbal model name analysis (raw ASCII text, e.g. "C13")
+    void gimbal_model_analyse();
 
     // calculate checksum
     uint8_t calculate_crc(const uint8_t *cmd, uint8_t len) const;
@@ -211,8 +229,11 @@ private:
     bool _sdcard_status;                                        // memory card status (received from gimbal)
     bool _last_lock;                                            // last lock mode sent to gimbal
     bool _got_gimbal_version;                                   // true if gimbal's version has been received
+    bool _got_model_name;                                       // true if gimbal's model name has been received
+    bool _announced_connected;                                  // true once we've told the user the gimbal is connected
     uint32_t _firmware_ver;                                     // firmware version
-    Vector3f _current_angle_rad;                                // current angles in radians received from gimbal (x=roll (unused), y=pitch, z=yaw)
+    char _model_name[8];                                        // gimbal model name (e.g. "C11", "C13"), always null-terminated
+    Vector3f _current_angle_rad;                                // current angles in radians received from gimbal (x=roll, y=pitch, z=yaw).  roll is always 0 on models with no roll axis
     uint32_t _last_current_angle_ms;                            // system time (in milliseconds) that angle information received from the gimbal
     uint32_t _last_req_current_info_ms;                         // system time that this driver last requested current gimbal information
     uint8_t _last_req_step;                                     // 10hz request loop step (different requests are sent at various steps)
@@ -235,6 +256,7 @@ private:
         {{"REC"}, &AP_Mount_SkyDroid::gimbal_record_analyse},
         {{"SDC"}, &AP_Mount_SkyDroid::gimbal_sdcard_analyse},
         {{"VER"}, &AP_Mount_SkyDroid::gimbal_version_analyse},
+        {{"MOD"}, &AP_Mount_SkyDroid::gimbal_model_analyse},
     };
 };
 
