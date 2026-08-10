@@ -30,13 +30,17 @@ using namespace SITL;
 
 void SkyDroid::update(const Aircraft &aircraft)
 {
-    // Drive GimbalSim toward the angles commanded via the GAM packet.
-    // Wire encoding: pitch_cd = pitch_deg * 100, yaw_cd = yaw_deg * 100 (no sign
-    // flip either way; SkyDroid's own protocol is pitch-up-positive, matching
-    // AP_Mount's convention directly)
+    // Drive GimbalSim toward the angles commanded via the GAM/GAR packets.
+    // Wire encoding: pitch_cd = pitch_deg * 100, yaw_cd = yaw_deg * 100, roll_cd =
+    // roll_deg * 100 (no sign flip anywhere; SkyDroid's own protocol is
+    // pitch-up-positive, matching AP_Mount's convention directly).  Roll is only
+    // driven towards its target on models with a roll axis; _commanded_roll_cd
+    // stays at 0 (its initial value) otherwise, which is the same as commanding
+    // a level roll, so there is no behavioural difference either way
     {
         const float target_pitch_rad = radians(_commanded_pitch_cd * 0.01f);
         const float target_yaw_rad   = radians(_commanded_yaw_cd   * 0.01f);
+        const float target_roll_rad  = _has_roll_axis ? radians(_commanded_roll_cd * 0.01f) : 0.0f;
 
         Vector3f ja;
         gimbal.get_joint_angles(ja);
@@ -47,7 +51,7 @@ void SkyDroid::update(const Aircraft &aircraft)
 
         static constexpr float GAIN = 10.0f;
         gimbal.set_demanded_rates(Vector3f(
-            vehicle_rate_gimbal.x,
+            vehicle_rate_gimbal.x + (_has_roll_axis ? (target_roll_rad - ja.x) * GAIN : 0.0f),
             vehicle_rate_gimbal.y + (target_pitch_rad - ja.y) * GAIN,
             vehicle_rate_gimbal.z + (target_yaw_rad   - ja.z) * GAIN));
     }
@@ -198,6 +202,10 @@ void SkyDroid::handle_packet(uint8_t data_len)
         const uint8_t data[] { '0','0','0','1','0', '0','0','0','2','0' };
         send_packet('D', "SDC", false, data, sizeof(data));
 
+    } else if (strncmp(id, "MOD", 3) == 0) {
+        // model name response is raw ASCII text, e.g. "C13"
+        send_packet('D', "MOD", false, (const uint8_t*)_model_name, strlen(_model_name));
+
     } else if (strncmp(id, "GAM", 3) == 0 && data_len >= 12) {
         // combined yaw+pitch angle command: Y0-3=yaw angle(4hex) Y4-5=yaw speed(2hex)
         // P0-3=pitch angle(4hex) P4-5=pitch speed(2hex), all centidegrees/0.5deg-per-sec
@@ -208,8 +216,15 @@ void SkyDroid::handle_packet(uint8_t data_len)
         if (hex_chars_to_uint32((const char*)&_buf[16], 4, tmp)) {
             _commanded_pitch_cd = (int16_t)tmp;
         }
+
+    } else if (strncmp(id, "GAR", 3) == 0 && data_len >= 4 && _has_roll_axis) {
+        // roll angle command (models with a roll axis only): X0-3=angle(4hex) X4-5=speed(2hex)
+        uint32_t tmp;
+        if (hex_chars_to_uint32((const char*)&_buf[10], 4, tmp)) {
+            _commanded_roll_cd = (int16_t)tmp;
+        }
     }
-    // all other commands (GSM, PTZ, FAE, FAI, CAP, REC, DZM etc.) absorbed silently
+    // all other commands (GSM, GSR, PTZ, FAE, FAI, CAP, REC, DZM etc.) absorbed silently
 }
 
 void SkyDroid::send_packet(char addr2, const char id[3], bool write, const uint8_t *data, uint8_t len)

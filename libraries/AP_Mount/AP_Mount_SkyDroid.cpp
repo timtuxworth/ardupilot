@@ -21,6 +21,8 @@ extern const AP_HAL::HAL& hal;
 #define AP_MOUNT_SKYDROID_ID3CHAR_GIMBAL_MODE       "PTZ"        // discrete gimbal control, data bytes: 00:stop, 01:up, 02:down, 03:left, 04:right, 05:center, 06:follow, 07:lock head
 #define AP_MOUNT_SKYDROID_ID3CHAR_SPEED_YAW_PITCH   "GSM"        // rate control, data bytes: yaw speed then pitch speed, each signed 8bit hex, units of 0.5deg/s
 #define AP_MOUNT_SKYDROID_ID3CHAR_ANGLE_YAW_PITCH   "GAM"        // angle control, data bytes: yaw angle(4hex,0.01deg)+yaw speed(2hex)+pitch angle(4hex,0.01deg)+pitch speed(2hex)
+#define AP_MOUNT_SKYDROID_ID3CHAR_ANGLE_ROLL         "GAR"       // roll angle control (models with a roll axis, e.g. C13), data bytes: angle(4hex,0.01deg)+speed(2hex)
+#define AP_MOUNT_SKYDROID_ID3CHAR_SPEED_ROLL         "GSR"       // roll rate control (models with a roll axis, e.g. C13), data bytes: signed 8bit hex, units of 0.5deg/s
 #define AP_MOUNT_SKYDROID_ID3CHAR_ATTITUDE_ENABLE   "GAA"        // enable/disable gimbal->us attitude streaming, data bytes: 00:off, 01-64:rate in Hz
 #define AP_MOUNT_SKYDROID_ID3CHAR_ATTITUDE_DATA     "GAC"        // unsolicited attitude data from gimbal, data bytes: yaw+pitch+roll, each 4hex 0.01deg
 #define AP_MOUNT_SKYDROID_ID3CHAR_FC_ATTITUDE_ENABLE "FAE"       // enable/disable us->gimbal attitude streaming, data bytes: 00:off, 01:on
@@ -29,6 +31,7 @@ extern const AP_HAL::HAL& hal;
 #define AP_MOUNT_SKYDROID_ID3CHAR_CAPTURE           "CAP"        // take picture, data bytes: 01
 #define AP_MOUNT_SKYDROID_ID3CHAR_SD_CARD           "SDC"        // get SD card state, data bytes: 00 to query
 #define AP_MOUNT_SKYDROID_ID3CHAR_GET_VERSION       "VER"        // get firmware version, data bytes always 00
+#define AP_MOUNT_SKYDROID_ID3CHAR_GET_MODEL         "MOD"        // get model name (e.g. "C11"), data bytes always 00
 #define AP_MOUNT_SKYDROID_ID3CHAR_DIGITAL_ZOOM      "DZM"        // digital zoom, data bytes: 0A:zoom+ (single step), 0B:zoom- (single step)
 
 #define AP_MOUNT_SKYDROID_DEBUG 0
@@ -83,6 +86,12 @@ void AP_Mount_SkyDroid::update()
     case 6:
         // (re)enable gimbal to accept our attitude pushes
         send_attitude_enable();
+        break;
+    case 8:
+        // get gimbal model name (e.g. "C11" vs "C13")
+        if (!_got_model_name) {
+            request_gimbal_model();
+        }
         break;
     }
 
@@ -192,7 +201,7 @@ void AP_Mount_SkyDroid::send_camera_settings(mavlink_channel_t chan) const
 // get attitude as a quaternion.  returns true on success
 bool AP_Mount_SkyDroid::get_attitude_quaternion(Quaternion& att_quat)
 {
-    // x=roll (always zero, C11 has no roll axis), y=pitch, z=yaw
+    // x=roll (always zero on models with no roll axis, e.g. C11), y=pitch, z=yaw
     att_quat.from_euler(_current_angle_rad.x, _current_angle_rad.y, _current_angle_rad.z);
     return true;
 }
@@ -374,6 +383,13 @@ void AP_Mount_SkyDroid::request_gimbal_version()
     send_fixedlen_packet(AddressByte::SYSTEM_AND_IMAGE, AP_MOUNT_SKYDROID_ID3CHAR_GET_VERSION, false, 0);
 }
 
+// request gimbal model name (e.g. "C11", "C13")
+void AP_Mount_SkyDroid::request_gimbal_model()
+{
+    // sample command: #TPUD2rMOD00
+    send_fixedlen_packet(AddressByte::SYSTEM_AND_IMAGE, AP_MOUNT_SKYDROID_ID3CHAR_GET_MODEL, false, 0);
+}
+
 // (re)enable the gimbal to accept our attitude pushes
 bool AP_Mount_SkyDroid::send_attitude_enable()
 {
@@ -407,11 +423,13 @@ void AP_Mount_SkyDroid::send_target_angles(const MountAngleTarget& angle_rad)
         return;
     }
 
-    // clamp to the configured MNT1_YAW/PITCH_MIN/MAX range.  Note: the C11's real
-    // hardware limit is -90..+10 deg pitch, -90..+90 deg yaw - set MNT1_PITCH_MAX=10
-    // (and leave yaw at the -90/+90 default) to match the physical hardware; this
-    // driver does not hardcode that limit itself so it stays correct if a future
-    // firmware/model widens the range
+    // clamp to the configured MNT1_YAW/PITCH/ROLL_MIN/MAX range.  Note: this driver
+    // covers every model in SkyDroid's "TOP protocol" gimbal camera family, and
+    // their physical limits differ (e.g. C11: -90..+10 deg pitch, no roll axis;
+    // C13: -90..+10 deg pitch, -45..+45 deg roll) - set MNT1_PITCH/ROLL_MIN/MAX to
+    // match your actual hardware; this driver does not hardcode any model's limits
+    // itself so it stays correct across the family and if a future model changes them
+    const uint8_t speed = 99;  // GAM/GAR's documented max speed sub-field value (0.5deg/s units)
     const int16_t yaw_cd = constrain_int16(degrees(angle_rad.get_bf_yaw()) * 100,
                                             _params.yaw_angle_min * 100,
                                             _params.yaw_angle_max * 100);
@@ -420,11 +438,22 @@ void AP_Mount_SkyDroid::send_target_angles(const MountAngleTarget& angle_rad)
                                               _params.pitch_angle_max * 100);
 
     // sample command: #TPUGCwGAM
-    const uint8_t speed = 99;  // GAM's documented max speed sub-field value (0.5deg/s units)
     uint8_t databuff[13];
     hal.util->snprintf((char*)databuff, ARRAY_SIZE(databuff), "%04X%02X%04X%02X",
                         (uint16_t)yaw_cd, speed, (uint16_t)pitch_cd, speed);
     send_variablelen_packet(HeaderType::VARIABLE_LEN, AddressByte::GIMBAL, AP_MOUNT_SKYDROID_ID3CHAR_ANGLE_YAW_PITCH, true, databuff, ARRAY_SIZE(databuff)-1);
+
+    // roll is a separate command (GAM only combines yaw+pitch) and only applies to
+    // models with a roll axis (e.g. C13); roll_range_valid() is false by default
+    // (MNT1_ROLL_MIN/MAX both 0) so this is a no-op on models without one, like the C11
+    if (roll_range_valid()) {
+        const int16_t roll_cd = constrain_int16(degrees(angle_rad.roll) * 100,
+                                                 _params.roll_angle_min * 100,
+                                                 _params.roll_angle_max * 100);
+        uint8_t roll_databuff[7];
+        hal.util->snprintf((char*)roll_databuff, ARRAY_SIZE(roll_databuff), "%04X%02X", (uint16_t)roll_cd, speed);
+        send_variablelen_packet(HeaderType::VARIABLE_LEN, AddressByte::GIMBAL, AP_MOUNT_SKYDROID_ID3CHAR_ANGLE_ROLL, true, roll_databuff, ARRAY_SIZE(roll_databuff)-1);
+    }
 }
 
 // send rate target in rad/s to gimbal
@@ -443,6 +472,15 @@ void AP_Mount_SkyDroid::send_target_rates(const MountRateTarget& rate_rads)
     uint8_t databuff[5];
     hal.util->snprintf((char*)databuff, ARRAY_SIZE(databuff), "%02X%02X", (uint8_t)yaw_speed, (uint8_t)pitch_speed);
     send_variablelen_packet(HeaderType::VARIABLE_LEN, AddressByte::GIMBAL, AP_MOUNT_SKYDROID_ID3CHAR_SPEED_YAW_PITCH, true, databuff, ARRAY_SIZE(databuff)-1);
+
+    // roll is a separate command (GSM only combines yaw+pitch) and only applies to
+    // models with a roll axis (e.g. C13); no-op on models without one, like the C11
+    if (roll_range_valid()) {
+        const int8_t roll_speed = constrain_int16(degrees(rate_rads.roll) * 2, -127, 127);
+        uint8_t roll_databuff[3];
+        hal.util->snprintf((char*)roll_databuff, ARRAY_SIZE(roll_databuff), "%02X", (uint8_t)roll_speed);
+        send_variablelen_packet(HeaderType::VARIABLE_LEN, AddressByte::GIMBAL, AP_MOUNT_SKYDROID_ID3CHAR_SPEED_ROLL, true, roll_databuff, ARRAY_SIZE(roll_databuff)-1);
+    }
 }
 
 // attitude information analysis of gimbal (arrives as "GAC" in response to our "GAA" enable request)
@@ -457,13 +495,21 @@ void AP_Mount_SkyDroid::gimbal_angle_analyse()
     }
     const int16_t yaw_angle_cd = wrap_180_cd((int16_t)yaw_raw);
     const int16_t pitch_angle_cd = (int16_t)pitch_raw;
-    const int16_t roll_angle_cd = (int16_t)roll_raw;    // always 0 on C11, no roll axis
+    const int16_t roll_angle_cd = (int16_t)roll_raw;    // always 0 on models with no roll axis (e.g. C11)
 
     // convert cd to radians
     _current_angle_rad.x = cd_to_rad(roll_angle_cd);
     _current_angle_rad.y = cd_to_rad(pitch_angle_cd);
     _current_angle_rad.z = cd_to_rad(yaw_angle_cd);
     _last_current_angle_ms = AP_HAL::millis();
+
+    // announce gimbal connection to the user on the first attitude report received.
+    // this does not depend on the "VER" command (whose model support is undocumented
+    // for some SkyDroid models) so it is a more reliable connection signal
+    if (!_announced_connected) {
+        _announced_connected = true;
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "%s connected", send_message_prefix);
+    }
 }
 
 // gimbal video information analysis
@@ -525,6 +571,22 @@ void AP_Mount_SkyDroid::gimbal_version_analyse()
         version[2]);    // patch version
 
     _got_gimbal_version = true;
+}
+
+// gimbal model name analysis.  response data is raw ASCII text, e.g. "C13"
+void AP_Mount_SkyDroid::gimbal_model_analyse()
+{
+    uint8_t data_buf_len;
+    if (!hex_char_to_nibble(_msg_buff[5], data_buf_len) || data_buf_len == 0) {
+        return;
+    }
+    memset(_model_name, 0, sizeof(_model_name));
+    memcpy(_model_name, _msg_buff + 10, MIN((uint8_t)(sizeof(_model_name)-1), data_buf_len));
+
+    // display gimbal model name to user
+    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "%s %s", send_message_prefix, _model_name);
+
+    _got_model_name = true;
 }
 
 // calculate checksum
