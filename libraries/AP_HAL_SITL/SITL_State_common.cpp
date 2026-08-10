@@ -243,6 +243,12 @@ SITL::SerialDevice *SITL_State_Common::create_serial_sim(const char *name, const
         sitl_model->add_gimbal_sim(*topotek);
         return topotek;
 #endif  // AP_SIM_TOPOTEK_ENABLED
+#if AP_SIM_SKYDROID_ENABLED
+    } else if (streq(name, "skydroid")) {
+        const auto skydroid = NEW_NOTHROW SITL::SkyDroid();
+        sitl_model->add_gimbal_sim(*skydroid);
+        return skydroid;
+#endif  // AP_SIM_SKYDROID_ENABLED
 #if AP_SIM_VIEWPRO_ENABLED
     } else if (streq(name, "viewpro")) {
         const auto viewpro = NEW_NOTHROW SITL::Viewpro();
