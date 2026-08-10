@@ -8308,6 +8308,31 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         self.mount_test_body(pitch_rc_neutral=1818, do_rate_tests=False,
                              constrain_sysid_target=False)
 
+    def MountSkyDroid(self):
+        '''test SkyDroid gimbal using SIM_SkyDroid simulator'''
+        self.set_parameters({
+            "MNT1_TYPE": 15,      # SkyDroid
+            "CAM1_TYPE": 4,       # Mount
+            "SERIAL5_PROTOCOL": 8,  # gimbal
+            "RC6_OPTION": 213,    # MOUNT1_PITCH
+        })
+        self.customise_SITL_commandline(["--serial5=sim:skydroid:"])
+        # version "V1.0.0" from SIM_SkyDroid: major=1 | (minor=0)<<8 | (patch=0)<<16 = 1
+        # cap flags: CAPTURE_VIDEO | CAPTURE_IMAGE | HAS_BASIC_ZOOM
+        self.mount_check_camera_information(
+            "SkyDroid", "C11",
+            expected_fw_version=1,
+            expected_cap_flags=0x43,
+        )
+        # pitch_rc_neutral=1818: with RC6 min=1000 max=2000 trim=1500 and
+        # default MNT1_PITCH_MIN=-90 / MNT1_PITCH_MAX=20, norm_input=0.636
+        # maps to exactly 0 deg pitch.
+        # constrain_sysid_target=True (the default): unlike Topotek/Viewpro,
+        # AP_Mount_SkyDroid::send_target_angles does clamp pitch/yaw to the
+        # configured MNT1_PITCH/YAW_MIN/MAX before sending, so the 68-deg
+        # sysid test (which expects that clamp) is exercised here.
+        self.mount_test_body(pitch_rc_neutral=1818, do_rate_tests=False)
+
     def MountTopotekNetwork(self):
         '''test Topotek gimbal connected via a network port rather than a serial port'''
         self.set_parameters({
@@ -19327,6 +19352,7 @@ return update, 1000
             self.TakeoffWithLocation,
             self.MountTopotek,
             self.MountTopotekNetwork,
+            self.MountSkyDroid,
             self.MountViewPro,
             self.MountAVTCM62,
             self.MountAVTCM62Dual,
