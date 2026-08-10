@@ -8461,6 +8461,21 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
 
     def MountSkyDroid(self):
         '''test SkyDroid gimbal using SIM_SkyDroid simulator'''
+        # pitch_rc_neutral=1818: with RC6 min=1000 max=2000 trim=1500 and
+        # default MNT1_PITCH_MIN=-90 / MNT1_PITCH_MAX=20, norm_input=0.636
+        # maps to exactly 0 deg pitch.
+        pitch_rc_neutral = 1818
+        # centre RC6 *before* the parameter changes below reboot the FC.  MNT1's
+        # default mode is RC_TARGETING, so without this the mount starts driving
+        # toward whatever angle RC6's un-centred default value maps to the moment
+        # it boots, well before the test gets to explicitly select NEUTRAL mode.
+        # Harmless for backends with a fast control loop (they recover from that
+        # transient inside the neutral check's 5s budget), but the C11's
+        # individual-axis GSY/GSP commands are calibrated to a real, fairly slow
+        # ~4deg/s max slew rate (see AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_MAX_DPS) that
+        # can't out-run a multi-tens-of-degrees transient in time, so avoid causing
+        # it in the first place instead
+        self.set_rc(6, pitch_rc_neutral)
         self.set_parameters({
             "MNT1_TYPE": 15,      # SkyDroid
             "CAM1_TYPE": 4,       # Mount
@@ -8475,14 +8490,17 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             expected_fw_version=1,
             expected_cap_flags=0x43,
         )
-        # pitch_rc_neutral=1818: with RC6 min=1000 max=2000 trim=1500 and
-        # default MNT1_PITCH_MIN=-90 / MNT1_PITCH_MAX=20, norm_input=0.636
-        # maps to exactly 0 deg pitch.
         # constrain_sysid_target=True (the default): unlike Topotek/Viewpro,
         # AP_Mount_SkyDroid::send_target_angles does clamp pitch/yaw to the
         # configured MNT1_PITCH/YAW_MIN/MAX before sending, so the 68-deg
         # sysid test (which expects that clamp) is exercised here.
-        self.mount_test_body(pitch_rc_neutral=1818, do_rate_tests=False)
+        # neutral_tol_deg=3.5: confirmed on real hardware that the C11 only responds to
+        # the individual-axis GSY/GSP speed commands (GAM/GSM are silently ignored -
+        # see AP_Mount_SkyDroid::uses_individual_axis_speed_commands()); since there's
+        # no working absolute-angle command, the driver closes an angle P-controller
+        # loop on top of them, so allow a little settling tolerance rather than the
+        # exact GAM-based positioning the other backends use
+        self.mount_test_body(pitch_rc_neutral=pitch_rc_neutral, do_rate_tests=False, neutral_tol_deg=3.5)
 
     def MountSkyDroidC13(self):
         '''test SkyDroid C13 gimbal using SIM_SkyDroid simulator

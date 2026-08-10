@@ -69,10 +69,26 @@ private:
 
     // last commanded angles from GAM/GAR packets (wire centidegrees, same sign as sent
     // by driver i.e. no sign flip: SkyDroid's own protocol is pitch-up-positive same as
-    // AP_Mount).  _commanded_roll_cd is only meaningful if _has_roll_axis
+    // AP_Mount).  _commanded_roll_cd is only meaningful if _has_roll_axis.  Only used
+    // for models other than the C11 - confirmed on real C11 hardware that GAM/GSM are
+    // silently ignored, so the "C11" instance ignores these and uses
+    // _commanded_yaw/pitch_speed_lsb instead
     int16_t _commanded_pitch_cd;
     int16_t _commanded_yaw_cd;
     int16_t _commanded_roll_cd;
+
+    // last GSY/GSP speed values received (signed 8bit wire units).  Only meaningful
+    // for the "C11" instance - confirmed on real hardware that these individual-axis
+    // speed commands are the only ones that actually move that model (GAM/GSM/GAY/GAP
+    // are all silently ignored).  Not yet extended to the C13 (untested on real
+    // hardware whether it needs the same treatment)
+    int8_t _commanded_yaw_speed_lsb;
+    int8_t _commanded_pitch_speed_lsb;
+
+    // true if this instance should be driven by the individual-axis GSY/GSP speed
+    // commands rather than GAM/GSM, matching
+    // AP_Mount_SkyDroid::uses_individual_axis_speed_commands()'s own model check
+    bool uses_individual_axis_speed_commands() const { return strcmp(_model_name, "C11") == 0; }
 
     // read and dispatch incoming packets from autopilot
     void update_input();
