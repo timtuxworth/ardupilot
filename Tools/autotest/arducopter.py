@@ -8333,6 +8333,42 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         # sysid test (which expects that clamp) is exercised here.
         self.mount_test_body(pitch_rc_neutral=1818, do_rate_tests=False)
 
+    def MountSkyDroidNetwork(self):
+        '''test SkyDroid gimbal connected via a UDP network port rather than a serial port
+
+        the real C11 hardware is UDP-only (no serial control interface), so this
+        exercises the actual transport used in the field rather than the SITL
+        serial-port path used by MountSkyDroid'''
+        self.set_parameters({
+            "MNT1_TYPE": 15,      # SkyDroid
+            "CAM1_TYPE": 4,       # Mount
+            "NET_ENABLE": 1,
+            "NET_P1_TYPE": 1,     # UDP client
+            "NET_P1_PROTOCOL": 8,  # gimbal
+            "NET_P1_IP0": 127,
+            "NET_P1_IP1": 0,
+            "NET_P1_IP2": 0,
+            "NET_P1_IP3": 1,
+            "NET_P1_PORT": 15006,
+        })
+        # the simulated gimbal listens on a UDP socket rather than
+        # being attached to one of the autopilot's serial ports:
+        self.customise_SITL_commandline(["--net-device=skydroid:15006:udp"])
+        self.mount_check_camera_information(
+            "SkyDroid", "C11",
+            expected_fw_version=1,
+            expected_cap_flags=0x43,
+        )
+        # command an angle and check the gimbal reports reaching it,
+        # which requires traffic in both directions:
+        self.set_mount_mode(mavutil.mavlink.MAV_MOUNT_MODE_MAVLINK_TARGETING)
+        self.run_cmd(
+            mavutil.mavlink.MAV_CMD_DO_MOUNT_CONTROL,
+            p1=-30,  # pitch angle in degrees
+            p7=mavutil.mavlink.MAV_MOUNT_MODE_MAVLINK_TARGETING,
+        )
+        self.wait_mount_roll_pitch_yaw_deg(p=-30)
+
     def MountTopotekNetwork(self):
         '''test Topotek gimbal connected via a network port rather than a serial port'''
         self.set_parameters({
@@ -19353,6 +19389,7 @@ return update, 1000
             self.MountTopotek,
             self.MountTopotekNetwork,
             self.MountSkyDroid,
+            self.MountSkyDroidNetwork,
             self.MountViewPro,
             self.MountAVTCM62,
             self.MountAVTCM62Dual,
