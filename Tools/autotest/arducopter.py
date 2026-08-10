@@ -8333,6 +8333,52 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         # sysid test (which expects that clamp) is exercised here.
         self.mount_test_body(pitch_rc_neutral=1818, do_rate_tests=False)
 
+    def MountSkyDroidC13(self):
+        '''test SkyDroid C13 gimbal using SIM_SkyDroid simulator
+
+        the C13 shares the same wire protocol as the C11 (same AP_Mount_SkyDroid
+        driver) but has a roll axis (-45..+45 deg) that the C11 doesn't, so this
+        test exercises that in addition to the usual pitch/yaw checks'''
+        self.set_parameters({
+            "MNT1_TYPE": 15,      # SkyDroid
+            "CAM1_TYPE": 4,       # Mount
+            "SERIAL5_PROTOCOL": 8,  # gimbal
+            "RC6_OPTION": 213,    # MOUNT1_PITCH
+            "MNT1_ROLL_MIN": -45,
+            "MNT1_ROLL_MAX": 45,
+        })
+        self.customise_SITL_commandline(["--serial5=sim:skydroid_c13:"])
+        # version "V1.0.0" from SIM_SkyDroid: major=1 | (minor=0)<<8 | (patch=0)<<16 = 1
+        # cap flags: CAPTURE_VIDEO | CAPTURE_IMAGE | HAS_BASIC_ZOOM
+        # model name "C13" confirms the roll-capable variant was actually selected
+        self.mount_check_camera_information(
+            "SkyDroid", "C13",
+            expected_fw_version=1,
+            expected_cap_flags=0x43,
+        )
+        self.mount_test_body(pitch_rc_neutral=1818, do_rate_tests=False)
+
+        # exercise the roll axis, which the C11 doesn't have
+        self.progress("Testing mount roll targeting (C13-only axis)")
+        self.context_push()
+        self.set_parameters({
+            'RC11_OPTION': 212,    # MOUNT1_ROLL
+        })
+        self.set_mount_mode(mavutil.mavlink.MAV_MOUNT_MODE_RC_TARGETING)
+        self.set_rc(11, 1100)
+        tstart = self.get_sim_time()
+        achieved = False
+        while self.get_sim_time_cached() - tstart < 10:
+            mount_roll_deg, _, _, _ = self.get_mount_roll_pitch_yaw_deg()
+            self.progress("roll=%f" % mount_roll_deg)
+            if abs(mount_roll_deg) > 30:
+                achieved = True
+                break
+        self.set_rc(11, 1500)
+        self.context_pop()
+        if not achieved:
+            raise NotAchievedException("Mount roll not achieved")
+
     def MountSkyDroidNetwork(self):
         '''test SkyDroid gimbal connected via a UDP network port rather than a serial port
 
@@ -19389,6 +19435,7 @@ return update, 1000
             self.MountTopotek,
             self.MountTopotekNetwork,
             self.MountSkyDroid,
+            self.MountSkyDroidC13,
             self.MountSkyDroidNetwork,
             self.MountViewPro,
             self.MountAVTCM62,

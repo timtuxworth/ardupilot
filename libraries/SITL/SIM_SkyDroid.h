@@ -13,13 +13,20 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 /*
-  Simulator for SkyDroid gimbal
+  Simulator for SkyDroid gimbal.  This one class simulates every model in
+  SkyDroid's "TOP protocol" gimbal camera family (they all share the same
+  wire protocol); which model is being simulated is selected by the
+  constructor arguments, and registered under separate device names (see
+  SITL_State_common.cpp) since each has different capabilities
 
 ./Tools/autotest/sim_vehicle.py --gdb --debug -v ArduCopter -A --serial5=sim:skydroid --speedup=1
 
 param set MNT1_TYPE 15       # skydroid
 param set SERIAL5_PROTOCOL 8 # gimbal
 reboot
+
+To simulate a C13 (which has a roll axis, unlike the C11) use
+--serial5=sim:skydroid_c13 instead and set MNT1_ROLL_MIN/MAX to -45/45.
 
 */
 
@@ -37,12 +44,21 @@ namespace SITL {
 class SkyDroid : public Mount {
 public:
 
+    // model_name is returned verbatim in response to the "MOD" command (e.g. "C11",
+    // "C13").  has_roll_axis selects whether GAR/GSR (roll angle/rate) commands are
+    // handled; models without a roll axis (e.g. the C11) ignore them
+    SkyDroid(const char *model_name, bool has_roll_axis) :
+        _model_name(model_name), _has_roll_axis(has_roll_axis) {}
+
     void update(const Aircraft &aircraft) override;
 
 private:
 
     // the physical gimbal:
     Gimbal gimbal;
+
+    const char *_model_name;
+    const bool _has_roll_axis;
 
     // input accumulation buffer; also used as working buffer by handle_packet()
     static constexpr uint8_t PACKETLEN_MAX = 28;
@@ -51,10 +67,12 @@ private:
 
     uint32_t _last_attitude_ms;     // time of last attitude packet sent
 
-    // last commanded angles from GAM packet (wire centidegrees, same sign as sent by driver
-    // i.e. no sign flip: SkyDroid's own protocol is pitch-up-positive same as AP_Mount)
+    // last commanded angles from GAM/GAR packets (wire centidegrees, same sign as sent
+    // by driver i.e. no sign flip: SkyDroid's own protocol is pitch-up-positive same as
+    // AP_Mount).  _commanded_roll_cd is only meaningful if _has_roll_axis
     int16_t _commanded_pitch_cd;
     int16_t _commanded_yaw_cd;
+    int16_t _commanded_roll_cd;
 
     // read and dispatch incoming packets from autopilot
     void update_input();
