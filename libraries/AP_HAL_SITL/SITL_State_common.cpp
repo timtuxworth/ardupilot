@@ -14,6 +14,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <strings.h>
 #include <sys/select.h>
 
 #include <AP_Param/AP_Param.h>
@@ -365,10 +366,12 @@ SITL::SerialDevice *SITL_State_Common::create_serial_sim(const char *name, const
 
 #if AP_SIM_SERIALDEVICE_NETWORK_ENABLED
 /*
-  create a simulated device which the autopilot connects to over TCP
-  rather than over one of its simulated serial ports.  This is used to
-  simulate devices attached to the autopilot's network ports (NET_Pn).
-  spec is of the form NAME:TCPPORT e.g. "topotek:15005"
+  create a simulated device which the autopilot connects to over the
+  network (TCP by default, or UDP) rather than over one of its
+  simulated serial ports.  This is used to simulate devices attached
+  to the autopilot's network ports (NET_Pn).
+  spec is of the form NAME:PORT or NAME:PORT:PROTOCOL, e.g.
+  "topotek:15005" (TCP, the default) or "skydroid:15005:udp"
  */
 void SITL_State_Common::create_net_serial_sim(const char *spec)
 {
@@ -383,13 +386,21 @@ void SITL_State_Common::create_net_serial_sim(const char *spec)
     char *saveptr = nullptr;
     const char *name = strtok_r(s, ":", &saveptr);
     const char *port_str = strtok_r(nullptr, ":", &saveptr);
+    const char *protocol_str = strtok_r(nullptr, ":", &saveptr);  // optional, defaults to "tcp"
     if (name == nullptr || port_str == nullptr) {
-        AP_HAL::panic("Bad network device (%s); expected NAME:TCPPORT", spec);
+        AP_HAL::panic("Bad network device (%s); expected NAME:PORT[:PROTOCOL]", spec);
+    }
+    const bool use_udp = (protocol_str != nullptr) && (strcasecmp(protocol_str, "udp") == 0);
+    if (protocol_str != nullptr && !use_udp && strcasecmp(protocol_str, "tcp") != 0) {
+        AP_HAL::panic("Bad network device protocol (%s); expected 'tcp' or 'udp'", protocol_str);
     }
 
     SITL::SerialDevice *device = create_serial_sim(name, nullptr, 0);
-    if (!device->listen_on_tcp_port(atoi(port_str))) {
-        AP_HAL::panic("Failed to attach %s to TCP port %s", name, port_str);
+    const bool ok = use_udp ?
+        device->listen_on_udp_port(atoi(port_str)) :
+        device->listen_on_tcp_port(atoi(port_str));
+    if (!ok) {
+        AP_HAL::panic("Failed to attach %s to %s port %s", name, use_udp ? "UDP" : "TCP", port_str);
     }
     net_serial_sims[num_net_serial_sims++] = device;
 
