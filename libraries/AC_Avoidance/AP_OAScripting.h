@@ -52,10 +52,10 @@ public:
     enum class ObstacleType : uint8_t {
         GENERAL                     = 0,
         MAV_SYSID                   = 1,
-        // Named GENERAL_AVIATION, not "ADSB", on purpose: the source being ADS-B does not
+        // Named AIRCRAFT, not "ADSB", on purpose: the source being ADS-B does not
         // fix the type. An ADS-B contact with a UAV emitter is a drone (MAV_SYSID above),
         // so "ADSB" would span two ObstacleTypes. This one is specifically crewed aircraft.
-        GENERAL_AVIATION            = 2,
+        AIRCRAFT            = 2,
         WEATHER                     = 3,
         BIRD_MIGRATORY              = 4,
         BIRD_OF_PREY                = 5,
@@ -160,8 +160,6 @@ struct OAObstacle {
     uint32_t                    src_id;         // The AP_Avoid src_id
     uint32_t                    icao_code;      // The ICAO code (if relevant) from ADSB
     uint32_t                    emitter_type;   // The ADSB_EMITTER of the obstacle (if relevant)
-    bool                        is_aircraft;    // Whether or not this is an aircraft
-    bool                        is_drone;       // Whether or not this is a drone/UAV
     uint8_t                     obstacle_type;
     char                        *label;
 
