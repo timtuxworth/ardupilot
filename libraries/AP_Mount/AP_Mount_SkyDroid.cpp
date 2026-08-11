@@ -32,17 +32,19 @@ extern const AP_HAL::HAL& hal;
 // (not saturated) up to the max wire value of 127
 #define AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_DPS_PER_LSB 0.03125f
 #define AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_MAX_DPS    (127 * AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_DPS_PER_LSB)
-// minimum interval between repeated PTZ fine-tune nudges (yaw/roll on the C13) - the
-// originally-validated 200ms (5hz) ceiling, confirmed safe via the one-command-at-a-
-// time real-hardware testing that discovered this mechanism in the first place.  Do
-// not raise this without first confirming GAC attitude feedback stays healthy at
-// whatever rate is tried - a much faster (20ms/50hz) rate was briefly tested and
-// associated with a serious real-hardware runaway (all three axes ran to their
-// limits and kept pushing, immediately after boot with no command involved) -
-// suspected but unconfirmed cause was the extra send volume overwhelming the
-// camera's own processing and starving GAC feedback, so every axis's closed loop
-// kept reacting to a stale error that never shrank.  Reverted to this known-safe
-// value as a precaution
+// minimum interval between repeated PTZ fine-tune nudges (yaw/roll on the C13) -
+// back to the originally-validated 200ms (5hz) ceiling.  Was briefly raised to 20ms
+// (near the driver's native 50hz) to test whether the fine-tune mechanism just
+// needed to be sent faster to feel smooth, but reverted as a precaution after a
+// real-hardware test with that change active saw ALL THREE axes (not just roll -
+// see AP_MOUNT_SKYDROID_FINETUNE_ROLL_ENABLED) run away to their limits and keep
+// pushing, immediately after boot with no command involved.  Leading theory: the
+// extra send volume (this plus the fast MOD retry etc.) may have overwhelmed the
+// camera's own processing and starved our GAC attitude feedback, so every axis's
+// closed loop kept reacting to a stale error that never shrank - not confirmed, but
+// reverting this is the cheapest way to rule it out before testing further.  Do not
+// raise this again without first confirming GAC feedback stays healthy at whatever
+// rate is tried
 #define AP_MOUNT_SKYDROID_FINETUNE_NUDGE_INTERVAL_MS 200
 #define AP_MOUNT_SKYDROID_ID3CHAR_ATTITUDE_ENABLE   "GAA"        // enable/disable gimbal->us attitude streaming, data bytes: 00:off, 01-64:rate in Hz
 #define AP_MOUNT_SKYDROID_ID3CHAR_ATTITUDE_DATA     "GAC"        // unsolicited attitude data from gimbal, data bytes: yaw+pitch+roll, each 4hex 0.01deg
@@ -137,6 +139,16 @@ void AP_Mount_SkyDroid::update()
 
     // reading incoming packets from gimbal
     read_incoming_packets();
+
+    // announce, once, that we're defaulting to AP_MOUNT_SKYDROID_DEFAULT_MODEL until
+    // "MOD" answers - see effective_model_name() for why.  gimbal_model_analyse()
+    // sends its own message with the real model name the moment "MOD" does answer,
+    // so the user always knows which is actually in effect
+    if (!_announced_default_model) {
+        _announced_default_model = true;
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "%s defaulting to %s until model confirmed",
+                      send_message_prefix, AP_MOUNT_SKYDROID_DEFAULT_MODEL);
+    }
 
     // aggressively (re)request the model name until it's known.  This is deliberately
     // NOT part of the 1hz housekeeping loop below - uses_individual_axis_speed_commands()
@@ -860,6 +872,16 @@ void AP_Mount_SkyDroid::gimbal_angle_analyse()
     if (!_announced_connected) {
         _announced_connected = true;
         GCS_SEND_TEXT(MAV_SEVERITY_INFO, "%s connected", send_message_prefix);
+    }
+
+    // a genuinely nonzero roll reading is only possible on a model with a real roll
+    // motor (e.g. C13) - the C11 has no roll axis at all and should always report
+    // exactly 0.  This is a positive-only signal (see effective_model_name()) that
+    // reacts immediately, well before the unreliable "MOD" query might ever answer.
+    // >1deg threshold to allow for any reporting noise around a genuine 0
+    if (!_got_model_name && !_detected_roll_axis && abs(roll_angle_cd) > 100) {
+        _detected_roll_axis = true;
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "%s detected roll movement, assuming C13", send_message_prefix);
     }
 }
 
