@@ -34,7 +34,7 @@ static constexpr float OA_MARGIN_MAX_DEFAULT = 609.6;
 const AP_Param::GroupInfo AP_OAScripting::var_info[] = {
 
     // @Param: MARGIN_GA
-    // @DisplayName: Margin for crude aircraft
+    // @DisplayName: Margin for crewed aircraft
     // @Description: Object Avoidance will ignore aircraft more than this many meters from vehicle
     // @Units: m
     // @Range: 0.1 10000
@@ -93,7 +93,7 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
     end_NED_m.z     = -end_NED_m.z;
 
     // "obstacles" are stored in AP_Avoidance - the are typically populated by MAVLink (ADSB, GLOBAL_POSITION, FOLLOW_TARGET)
-    // These have priority over all other obstacles, especially if they are ADSB messages representing crude aircraft
+    // These have priority over all other obstacles, especially if they are ADSB messages representing crewed aircraft
     OAObstacle obstacle_found;
     OAObstacle aircraft_found;
     distance_new_m = _distance_to_avoidance(start_NED_m, end_NED_m, obstacle_found, aircraft_found);
@@ -166,7 +166,7 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
     return false;
 }
 
-// Lua binding to find the nearest crude aircraft (GA/GENERAL_AVIATION) 
+// Lua binding to find the nearest crewed aircraft (GA/GENERAL_AVIATION) 
 // this is needed because avoiding aircraft is often a higher priority than avoiding other obstacles
 bool AP_OAScripting::find_aircraft(const Location &vehicle_loc, const float lookahead_m, const float vertical_lookahead_m,
                                             float       &distance_m,
@@ -187,7 +187,7 @@ bool AP_OAScripting::find_aircraft(const Location &vehicle_loc, const float look
     vehicle_NED_m.z = -vehicle_NED_m.z;
 
     // "obstacles" are stored in AP_Avoidance - the are typically populated by MAVLink (ADSB, GLOBAL_POSITION, FOLLOW_TARGET)
-    // These have priority over all other obstacles, especially if they are ADSB messages representing crude aircraft
+    // These have priority over all other obstacles, especially if they are ADSB messages representing crewed aircraft
     OAObstacle obstacle_found;
     distance_new_m = _distance_to_aircraft(vehicle_NED_m, distance_m, vertical_lookahead_m, obstacle_found);
     if (distance_new_m < distance_m) {
@@ -318,7 +318,7 @@ bool AP_OAScripting::find_closest_obstacle(const Location &start_loc, const Loca
     end_NED_m.z     = -end_NED_m.z;
 
     // "obstacles" are stored in AP_Avoidance - the are typically populated by MAVLink (ADSB, GLOBAL_POSITION, FOLLOW_TARGET)
-    // These have priority over all other obstacles, especially if they are ADSB messages representing crude aircraft
+    // These have priority over all other obstacles, especially if they are ADSB messages representing crewed aircraft
     OAObstacle obstacle_found;
     OAObstacle aircraft_found;
     distance_new_m = _distance_to_avoidance(start_NED_m, end_NED_m, obstacle_found, aircraft_found);
@@ -432,17 +432,13 @@ char* AP_OAScripting::_get_obstacle_label(uint8_t emitter_type, int32_t obstacle
 {
     if (AP_Avoidance::is_adsb_uav(emitter_type) || obstacle_id < 0x3FFF) {
         return (char *)"MAV";
-    }
-    else if (obstacle_id >= 0xB00000 and obstacle_id <= 0xB10000) {
+    } else if (obstacle_id >= 0xB00000 && obstacle_id <= 0xB10000) {
         return (char *)"Weather";
-    }
-    else if (obstacle_id >= 0xB10000 and obstacle_id <= 0xB20000) {
+    } else if (obstacle_id >= 0xB10000 && obstacle_id <= 0xB20000) {
         return (char *)"Migratory Bird";
-    }
-    else if (obstacle_id >= 0xB20000 and obstacle_id <= 0xB30000) {
+    } else if (obstacle_id >= 0xB20000 && obstacle_id <= 0xB30000) {
         return (char *)"Bird of Prey";
-    }
-    else if(obstacle_id > 0xA00000) {
+    } else if (obstacle_id > 0xA00000) {
         return (char *)"ADS-B";
     }
     return (char *)"Unknown";
@@ -453,18 +449,14 @@ AP_OAScripting::ObstacleType AP_OAScripting::_get_obstacle_type(uint8_t emitter_
 {
     if (AP_Avoidance::is_adsb_uav(emitter_type) || icao_code <= 0x0BFFF) {
         return ObstacleType::MAV_SYSID;
-    }
-    else if (icao_code >= 0xB00000 and icao_code <= 0xB10000) {
+    } else if (icao_code >= 0xB00000 && icao_code <= 0xB10000) {
         return ObstacleType::WEATHER;
-    }
-    else if (icao_code >= 0xB10000 and icao_code <= 0xB20000) {
+    } else if (icao_code >= 0xB10000 && icao_code <= 0xB20000) {
         return ObstacleType::BIRD_MIGRATORY;
-    }
-    else if (icao_code >= 0xB20000 and icao_code <= 0xB30000) {
+    } else if (icao_code >= 0xB20000 && icao_code <= 0xB30000) {
         return ObstacleType::BIRD_OF_PREY;
-    }
-    else if(AP_Avoidance::is_adsb_aircraft(emitter_type)) {
-       return ObstacleType::GENERAL_AVIATION;
+    } else if (AP_Avoidance::is_adsb_aircraft(emitter_type)) {
+        return ObstacleType::GENERAL_AVIATION;
     }
     return ObstacleType::GENERAL;
 }
