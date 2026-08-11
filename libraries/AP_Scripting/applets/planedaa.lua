@@ -83,7 +83,7 @@ MAV_COLLISION_ACTION = {
 OBSTACLE_TYPE = {
     GENERAL                     = 0,    -- generic obstacle, we don't really know what it is
     MAV_SYSID                   = 1,    -- another MAVLINK drone with a MAV_SYSID
-    GENERAL_AVIATION            = 2,    -- crude aircraft, usually with an ICAO ADSB identifier
+    GENERAL_AVIATION            = 2,    -- crewed aircraft, usually with an ICAO ADSB identifier
     WEATHER                     = 3,
     BIRD_MIGRATORY              = 4,    -- typically one or more Canada Geese
     BIRD_OF_PREY                = 5,    -- a bird that might attack the vehicle
@@ -301,8 +301,8 @@ DAA_BR_ANGLE = bind_add_param('BR_ANGLE', 18, 45)
 
 --[[
     // @Param: DAA_AVD_ALT
-    // @DisplayName: The altitude to loiter to when avoiding a crude aircraft
-    // @Description:  DAA will loiter and descent to this altitude if a crude aircraft is detected within DAA_MARGIN_GA of the vehicle. Ignored if zero (0).
+    // @DisplayName: The altitude to loiter to when avoiding a crewed aircraft
+    // @Description:  DAA will loiter and descent to this altitude if a crewed aircraft is detected within DAA_MARGIN_GA of the vehicle. Ignored if zero (0).
     // @Range: 20 5000
     // @Increment: 5
     // @User: Standard
@@ -866,7 +866,7 @@ local function location_project(loc1, bearing_deg, distance, alt_target_loc)
     return loc2
 end
 
--- make obstacle labels a bit more meaningful for user especially for crude aircraft and MAVLink vehicles
+-- make obstacle labels a bit more meaningful for user especially for crewed aircraft and MAVLink vehicles
 local function pretty_label(script_obstacle)
     local obstacle_type = script_obstacle:obstacle_type()
     local emitter_type  = script_obstacle:emitter_type()
@@ -1180,7 +1180,7 @@ local function effective_groundspeed(airspeed, bearing_deg, wind_dir_rad, wind_s
 end
 
 -------------------------------------------------------------------------------
--- LOITER ALTITUDE - Loiter right or left to (usually) lose altitude to avoid an obstacle (usually a crude aircraft)
+-- LOITER ALTITUDE - Loiter right or left to (usually) lose altitude to avoid an obstacle (usually a crewed aircraft)
 -------------------------------------------------------------------------------
 local loiteralt = {
     active = false,
@@ -2072,7 +2072,7 @@ local DAA = {
         return make_alt_fence_obstacle(otype, label_str, math.max(headroom_m, 0.0))
     end
 
-    -- crude aircraft are a special case. We do specific things if there is an aircraft nearby so we need to know the nearest one
+    -- crewed aircraft are a special case. We do specific things if there is an aircraft nearby so we need to know the nearest one
     local function detect_aircraft()
     --[[ local obstacle = {}
 
@@ -2431,7 +2431,7 @@ local DAA = {
             -- reset the target back to the original target
             new_target_loc = nil
         elseif obstacle.type == OBSTACLE_TYPE.GENERAL_AVIATION and false then
-            -- depending on the obstacle we might do different things. Specifically if the obstacle is a crude aircraft
+            -- depending on the obstacle we might do different things. Specifically if the obstacle is a crewed aircraft
             -- in Canada we want to do a "Right 2" circuit descending to XXX altitude
             -- which for now we are doing by simply doing a loiter to alt in guided mode
 
