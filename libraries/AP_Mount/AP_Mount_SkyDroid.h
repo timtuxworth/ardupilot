@@ -57,6 +57,21 @@
 #define AP_MOUNT_SKYDROID_PACKETLEN_MAX     28      // maximum number of bytes in a packet sent to or received from the gimbal
 #define AP_MOUNT_SKYDROID_CMD_CATEGORIES_NUM 5       // number of gimbal message types we parse
 
+// the model name to assume until the real "MOD" response arrives (or, sooner, until
+// a genuine roll-axis movement is observed in GAC telemetry - see
+// effective_model_name(), which can only mean a C13, since the C11 has no roll
+// motor at all).  Added as a workaround: on real hardware the "MOD" query has been
+// observed to take anywhere from under a second to 8+ minutes to get a reply, for
+// reasons not yet understood (raised with SkyDroid, response pending) - defaulting
+// to a known-working model avoids leaving the mount on the always-broken GAM/GSM
+// path for however long that turns out to take.  A GCS message is sent once at
+// startup announcing this assumption so it's never a silent guess, and switches to
+// another GCS message (from the existing gimbal_model_analyse()) reporting the real
+// model the moment "MOD" actually answers.  Change this (or remove the whole
+// mechanism) once "MOD" is reliable, or if defaulting to a different model than the
+// one usually connected
+#define AP_MOUNT_SKYDROID_DEFAULT_MODEL "C11"
+
 class AP_Mount_SkyDroid : public AP_Mount_Backend_Serial
 {
 
@@ -208,15 +223,29 @@ private:
     // send rate target in rad/s to gimbal
     void send_target_rates(const MountRateTarget& rate_rads) override;
 
-    // true if the connected model is known to only respond to the individual-axis
+    // the model name to use for uses_individual_axis_speed_commands()/
+    // uses_finetune_nudge_commands(): the real one if "MOD" has answered; failing
+    // that, "C13" if a genuine roll-axis movement has been observed in GAC telemetry
+    // (see gimbal_angle_analyse() - only a model with a real roll motor, e.g. C13,
+    // can ever report nonzero roll, so this is a positive-only signal that doesn't
+    // depend on the unreliable "MOD" query at all); failing that,
+    // AP_MOUNT_SKYDROID_DEFAULT_MODEL
+    const char* effective_model_name() const {
+        if (_got_model_name) {
+            return _model_name;
+        }
+        if (_detected_roll_axis) {
+            return "C13";
+        }
+        return AP_MOUNT_SKYDROID_DEFAULT_MODEL;
+    }
+
+    // true if the connected (or, before "MOD" answers, assumed - see
+    // effective_model_name()) model is known to only respond to the individual-axis
     // GSY/GSP speed commands (confirmed on the C11; GAM/GSM/GAY/GAP - i.e. every
-    // combined or absolute-angle command - are silently ignored on that model).
-    // Unknown models (including before the "MOD" response has arrived) default to
-    // false and use the normal GAM/GSM angle/rate commands, since that's the
-    // documented behaviour and is confirmed working on at least the C10/C10Pro/C12/C20
-    // family
+    // combined or absolute-angle command - are silently ignored on that model)
     bool uses_individual_axis_speed_commands() const {
-        return _got_model_name && strncmp(_model_name, "C11", 3) == 0;
+        return strncmp(effective_model_name(), "C11", 3) == 0;
     }
 
     // send angle target by closing the loop ourselves (P-controller) using GAC
@@ -255,13 +284,14 @@ private:
         ROLL_B = 0x13,
     };
 
-    // true if the connected model is known to only move yaw/roll via PTZ fine-tune
-    // nudges (confirmed on the C13; GAM/GSM/GSY/GSP/GAY/PTZ-left-right are all
-    // silently ignored on that model).  Pitch uses the ordinary PTZ up/down jog,
+    // true if the connected (or, before "MOD" answers, assumed - see
+    // effective_model_name()) model is known to only move yaw/roll via PTZ
+    // fine-tune nudges (confirmed on the C13; GAM/GSM/GSY/GSP/GAY/PTZ-left-right are
+    // all silently ignored on that model).  Pitch uses the ordinary PTZ up/down jog,
     // same as every other model, so isn't gated by this - see
     // send_target_angles_finetune()/send_target_rates_finetune()
     bool uses_finetune_nudge_commands() const {
-        return _got_model_name && strncmp(_model_name, "C13", 3) == 0;
+        return strncmp(effective_model_name(), "C13", 3) == 0;
     }
 
     // send angle target for models needing PTZ fine-tune nudges for yaw/roll (e.g.
@@ -335,6 +365,8 @@ private:
     bool _last_lock;                                            // last lock mode sent to gimbal
     bool _got_gimbal_version;                                   // true if gimbal's version has been received
     bool _got_model_name;                                       // true if gimbal's model name has been received
+    bool _detected_roll_axis;                                   // true if GAC has ever reported a genuinely nonzero roll angle - see effective_model_name()
+    bool _announced_default_model;                              // true once we've told the user we're defaulting to AP_MOUNT_SKYDROID_DEFAULT_MODEL pending "MOD"
     bool _announced_connected;                                  // true once we've told the user the gimbal is connected
     uint32_t _firmware_ver;                                     // firmware version
     char _model_name[8];                                        // gimbal model name (e.g. "C11", "C13"), always null-terminated
