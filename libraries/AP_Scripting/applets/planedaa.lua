@@ -440,7 +440,7 @@ DAA_SIDE_HOLD = bind_add_param('SIDE_HOLD', 31, 3)
 --[[
     // @Param: DAA_CPA_MIN
     // @DisplayName: Avoidance minimum closing speed
-    // @Description: Minimum closing speed for a moving obstacle to be treated as a conflict. A moving obstacle whose predicted closest approach stays beyond the well-clear distance and which is opening range faster than this is not avoided (it is leaving). 0 avoids regardless of closing speed.
+    // @Description: Minimum closing speed for a moving obstacle to be treated as a conflict. CPA (Closest Point of Approach) is the predicted minimum separation between the vehicle and a moving obstacle on their current tracks. A moving obstacle whose CPA stays beyond the well-clear distance and which is opening range faster than this is not avoided (it is leaving). 0 avoids regardless of closing speed.
     // @Units: m/s
     // @Range: 0 20
     // @Increment: 0.5
