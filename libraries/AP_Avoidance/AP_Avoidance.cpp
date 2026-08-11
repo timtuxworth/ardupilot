@@ -862,19 +862,25 @@ float AP_Avoidance::distance_to_obstacle(const Vector3f &start_NED_m, const Vect
             // until we get the new NED functions
             obstacle_NED_m.z = -obstacle_NED_m.z;
 
-            // TIM: This is fairly simplistic for now, needs to deal with altitude
-            // as per the Lua version in obstacle_avoidance_margin() in Tridge's script
+            // effective distance = horizontal clearance from the path segment to the obstacle,
+            // minus the obstacle's radius. Sample the segment at its horizontal closest point (t)
+            // and reuse that same point for the vertical check, so altitude is evaluated where the
+            // path actually passes the obstacle (matters on climbing/descending legs, and on the
+            // small drone vertical band).
+            const Vector2f seg_NE_m = end_NE_m - start_NE_m;
+            const float seg_len_sq_m = seg_NE_m.length_squared();
+            float t = 0.0f;
+            if (seg_len_sq_m > 1.0e-6f) {
+                t = constrain_float((obstacle_NE_m - start_NE_m) * seg_NE_m / seg_len_sq_m, 0.0f, 1.0f);
+            }
+            const Vector2f closest_NE_m = start_NE_m + seg_NE_m * t;
+            float distance_m = (obstacle_NE_m - closest_NE_m).length() - get_obstacle_radius_m(obstacle.emitter_type);
 
-            // float m = Vector3f::closest_distance_between_line_and_point(start_NED_cm, end_NED_cm, obstacle_NED_cm) * 0.01f;
-
-            // this needs to account for the moving obstacle as done in closest_approach_ne_m
-
-            // effective distance is distance between line segment and obstacle minus obstacle's radius
-            float distance_m = Vector2f::closest_distance_between_line_and_point(start_NE_m, end_NE_m, obstacle_NE_m);
-            distance_m = distance_m - get_obstacle_radius_m(obstacle.emitter_type);
-
-            // height difference is the minimum difference in the height between the line and the obstacle
-            float height_difference_m = MIN(fabsf(start_NED_m.z - obstacle_NED_m.z), fabsf(end_NED_m.z - obstacle_NED_m.z));
+            // height difference between the obstacle and the path at that same closest point.
+            // This is a static-position check by design: the closing/receding motion of ADS-B
+            // traffic is handled a layer up, in the Lua assess_obstacle_motion() CPA logic.
+            const float path_z_at_closest_m = start_NED_m.z + t * (end_NED_m.z - start_NED_m.z);
+            float height_difference_m = fabsf(path_z_at_closest_m - obstacle_NED_m.z);
 
             if (distance_m < distance_new_m && height_difference_m < get_obstacle_height_m(obstacle.emitter_type)) {
                 // we are within the horizontal distance - next check the vertical distance
