@@ -34,6 +34,10 @@
 #include <AP_HAL_SITL/HAL_SITL_Class.h>
 #include <AP_Vehicle/AP_Vehicle_Type.h>
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_SITL
+#include <AP_HAL_SITL/SITL_SwarmInfo.h>
+#endif
+
 using namespace SITL;
 
 extern const AP_HAL::HAL& hal;
@@ -309,12 +313,31 @@ void Aircraft::sync_frame_time(void)
         // don't let a large negative debt build up
         sleep_debt_us = -1.0e5;
     }
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_SITL
+    // on a fresh reboot, instantly snap our clock to match peers instead
+    // of sprinting to catch up - avoids a long visible "no link" period.
+    hal_sitl.get_sitl_state()->_shared_mem.instant_catchup_if_new(time_now_us);
+
+    // if we've fallen behind a multi-instance swarm (e.g. just rebooted),
+    // halve our sleep to run at ~2x speedup and fast-forward back into
+    // lock-step, rather than staying permanently excluded from the barrier.
+    const bool catching_up =
+        hal_sitl.get_sitl_state()->_shared_mem.is_behind_peers(time_now_us);
+    const float catchup_sleep_scale = catching_up ? 0.5f : 1.0f;
+#else
+    const bool catching_up = false;
+    const float catchup_sleep_scale = 1.0f;
+#endif
+    (void)catching_up;
+    (void)catchup_sleep_scale;
+
     if (sleep_debt_us > min_sleep_time) {
         // sleep if we have built up a debt of min_sleep_tim
 #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
-        usleep(sleep_debt_us);
+        usleep((uint64_t)(sleep_debt_us * catchup_sleep_scale));
 #elif CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS
-        hal.scheduler->delay_microseconds(sleep_debt_us);
+        hal.scheduler->delay_microseconds((uint64_t)(sleep_debt_us * catchup_sleep_scale));
 #else
         // ??
 #endif
@@ -334,7 +357,34 @@ void Aircraft::sync_frame_time(void)
         last_frame_count = frame_counter;
         last_fps_report_ms = now_ms;
     }
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_SITL
+    // publish basic swarm telemetry (position/velocity/heading) for peer
+    // instances to read - see AP_SITL_SwarmInfo for the payload layout.
+    {
+        AP_SITL_SwarmInfo swarm {};
+        swarm.sysid       = mavlink_system.sysid;
+        swarm.sim_time_us = time_now_us;
+        swarm.lat         = location.lat;
+        swarm.lng         = location.lng;
+        swarm.alt_cm      = location.alt;
+        swarm.vx          = velocity_ef.x;
+        swarm.vy          = velocity_ef.y;
+        swarm.vz          = velocity_ef.z;
+        float roll, pitch, yaw;
+        dcm.to_euler(&roll, &pitch, &yaw);
+        swarm.heading_deg = wrap_360(degrees(yaw));
+        hal_sitl.get_sitl_state()->_shared_mem.write_payload(&swarm, sizeof(swarm));
+    }
+
+    // When running multiple SITL instances in parallel (e.g. for CI with
+    // speedup=100), keep all instances within a tight sim-time window so
+    // that inter-vehicle communication is consistent.  The barrier is a
+    // no-op for single-instance runs.
+    hal_sitl.get_sitl_state()->_shared_mem.sync_with_peers(time_now_us);
+#endif
 }
+
 
 /* add noise based on throttle level (from 0..1) */
 void Aircraft::add_noise(float throttle)
