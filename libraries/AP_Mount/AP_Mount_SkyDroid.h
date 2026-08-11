@@ -182,6 +182,14 @@ private:
     // request gimbal model name (e.g. "C11", "C13")
     void request_gimbal_model();
 
+    // send current UTC date/time to the gimbal (TIM command) so it can correctly
+    // timestamp photos/videos - the camera has no RTC of its own and defaults to
+    // 1970-01-01 without this (confirmed on real hardware).  Resent periodically,
+    // same as request_gimbal_attitude()/send_attitude_enable(), both as a guard
+    // against UDP packet loss and to recover if the camera reboots independently
+    // of the flight controller (also confirmed to happen on real hardware)
+    bool send_time_sync();
+
     // enable the gimbal to receive our attitude (FAE) and send it to us (GAA)
     bool send_attitude_enable();
 
@@ -267,6 +275,7 @@ private:
     Vector3f _current_angle_rad;                                // current angles in radians received from gimbal (x=roll, y=pitch, z=yaw).  roll is always 0 on models with no roll axis
     uint32_t _last_current_angle_ms;                            // system time (in milliseconds) that angle information received from the gimbal
     uint32_t _last_req_current_info_ms;                         // system time that this driver last requested current gimbal information
+    uint32_t _last_model_request_ms;                            // system time this driver last requested the model name (retried fast, independent of the 1hz loop below, until _got_model_name is true)
     uint8_t _last_req_step;                                     // 10hz request loop step (different requests are sent at various steps)
     uint8_t _msg_buff[AP_MOUNT_SKYDROID_PACKETLEN_MAX];         // buffer holding bytes from latest packet received.  only used to calculate crc
     uint8_t _msg_buff_len;                                      // number of bytes in the msg buffer

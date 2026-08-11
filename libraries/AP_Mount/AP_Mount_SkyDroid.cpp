@@ -6,12 +6,14 @@
 
 #include <AP_HAL/AP_HAL.h>
 #include <AP_AHRS/AP_AHRS.h>
+#include <AP_RTC/AP_RTC.h>
 #include <AP_Vehicle/AP_Vehicle_Type.h>
 #include <GCS_MAVLink/GCS.h>
 
 extern const AP_HAL::HAL& hal;
 
 #define AP_MOUNT_SKYDROID_UPDATE_INTERVAL_MS 100                 // resend angle or rate targets, and push our attitude, at this interval
+#define AP_MOUNT_SKYDROID_MODEL_RETRY_MS     200                 // retry interval for the model name query until it succeeds - kept fast because the correct control path depends on it (see update())
 #define AP_MOUNT_SKYDROID_HEALTH_TIMEOUT_MS  1000                // timeout for health (based on attitude reports from gimbal)
 #define AP_MOUNT_SKYDROID_PACKETLEN_MIN      12                  // packet length not including the data segment
 #define AP_MOUNT_SKYDROID_DATALEN_MAX        (AP_MOUNT_SKYDROID_PACKETLEN_MAX - AP_MOUNT_SKYDROID_PACKETLEN_MIN) // data segment len can be no more than this
@@ -40,6 +42,7 @@ extern const AP_HAL::HAL& hal;
 #define AP_MOUNT_SKYDROID_ID3CHAR_GET_VERSION       "VER"        // get firmware version, data bytes always 00
 #define AP_MOUNT_SKYDROID_ID3CHAR_GET_MODEL         "MOD"        // get model name (e.g. "C11"), data bytes always 00
 #define AP_MOUNT_SKYDROID_ID3CHAR_DIGITAL_ZOOM      "DZM"        // digital zoom, data bytes: 0A:zoom+ (single step), 0B:zoom- (single step)
+#define AP_MOUNT_SKYDROID_ID3CHAR_TIME              "TIM"        // set current time, data bytes: hhmmss.ccDDMMYY (15 ASCII chars, cc=hundredths of a second).  Confirmed on real hardware that the camera has no RTC of its own and defaults to 1970-01-01 without this
 
 #define AP_MOUNT_SKYDROID_DEBUG 0
 #define debug(fmt, args ...) do { if (AP_MOUNT_SKYDROID_DEBUG) { GCS_SEND_TEXT(MAV_SEVERITY_INFO, "SkyDroid: " fmt, ## args); } } while (0)
@@ -58,6 +61,22 @@ void AP_Mount_SkyDroid::update()
 
     // reading incoming packets from gimbal
     read_incoming_packets();
+
+    // aggressively (re)request the model name until it's known.  This is deliberately
+    // NOT part of the 1hz housekeeping loop below - uses_individual_axis_speed_commands()
+    // depends on _got_model_name to pick the correct control path for the C11 (GAM/GSM
+    // are otherwise silently sent instead, which do nothing at all on real C11 hardware),
+    // so any delay here is a real dead-control-input window, not just a cosmetic one.
+    // Confirmed on real hardware that a run of lost UDP packets can otherwise stretch
+    // this out unpredictably (up to several seconds at the old 1hz retry rate) before
+    // RC/MAVLink pointing starts working
+    if (!_got_model_name) {
+        const uint32_t now_ms = AP_HAL::millis();
+        if (now_ms - _last_model_request_ms >= AP_MOUNT_SKYDROID_MODEL_RETRY_MS) {
+            _last_model_request_ms = now_ms;
+            request_gimbal_model();
+        }
+    }
 
     // update based on mount mode, and send target angles or rates depending on the
     // target type.  Deliberately NOT gated by the 10hz throttle below - AP_Mount::update()
@@ -90,6 +109,11 @@ void AP_Mount_SkyDroid::update()
             request_gimbal_version();
         }
         break;
+    case 1:
+        // (re)send current UTC time so photos/videos are timestamped correctly - see
+        // send_time_sync() for why this is needed and why it's resent periodically
+        send_time_sync();
+        break;
     case 2:
         // (re)request gimbal attitude streaming.  harmless to resend if already enabled,
         // and guards against the enable packet being lost over UDP
@@ -103,12 +127,8 @@ void AP_Mount_SkyDroid::update()
         // (re)enable gimbal to accept our attitude pushes
         send_attitude_enable();
         break;
-    case 8:
-        // get gimbal model name (e.g. "C11" vs "C13")
-        if (!_got_model_name) {
-            request_gimbal_model();
-        }
-        break;
+        // model name request lives in its own fast retry loop above (not this 1hz
+        // loop) since control-path correctness depends on it - see the comment there
     }
 }
 
@@ -400,6 +420,30 @@ void AP_Mount_SkyDroid::request_gimbal_model()
     send_fixedlen_packet(AddressByte::SYSTEM_AND_IMAGE, AP_MOUNT_SKYDROID_ID3CHAR_GET_MODEL, false, 0);
 }
 
+// send current UTC date/time to the gimbal so photos/videos are timestamped correctly.
+// Confirmed on real hardware that the camera has no RTC of its own and defaults to
+// 1970-01-01 without this.  Uses UTC since ArduPilot has no local timezone concept -
+// this means driver-triggered captures' timestamps will differ from ones taken via
+// SkyDroid's own app (which uses the connected device's local time) by the local UTC
+// offset.  Returns false (without sending) if the vehicle doesn't yet have a valid
+// time source (e.g. GPS not locked)
+bool AP_Mount_SkyDroid::send_time_sync()
+{
+    uint16_t year, ms;
+    uint8_t month, day, hour, min, sec;
+    if (!AP::rtc().get_date_and_time_utc(year, month, day, hour, min, sec, ms)) {
+        return false;
+    }
+
+    // sample command: #tpUDFwTIM142832.00031218 (2018-12-03 14:28:32.00) - data is 15
+    // ASCII chars: hhmmss.ccDDMMYY, cc=hundredths of a second, YY=2-digit year
+    uint8_t databuff[16];
+    hal.util->snprintf((char*)databuff, ARRAY_SIZE(databuff), "%02u%02u%02u.%02u%02u%02u%02u",
+                        hour, min, sec, (unsigned)((ms / 10) % 100),
+                        day, month, (unsigned)(year % 100));
+    return send_variablelen_packet(HeaderType::VARIABLE_LEN, AddressByte::SYSTEM_AND_IMAGE, AP_MOUNT_SKYDROID_ID3CHAR_TIME, true, databuff, ARRAY_SIZE(databuff)-1);
+}
+
 // (re)enable the gimbal to accept our attitude pushes
 bool AP_Mount_SkyDroid::send_attitude_enable()
 {
@@ -521,19 +565,28 @@ void AP_Mount_SkyDroid::send_target_angles_individual_axis(const MountAngleTarge
                                                              _params.pitch_angle_min, _params.pitch_angle_max));
 
     // simple P-controller driving GSY/GSP as the rate actuator, using the GAC
-    // attitude feedback already parsed by gimbal_angle_analyse().  Gain chosen so
-    // full-scale rate (~4deg/s, see AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_MAX_DPS) is
-    // reached by about 2deg of error - comfortably inside the travel range while
-    // still slowing down smoothly on approach rather than a bang-bang overshoot
-    constexpr float kP = 2.0;  // (deg/s of rate command) per (deg of angle error)
+    // attitude feedback already parsed by gimbal_angle_analyse().  Confirmed on real
+    // C11 hardware that a more aggressive gain (previously 2.0, reaching full-scale
+    // rate by ~2deg of error) sustains a continuous limit-cycle oscillation on both
+    // axes - the real feedback (GAC round-trip plus the gimbal's own mechanical
+    // response) has enough lag that a fast-reacting P-controller overshoots and
+    // re-corrects indefinitely instead of settling.  A much gentler gain plus a
+    // deadzone (stop correcting entirely once close, rather than tapering to an
+    // ever-smaller command that can still re-trigger hunting) fixes this at the cost
+    // of a slower final approach - acceptable since there's no absolute-angle
+    // command to fall back on anyway
+    constexpr float kP = 0.3;  // (deg/s of rate command) per (deg of angle error)
+    constexpr float deadzone_deg = 2.0;  // stop correcting once within this many degrees
     const float yaw_error_deg = degrees(wrap_PI(yaw_target_rad - _current_angle_rad.z));
     const float pitch_error_deg = degrees(pitch_target_rad - _current_angle_rad.y);
-    const float yaw_rate_dps = constrain_float(yaw_error_deg * kP,
-                                                -AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_MAX_DPS,
-                                                AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_MAX_DPS);
-    const float pitch_rate_dps = constrain_float(pitch_error_deg * kP,
-                                                  -AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_MAX_DPS,
-                                                  AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_MAX_DPS);
+    const float yaw_rate_dps = (fabsf(yaw_error_deg) <= deadzone_deg) ? 0.0f :
+        constrain_float(yaw_error_deg * kP,
+                         -AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_MAX_DPS,
+                         AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_MAX_DPS);
+    const float pitch_rate_dps = (fabsf(pitch_error_deg) <= deadzone_deg) ? 0.0f :
+        constrain_float(pitch_error_deg * kP,
+                         -AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_MAX_DPS,
+                         AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_MAX_DPS);
 
     // GSY's sign is inverted vs AP_Mount's convention (see send_individual_axis_rate below)
     send_individual_axis_rate(AP_MOUNT_SKYDROID_ID3CHAR_SPEED_YAW, -yaw_rate_dps);
