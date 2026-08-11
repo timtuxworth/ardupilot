@@ -68,7 +68,7 @@ Detection of aircraft, drones and other MAVLink/ADS-B traffic is served from the
 | `ADSB_TYPE` | per hardware | Set to match your ADS-B receiver so `ADSB_VEHICLE` messages are processed. In SITL this is the path used to inject simulated traffic. |
 
 The Well Clear and Near Mid-Air Collision (NMAC) volumes that DAA reads at
-startup default to the **ASTM F3442M-23** thresholds for crude aircraft (with
+startup default to the **ASTM F3442M-23** thresholds for crewed aircraft (with
 NMAC falling back to the FAA / RTCA DO-396 figures, as ASTM F3442M does not
 itself define NMAC). The firmware defaults are already these values — change
 them only with good reason:
@@ -144,7 +144,7 @@ Collision volumes, and the `FENCE_*` parameters for the altitude/geo fences.
 | `DAA_MARGIN_PRX` | 50 | m | Avoidance radius for obstacles detected by proximity sensors. |
 | `DAA_BR_RATIO` | 1.5 | | BendyRuler will avoid changing bearing unless the ratio of the previous margin to the newly calculated margin is at least this much. |
 | `DAA_BR_ANGLE` | 45 | deg | BendyRuler resists changing the current bearing if the change exceeds this angle. |
-| `DAA_AVD_ALT` | 50 | m | Altitude to loiter/descend to when avoiding a crude aircraft contact. Ignored if zero. |
+| `DAA_AVD_ALT` | 50 | m | Altitude to loiter/descend to when avoiding a crewed aircraft contact. Ignored if zero. |
 | `DAA_AVD_ALT_TP` | 3 | | Frame of `DAA_AVD_ALT` (0: absolute, 1: above home, 2: above origin, 3: above terrain). |
 | `DAA_LTR_COOL_S` | 10 | s | Time the aircraft loiter-to-altitude is held after the aircraft was last detected before releasing back to the mission. Hysteresis against a briefly-dropped or laggy ADS-B feed thrashing the vehicle between GUIDED (loiter) and AUTO (mission). Set to 0 to release as soon as the aircraft is no longer detected. |
 | `DAA_AVD_ALERT` | 1 | | Whether to alert on avoidance (0: none, 1: alert). |
@@ -228,7 +228,7 @@ Moving obstacles (drones, birds, AIS) are gated by a closest-point-of-approach
 (CPA) test as well as position: one that is opening range and whose predicted
 miss stays beyond its keep-out radius (for a drone, `AVD_UAV_XY`) is treated as
 _leaving_ and is not avoided — this is what stops the aircraft from manoeuvring
-for traffic that is already past or diverging. A crude aircraft uses the same
+for traffic that is already past or diverging. A crewed aircraft uses the same
 test with the `AVD_WCLR_XY` well-clear radius, and inside that radius it is always
 treated as a conflict (a missing or uncertain velocity therefore always errs
 toward avoiding — safer first).
@@ -307,7 +307,7 @@ Written when the script commands an avoidance manoeuvre towards a DAA target.
 | `DstZ` | Vertical distance to the obstacle (+ve is up) (m) |
 | `ObjT` | `OBSTACLE_TYPE` of the obstacle (see table below) |
 
-### DAAG — General Aviation aircraft
+### DAAG — General aviation aircraft
 
 Written when an aircraft (typically with an ICAO/ADSB identifier) is detected.
 
