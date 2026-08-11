@@ -66,7 +66,7 @@ AP_ADSB *AP_ADSB::_singleton;
 const AP_Param::GroupInfo AP_ADSB::var_info[] = {
     // @Param: TYPE
     // @DisplayName: ADSB Type
-    // @Description: Type of ADS-B hardware for ADSB-in and ADSB-out configuration and operation. If any type is selected then MAVLink based ADSB-in messages will always be enabled. Select MAVLink to process incoming ADSB_VEHICLE messages (e.g. from a companion computer) with no ADS-B hardware attached.
+    // @Description: Type of ADS-B hardware for ADSB-in and ADSB-out configuration and operation. Incoming MAVLink ADSB_VEHICLE messages are processed for every type (they are also emitted by directly-attached MAVLink hardware such as the uAvionix ping). Select 5 (MAVLink) to process ADSB_VEHICLE messages (e.g. forwarded from a companion computer) with no ADS-B hardware backend attached.
     // @Values: 0:Disabled,1:uAvionix-MAVLink,2:Sagetech,3:uAvionix-UCP,4:Sagetech MX Series,5:MAVLink
     // @User: Standard
     // @RebootRequired: True
@@ -453,32 +453,6 @@ void AP_ADSB::update(const AP_ADSB::Loc &loc)
         }
     }
 
-    /*
-    static uint32_t last_debug_ms;
-    if (now - last_debug_ms >= 2000) {
-        last_debug_ms = now;
-        Location current_loc;
-        const bool have_pos = AP::ahrs().get_location(current_loc);
-        for (uint16_t i = 0; i < in_state.vehicle_count; i++) {
-            const adsb_vehicle_t &v = in_state.vehicle_list[i];
-            if (have_pos) {
-                Location vloc;
-                vloc.lat = v.info.lat;
-                vloc.lng = v.info.lon;
-                vloc.alt = v.info.altitude / 10;
-                vloc.relative_alt = false;
-                const float hdist = current_loc.get_distance(vloc);
-                const float vdist = (v.info.altitude * 0.001f) - (current_loc.alt * 0.01f);
-                if (hdist < 2000) {
-                    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "ADSB[%u] %s h=%.0f v=%.0f",
-                                i, v.info.callsign, hdist, vdist);
-                }
-            } else {
-                GCS_SEND_TEXT(MAV_SEVERITY_DEBUG, "ADSB[%u] %s (no pos)", i, v.info.callsign);
-            }
-        }
-    }
-    */
 }
 
 /*
@@ -604,7 +578,7 @@ void AP_ADSB::handle_adsb_vehicle(const adsb_vehicle_t &vehicle)
     } else if (in_state.vehicle_count < in_state.list_size_allocated) {
 
         // not found and there's room, add it to the end of the list
-            set_vehicle(in_state.vehicle_count, vehicle);
+        set_vehicle(in_state.vehicle_count, vehicle);
         in_state.vehicle_count++;
 
     } else {
