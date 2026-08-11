@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-048"
+SCRIPT_VERSION      = "4.8.0-049"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -83,7 +83,7 @@ MAV_COLLISION_ACTION = {
 OBSTACLE_TYPE = {
     GENERAL                     = 0,    -- generic obstacle, we don't really know what it is
     MAV_SYSID                   = 1,    -- another MAVLINK drone with a MAV_SYSID
-    GENERAL_AVIATION            = 2,    -- crewed aircraft, usually with an ICAO ADSB identifier
+    AIRCRAFT            = 2,    -- crewed aircraft, usually with an ICAO ADSB identifier
     WEATHER                     = 3,
     BIRD_MIGRATORY              = 4,    -- typically one or more Canada Geese
     BIRD_OF_PREY                = 5,    -- a bird that might attack the vehicle
@@ -837,6 +837,19 @@ local function locations_equal(loc1, loc2)
             and (loc1:get_alt_frame() == loc2:get_alt_frame())
 end
 
+-- copy the altitude (value and frame) from src into dest. A small Lua helper on top of
+-- the existing get_alt_m/set_alt_m bindings, so we don't carry a Location:copy_alt_from()
+-- binding just for this (no C++ flash cost). Reading in src's own frame needs no conversion.
+local function copy_alt_from(dest, src)
+    local frame = src:get_alt_frame()
+    -- get_alt_m returns the altitude in `frame` (or nil if it can't convert, e.g. no terrain).
+    -- Reading in src's own frame needs no conversion, so this normally succeeds.
+    local alt_m = src:get_alt_m(frame)
+    if alt_m ~= nil then
+        dest:set_alt_m(alt_m, frame)
+    end
+end
+
 -- Project forward from loc1 to a newlocation in the direction bearing_deg and distance m
 -- the altitude of the new projected location should be based on alt_target_loc, including frame
 local function location_project(loc1, bearing_deg, distance, alt_target_loc)
@@ -853,7 +866,7 @@ local function location_project(loc1, bearing_deg, distance, alt_target_loc)
 
     local loc2 = loc1:copy()
     loc2:offset_bearing(bearing_deg, distance)
-    loc2:copy_alt_from(alt_target_loc)
+    copy_alt_from(loc2, alt_target_loc)
 
 --    void offset_bearing(ftype bearing_deg, ftype distance);
 
@@ -874,15 +887,14 @@ local function pretty_label(script_obstacle)
     -- a MAVLink drone (GLOBAL_POSITION_INT/FOLLOW_TARGET) carries a small MAV system id in
     -- src_id; an ADSB-sourced drone (emitter 14) carries a 24-bit ICAO address there instead,
     -- so show that in hex rather than a meaningless decimal "SYSID" (0xBFFF matches the C++ split)
-    if script_obstacle:is_drone() == true or emitter_type == ADSB_EMITTER.UAV then
+    if emitter_type == ADSB_EMITTER.UAV then
         if script_obstacle:src_id() > 0xBFFF then
             return string.format("Drone:%06X", script_obstacle:icao_code())
         end
         return string.format("SYSID:%d", script_obstacle:src_id())
 
     -- this will have arrived as an ADSB_VEHICLE
-    elseif script_obstacle:is_aircraft() == true or emitter_type == 100
-            or (emitter_type >= ADSB_EMITTER.LIGHT and emitter_type <= ADSB_EMITTER.AIRCRAFT_HIGH) then
+    elseif obstacle_type == OBSTACLE_TYPE.AIRCRAFT or emitter_type == 100 then
         return string.format("%06X", script_obstacle:icao_code())
 
     -- fake generated obstacles from mavproxy_genobstacles have these special case "emitters" for SITL/testing
@@ -915,7 +927,7 @@ local function pretty_label(script_obstacle)
     elseif obstacle_type == OBSTACLE_TYPE.FENCE_ALT_MIN then
         return "Alt Min Fence"
     end
-    -- gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT ..": UNKNOWN: " .. script_obstacle:icao_code() .. " drone? " .. script_obstacle:is_drone() .. " aircraft:" .. script_obstacle:is_aircraft() .. " type: " .. obstacle_type)
+    -- gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT ..": UNKNOWN: " .. script_obstacle:icao_code() .. " emitter:" .. emitter_type .. " type: " .. obstacle_type)
     return "Unknown"
 end
 
@@ -931,7 +943,7 @@ local function pretty_obstacle_type(type, src_id)
         end
         return "mavdrone"
     end
-    if type == OBSTACLE_TYPE.GENERAL_AVIATION then 
+    if type == OBSTACLE_TYPE.AIRCRAFT then 
         return "aircraft"
     end
     if type == OBSTACLE_TYPE.WEATHER then
@@ -1050,7 +1062,7 @@ local function get_standoff(obstacle_type)
     elseif obstacle_type == OBSTACLE_TYPE.PROXIMITY then
         return margin_proximity_m
     end
-    -- GENERAL_AVIATION, AIS and anything else: the aircraft well-clear radius (AVD_WCLR_XY)
+    -- AIRCRAFT, AIS and anything else: the aircraft well-clear radius (AVD_WCLR_XY)
     return well_clear_xy
 end
 
@@ -1078,7 +1090,7 @@ local function find_closest_obstacle(loc1, loc2, lookahead_m, wind_ms)
     local obstacle_margin = 0;
     --[[
     These are currently handled inside find_threats, it would be better if they could be parameterized
-    if obstacle_type_val == OBSTACLE_TYPE.GENERAL_AVIATION then
+    if obstacle_type_val == OBSTACLE_TYPE.AIRCRAFT then
         obstacle_margin = margin_aircraft_m
     elseif obstacle_type_val == OBSTACLE_TYPE.MAV_SYSID then
         obstacle_margin = margin_uav_m
@@ -1090,7 +1102,7 @@ local function find_closest_obstacle(loc1, loc2, lookahead_m, wind_ms)
         obstacle_margin = margin_weather_m
     else
     --]]
-    if obstacle_type_val == OBSTACLE_TYPE.GENERAL_AVIATION then
+    if obstacle_type_val == OBSTACLE_TYPE.AIRCRAFT then
         obstacle_margin = well_clear_xy + margin_aircraft_m
     elseif obstacle_type_val == OBSTACLE_TYPE.MAV_SYSID then
         -- drone/UAV (ADSB emitter 14): mirrors the GA line but with the UAV horizontal
@@ -1137,7 +1149,7 @@ local function find_closest_obstacle(loc1, loc2, lookahead_m, wind_ms)
 
     obstacle = populate_obstacle(distance_m, any_obstacle)
 
-    --gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT ..": threat: " .. any_obstacle:icao_code() .. " drone? " .. any_obstacle:is_drone() .. " aircraft:" .. any_obstacle:is_aircraft())
+    --gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT ..": threat: " .. any_obstacle:icao_code() .. " type: " .. any_obstacle:obstacle_type())
 
     --gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT ..": threat: " .. any_obstacle.: .. " :" .. obstacle.label)
 
@@ -2430,7 +2442,7 @@ local DAA = {
             end
             -- reset the target back to the original target
             new_target_loc = nil
-        elseif obstacle.type == OBSTACLE_TYPE.GENERAL_AVIATION and false then
+        elseif obstacle.type == OBSTACLE_TYPE.AIRCRAFT and false then
             -- depending on the obstacle we might do different things. Specifically if the obstacle is a crewed aircraft
             -- in Canada we want to do a "Right 2" circuit descending to XXX altitude
             -- which for now we are doing by simply doing a loiter to alt in guided mode
