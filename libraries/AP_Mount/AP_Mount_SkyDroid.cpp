@@ -32,6 +32,18 @@ extern const AP_HAL::HAL& hal;
 // (not saturated) up to the max wire value of 127
 #define AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_DPS_PER_LSB 0.03125f
 #define AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_MAX_DPS    (127 * AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_DPS_PER_LSB)
+// minimum interval between repeated PTZ fine-tune nudges (yaw/roll on the C13) - the
+// originally-validated 200ms (5hz) ceiling, confirmed safe via the one-command-at-a-
+// time real-hardware testing that discovered this mechanism in the first place.  Do
+// not raise this without first confirming GAC attitude feedback stays healthy at
+// whatever rate is tried - a much faster (20ms/50hz) rate was briefly tested and
+// associated with a serious real-hardware runaway (all three axes ran to their
+// limits and kept pushing, immediately after boot with no command involved) -
+// suspected but unconfirmed cause was the extra send volume overwhelming the
+// camera's own processing and starving GAC feedback, so every axis's closed loop
+// kept reacting to a stale error that never shrank.  Reverted to this known-safe
+// value as a precaution
+#define AP_MOUNT_SKYDROID_FINETUNE_NUDGE_INTERVAL_MS 200
 #define AP_MOUNT_SKYDROID_ID3CHAR_ATTITUDE_ENABLE   "GAA"        // enable/disable gimbal->us attitude streaming, data bytes: 00:off, 01-64:rate in Hz
 #define AP_MOUNT_SKYDROID_ID3CHAR_ATTITUDE_DATA     "GAC"        // unsolicited attitude data from gimbal, data bytes: yaw+pitch+roll, each 4hex 0.01deg
 #define AP_MOUNT_SKYDROID_ID3CHAR_FC_ATTITUDE_ENABLE "FAE"       // enable/disable us->gimbal attitude streaming, data bytes: 00:off, 01:on
@@ -44,10 +56,74 @@ extern const AP_HAL::HAL& hal;
 #define AP_MOUNT_SKYDROID_ID3CHAR_DIGITAL_ZOOM      "DZM"        // digital zoom, data bytes: 0A:zoom+ (single step), 0B:zoom- (single step)
 #define AP_MOUNT_SKYDROID_ID3CHAR_TIME              "TIM"        // set current time, data bytes: hhmmss.ccDDMMYY (15 ASCII chars, cc=hundredths of a second).  Confirmed on real hardware that the camera has no RTC of its own and defaults to 1970-01-01 without this
 
+// PTZ jog's real fixed speed, matches every model's observed pitch jog rate (also
+// matched the C11's old PTZ-only yaw/pitch jog before the GSY/GSP redesign)
+#define AP_MOUNT_SKYDROID_PTZ_JOG_DPS 30.0f
+
+// duty-cycle PWM period for both the PTZ pitch jog and the fine-tune nudges, in
+// angle mode (position error) and rate mode alike - see duty_cycle_active().
+// UNVALIDATED on real hardware, a starting point to tune once tested
+#define AP_MOUNT_SKYDROID_DUTY_PWM_PERIOD_MS 200
+
+// angle-mode duty-from-error thresholds (see duty_from_error()): below
+// STOP_DEG, don't move at all (accept the residual error rather than hunt); at or
+// above FULL_SPEED_DEG, move continuously (duty 1.0); ramp linearly in between.
+// UNVALIDATED on real hardware for either actuator - tune once tested, independently
+// if it turns out pitch and yaw/roll need different curves
+#define AP_MOUNT_SKYDROID_DUTY_STOP_DEG 0.5f
+#define AP_MOUNT_SKYDROID_DUTY_FULL_SPEED_DEG 5.0f
+
+// DISABLED (2026-08-11): confirmed on real C13 hardware that ROLL_A/ROLL_B's sign
+// vs AP_Mount's roll-right-positive convention was backwards - the closed loop
+// amplified roll error instead of correcting it, a positive-feedback runaway that
+// drove the gimbal hard into its roll limit immediately after boot and kept trying
+// to push further (no command from the FC/RC involved at all - this happened purely
+// from the closed loop reacting to whatever tiny initial roll error existed after
+// the boot self-calibration sweep).  Real risk of mechanical damage if left running.
+// Re-enable only after verifying the correct sign with the same one-command-at-a-time,
+// human-eyes-verified method used to find this mechanism in the first place - do not
+// just flip the sign in FineTuneCode and assume it's fixed without re-testing on
+// real hardware
+#define AP_MOUNT_SKYDROID_FINETUNE_ROLL_ENABLED 0
+
 #define AP_MOUNT_SKYDROID_DEBUG 0
 #define debug(fmt, args ...) do { if (AP_MOUNT_SKYDROID_DEBUG) { GCS_SEND_TEXT(MAV_SEVERITY_INFO, "SkyDroid: " fmt, ## args); } } while (0)
 
 const char* AP_Mount_SkyDroid::send_message_prefix = "Mount: SkyDroid";
+
+// PWM-style duty cycle helpers for driving a fixed-speed ("full speed" or "stop",
+// no proportional control) actuator - the PTZ jog and the fine-tune nudges are both
+// this kind of actuator.  These let us approximate proportional speed/position
+// control from a fixed-speed command by pulsing it on and off: the EFFECTIVE
+// average speed is duty * the actuator's real fixed speed, rather than jogging at
+// full speed right up to a hard deadzone and stopping dead.  All UNVALIDATED on
+// real hardware - see the callers for where to tune
+
+// duty cycle derived from a position error: 0 at/below stop_deg, 1 at/above
+// full_speed_deg, ramping linearly in between
+static float duty_from_error(float error_deg, float stop_deg, float full_speed_deg)
+{
+    const float abs_error_deg = fabsf(error_deg);
+    if (abs_error_deg <= stop_deg) {
+        return 0.0f;
+    }
+    return constrain_float((abs_error_deg - stop_deg) / (full_speed_deg - stop_deg), 0.0f, 1.0f);
+}
+
+// duty cycle derived from a commanded rate vs the actuator's real fixed speed
+static float duty_from_rate(float rate_dps, float actuator_speed_dps)
+{
+    return constrain_float(fabsf(rate_dps) / actuator_speed_dps, 0.0f, 1.0f);
+}
+
+// true if, right now, a duty-cycled actuator should be actively moving (the
+// direction is the caller's own decision - this only decides on/off timing).  Purely
+// a function of wall-clock time and the requested duty, so needs no per-caller state
+static bool duty_cycle_active(float duty, uint32_t period_ms)
+{
+    const uint32_t phase_ms = AP_HAL::millis() % period_ms;
+    return phase_ms < (uint32_t)(constrain_float(duty, 0.0f, 1.0f) * period_ms);
+}
 
 // update mount position - should be called periodically
 void AP_Mount_SkyDroid::update()
@@ -478,6 +554,13 @@ void AP_Mount_SkyDroid::send_target_angles(const MountAngleTarget& angle_rad)
         return;
     }
 
+    // the C13 doesn't respond to GAM either, and needs an entirely different
+    // mechanism again (PTZ fine-tune nudges for yaw/roll) - see uses_finetune_nudge_commands()
+    if (uses_finetune_nudge_commands()) {
+        send_target_angles_finetune(angle_rad);
+        return;
+    }
+
     // set gimbal's lock state (follow the body-frame target)
     if (!set_gimbal_lock(false)) {
         return;
@@ -522,6 +605,13 @@ void AP_Mount_SkyDroid::send_target_rates(const MountRateTarget& rate_rads)
     // the C11 doesn't respond to GSM at all - drive it with GSY/GSP instead
     if (uses_individual_axis_speed_commands()) {
         send_target_rates_individual_axis(rate_rads);
+        return;
+    }
+
+    // the C13 doesn't respond to GSM either, and needs an entirely different
+    // mechanism again (PTZ fine-tune nudges for yaw/roll) - see uses_finetune_nudge_commands()
+    if (uses_finetune_nudge_commands()) {
+        send_target_rates_finetune(rate_rads);
         return;
     }
 
@@ -614,6 +704,134 @@ void AP_Mount_SkyDroid::send_individual_axis_rate(const Identifier id, float rat
 {
     const int8_t rate_lsb = constrain_int16(roundf(rate_dps / AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_DPS_PER_LSB), -127, 127);
     send_fixedlen_packet(AddressByte::GIMBAL, id, true, (uint8_t)rate_lsb);
+}
+
+// send angle target for models needing PTZ fine-tune nudges for yaw/roll (e.g. C13).
+// There is no absolute-angle command that works on this model for any axis, so every
+// axis closes the loop itself using GAC attitude feedback: pitch with the ordinary
+// PTZ up/down bang-bang jog (same mechanism as every other PTZ-jog model), yaw/roll
+// with repeated fine-tune nudges toward the target
+void AP_Mount_SkyDroid::send_target_angles_finetune(const MountAngleTarget& angle_rad)
+{
+    // set gimbal's lock state (follow the body-frame target)
+    set_gimbal_lock(false);
+
+    // clamp to the configured MNT1_YAW/PITCH/ROLL_MIN/MAX range, same as every other path
+    const float pitch_target_rad = radians(constrain_float(degrees(angle_rad.pitch),
+                                                             _params.pitch_angle_min, _params.pitch_angle_max));
+    const float yaw_target_rad = radians(constrain_float(degrees(angle_rad.get_bf_yaw()),
+                                                          _params.yaw_angle_min, _params.yaw_angle_max));
+
+    // pitch: duty-cycle the PTZ jog as the error shrinks, instead of jogging at full
+    // speed right up to a hard deadzone and stopping dead - see duty_from_error()/
+    // duty_cycle_active().  UNVALIDATED on real hardware - tune the thresholds once tested
+    const float pitch_error_deg = degrees(pitch_target_rad - _current_angle_rad.y);
+    const float pitch_duty = duty_from_error(pitch_error_deg, AP_MOUNT_SKYDROID_DUTY_STOP_DEG, AP_MOUNT_SKYDROID_DUTY_FULL_SPEED_DEG);
+    int8_t pitch_dir = 0;
+    if (pitch_duty > 0.0f && duty_cycle_active(pitch_duty, AP_MOUNT_SKYDROID_DUTY_PWM_PERIOD_MS)) {
+        pitch_dir = (pitch_error_deg > 0) ? 1 : -1;
+    }
+    send_ptz_pitch_direction(pitch_dir);
+
+    // yaw: duty-cycle the fine-tune nudge rate the same way.  Thresholds/step-size
+    // here are UNVALIDATED on real hardware (see FineTuneCode's comment) - revisit
+    // once the real degrees-per-nudge and any saturating trim-range behaviour are characterized
+    const float yaw_error_deg = degrees(wrap_PI(yaw_target_rad - _current_angle_rad.z));
+    const float yaw_duty = duty_from_error(yaw_error_deg, AP_MOUNT_SKYDROID_DUTY_STOP_DEG, AP_MOUNT_SKYDROID_DUTY_FULL_SPEED_DEG);
+    if (yaw_duty > 0.0f) {
+        send_finetune_nudge(yaw_error_deg > 0 ? FineTuneCode::YAW_RIGHT : FineTuneCode::YAW_LEFT, _last_yaw_nudge_ms, yaw_duty);
+    }
+
+    // roll DISABLED - see AP_MOUNT_SKYDROID_FINETUNE_ROLL_ENABLED
+#if AP_MOUNT_SKYDROID_FINETUNE_ROLL_ENABLED
+    if (roll_range_valid()) {
+        const float roll_target_rad = radians(constrain_float(degrees(angle_rad.roll),
+                                                                _params.roll_angle_min, _params.roll_angle_max));
+        const float roll_error_deg = degrees(roll_target_rad - _current_angle_rad.x);
+        const float roll_duty = duty_from_error(roll_error_deg, AP_MOUNT_SKYDROID_DUTY_STOP_DEG, AP_MOUNT_SKYDROID_DUTY_FULL_SPEED_DEG);
+        if (roll_duty > 0.0f) {
+            send_finetune_nudge(roll_error_deg > 0 ? FineTuneCode::ROLL_A : FineTuneCode::ROLL_B, _last_roll_nudge_ms, roll_duty);
+        }
+    }
+#endif
+}
+
+// send rate target for models needing PTZ fine-tune nudges for yaw/roll (e.g. C13)
+void AP_Mount_SkyDroid::send_target_rates_finetune(const MountRateTarget& rate_rads)
+{
+    // set gimbal's lock state if it has changed
+    set_gimbal_lock(rate_rads.yaw_is_ef);
+
+    // pitch: duty-cycle the PTZ jog so the EFFECTIVE average speed approximates the
+    // commanded rate, rather than jogging at the actuator's full fixed speed for any
+    // nonzero command - see duty_from_rate()/duty_cycle_active()
+    const float pitch_dps = degrees(rate_rads.pitch);
+    const float pitch_duty = duty_from_rate(pitch_dps, AP_MOUNT_SKYDROID_PTZ_JOG_DPS);
+    int8_t pitch_dir = 0;
+    if (pitch_duty > 0.0f && duty_cycle_active(pitch_duty, AP_MOUNT_SKYDROID_DUTY_PWM_PERIOD_MS)) {
+        pitch_dir = (pitch_dps > 0) ? 1 : -1;
+    }
+    send_ptz_pitch_direction(pitch_dir);
+
+    // yaw/roll: duty-cycle the fine-tune nudge rate the same way.  UNVALIDATED on
+    // real hardware, same caveat as send_target_angles_finetune() above - the
+    // actuator speed used here is a placeholder (matches the PTZ jog) since the real
+    // per-nudge step size/rate hasn't been characterized yet
+    const float yaw_dps = degrees(rate_rads.yaw);
+    const float yaw_duty = duty_from_rate(yaw_dps, AP_MOUNT_SKYDROID_PTZ_JOG_DPS);
+    if (yaw_duty > 0.0f) {
+        send_finetune_nudge(yaw_dps > 0 ? FineTuneCode::YAW_RIGHT : FineTuneCode::YAW_LEFT, _last_yaw_nudge_ms, yaw_duty);
+    }
+
+    // roll DISABLED - see AP_MOUNT_SKYDROID_FINETUNE_ROLL_ENABLED
+#if AP_MOUNT_SKYDROID_FINETUNE_ROLL_ENABLED
+    if (roll_range_valid()) {
+        const float roll_dps = degrees(rate_rads.roll);
+        const float roll_duty = duty_from_rate(roll_dps, AP_MOUNT_SKYDROID_PTZ_JOG_DPS);
+        if (roll_duty > 0.0f) {
+            send_finetune_nudge(roll_dps > 0 ? FineTuneCode::ROLL_A : FineTuneCode::ROLL_B, _last_roll_nudge_ms, roll_duty);
+        }
+    }
+#endif
+}
+
+// send a single PTZ pitch jog direction (-1=down, 0=stop, +1=up), deduped against the
+// last direction sent so we don't spam an unchanged direction every update() cycle -
+// the gimbal keeps moving on its own at a fixed speed until told otherwise
+void AP_Mount_SkyDroid::send_ptz_pitch_direction(int8_t direction)
+{
+    uint8_t code = 0x00;
+    if (direction > 0) {
+        code = 0x01;
+    } else if (direction < 0) {
+        code = 0x02;
+    }
+    if (_last_ptz_pitch_code == code) {
+        return;
+    }
+    if (send_fixedlen_packet(AddressByte::GIMBAL, AP_MOUNT_SKYDROID_ID3CHAR_GIMBAL_MODE, true, code)) {
+        _last_ptz_pitch_code = code;
+    }
+}
+
+// send a fine-tune nudge code at up to AP_MOUNT_SKYDROID_FINETUNE_NUDGE_INTERVAL_MS
+// (a hard floor - never send faster than the empirically-tested rate), further
+// gated by duty (0-1) so the EFFECTIVE average nudge rate tapers off as duty shrinks
+// - see duty_cycle_active().  Unlike send_ptz_pitch_direction() above, repeated
+// identical sends are NOT deduped - each nudge is believed to be a small discrete
+// step rather than a "hold to keep moving" command, so sending the same code
+// repeatedly (at whatever the duty-gated rate works out to) is the intended way to keep moving
+void AP_Mount_SkyDroid::send_finetune_nudge(FineTuneCode code, uint32_t &last_send_ms, float duty)
+{
+    const uint32_t now_ms = AP_HAL::millis();
+    if (now_ms - last_send_ms < AP_MOUNT_SKYDROID_FINETUNE_NUDGE_INTERVAL_MS) {
+        return;
+    }
+    if (!duty_cycle_active(duty, AP_MOUNT_SKYDROID_DUTY_PWM_PERIOD_MS)) {
+        return;
+    }
+    last_send_ms = now_ms;
+    send_fixedlen_packet(AddressByte::GIMBAL, AP_MOUNT_SKYDROID_ID3CHAR_GIMBAL_MODE, true, (uint8_t)code);
 }
 
 // attitude information analysis of gimbal (arrives as "GAC" in response to our "GAA" enable request)

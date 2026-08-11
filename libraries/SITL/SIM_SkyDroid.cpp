@@ -28,6 +28,11 @@
 
 using namespace SITL;
 
+// simulated per-nudge step size for PTZ fine-tune codes (0x10-0x13) on the "C13"
+// instance - a GUESS, not measured on real hardware, just needs to be a working
+// closed loop for SITL
+static constexpr float AP_MOUNT_SKYDROID_SIM_FINETUNE_STEP_RAD = radians(0.5f);
+
 void SkyDroid::update(const Aircraft &aircraft)
 {
     Vector3f ja;
@@ -55,6 +60,25 @@ void SkyDroid::update(const Aircraft &aircraft)
             vehicle_rate_gimbal.x,
             vehicle_rate_gimbal.y + pitch_rate,
             vehicle_rate_gimbal.z + yaw_rate));
+    } else if (uses_finetune_nudge_commands()) {
+        // Confirmed on real C13 hardware: GAM/GSM/GSY/GSP/GAY/PTZ-left-right are all
+        // silently ignored - pitch still uses the ordinary PTZ up/down jog (same as
+        // every other model), but yaw/roll only move via the PTZ fine-tune nudge
+        // codes (0x10-0x13), accumulated into _finetune_yaw/roll_target_rad by
+        // handle_packet() below.  Step size per nudge is a SIMULATED GUESS, not
+        // measured on real hardware yet
+        const float jog_rate_rads = radians(30.0f);  // matches the C11's/every model's observed PTZ jog speed
+        float pitch_rate = 0.0f;
+        switch (_ptz_pitch_code) {
+        case 1: pitch_rate = jog_rate_rads; break;     // up
+        case 2: pitch_rate = -jog_rate_rads; break;    // down
+        default: break;                                // 0=stop, or unrecognised
+        }
+        const float gain = 10.0f;
+        gimbal.set_demanded_rates(Vector3f(
+            vehicle_rate_gimbal.x + (_has_roll_axis ? (_finetune_roll_target_rad - ja.x) * gain : 0.0f),
+            vehicle_rate_gimbal.y + pitch_rate,
+            vehicle_rate_gimbal.z + (_finetune_yaw_target_rad - ja.z) * gain));
     } else {
         // Drive GimbalSim toward the angles commanded via the GAM/GAR packets.
         // Wire encoding: pitch_cd = pitch_deg * 100, yaw_cd = yaw_deg * 100, roll_cd =
@@ -257,8 +281,40 @@ void SkyDroid::handle_packet(uint8_t data_len)
         if (hex_chars_to_uint32((const char*)&_buf[10], 2, tmp)) {
             _commanded_pitch_speed_lsb = (int8_t)tmp;
         }
+
+    } else if (strncmp(id, "PTZ", 3) == 0 && data_len >= 2 && uses_finetune_nudge_commands()) {
+        // the "C13" instance only - confirmed on real hardware that pitch still uses
+        // the ordinary PTZ up/down jog, but yaw/roll only move via the fine-tune
+        // nudge codes (0x10-0x13).  Step size per nudge is a SIMULATED GUESS - see
+        // AP_MOUNT_SKYDROID_SIM_FINETUNE_STEP_RAD
+        uint32_t tmp;
+        if (hex_chars_to_uint32((const char*)&_buf[10], 2, tmp)) {
+            switch (tmp) {
+            case 0x00: case 0x01: case 0x02:
+                _ptz_pitch_code = (uint8_t)tmp;
+                break;
+            case 0x10:  // yaw left
+                _finetune_yaw_target_rad -= AP_MOUNT_SKYDROID_SIM_FINETUNE_STEP_RAD;
+                break;
+            case 0x11:  // yaw right
+                _finetune_yaw_target_rad += AP_MOUNT_SKYDROID_SIM_FINETUNE_STEP_RAD;
+                break;
+            case 0x12:  // roll, direction A
+                if (_has_roll_axis) {
+                    _finetune_roll_target_rad += AP_MOUNT_SKYDROID_SIM_FINETUNE_STEP_RAD;
+                }
+                break;
+            case 0x13:  // roll, direction B
+                if (_has_roll_axis) {
+                    _finetune_roll_target_rad -= AP_MOUNT_SKYDROID_SIM_FINETUNE_STEP_RAD;
+                }
+                break;
+            default:
+                break;
+            }
+        }
     }
-    // all other commands (GSM, GSR, FAE, FAI, CAP, REC, DZM, PTZ etc.) absorbed silently
+    // all other commands (GSM, GSR, FAE, FAI, CAP, REC, DZM etc.) absorbed silently
 }
 
 void SkyDroid::send_packet(char addr2, const char id[3], bool write, const uint8_t *data, uint8_t len)

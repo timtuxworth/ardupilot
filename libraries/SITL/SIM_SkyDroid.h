@@ -90,6 +90,24 @@ private:
     // AP_Mount_SkyDroid::uses_individual_axis_speed_commands()'s own model check
     bool uses_individual_axis_speed_commands() const { return strcmp(_model_name, "C11") == 0; }
 
+    // last PTZ pitch jog code received (0=stop, 1=up, 2=down).  Only meaningful for
+    // the "C13" instance - confirmed on real hardware that this model still uses the
+    // ordinary PTZ jog for pitch (same as every other model) even though yaw/roll
+    // need the fine-tune nudges below instead
+    uint8_t _ptz_pitch_code;
+
+    // accumulated yaw/roll targets built up from fine-tune nudge codes (0x10-0x13).
+    // Only meaningful for the "C13" instance.  The per-nudge step size here is a
+    // SIMULATED GUESS (AP_MOUNT_SKYDROID_SIM_FINETUNE_STEP_RAD below) - not measured
+    // on real hardware yet, just needs to be a working closed loop for SITL
+    float _finetune_yaw_target_rad;
+    float _finetune_roll_target_rad;
+
+    // true if this instance should be driven by PTZ fine-tune nudges for yaw/roll
+    // rather than GAM/GAR, matching
+    // AP_Mount_SkyDroid::uses_finetune_nudge_commands()'s own model check
+    bool uses_finetune_nudge_commands() const { return strcmp(_model_name, "C13") == 0; }
+
     // read and dispatch incoming packets from autopilot
     void update_input();
 
