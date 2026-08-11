@@ -314,7 +314,7 @@ void Aircraft::sync_frame_time(void)
         sleep_debt_us = -1.0e5;
     }
 
-#if CONFIG_HAL_BOARD == HAL_BOARD_SITL
+#if CONFIG_HAL_BOARD == HAL_BOARD_SITL && !defined(HAL_BUILD_AP_PERIPH)
     // on a fresh reboot, instantly snap our clock to match peers instead
     // of sprinting to catch up - avoids a long visible "no link" period.
     hal_sitl.get_sitl_state()->_shared_mem.instant_catchup_if_new(time_now_us);
@@ -358,7 +358,7 @@ void Aircraft::sync_frame_time(void)
         last_fps_report_ms = now_ms;
     }
 
-#if CONFIG_HAL_BOARD == HAL_BOARD_SITL
+#if CONFIG_HAL_BOARD == HAL_BOARD_SITL && !defined(HAL_BUILD_AP_PERIPH)
     // publish basic swarm telemetry (position/velocity/heading) for peer
     // instances to read - see AP_SITL_SwarmInfo for the payload layout.
     {
