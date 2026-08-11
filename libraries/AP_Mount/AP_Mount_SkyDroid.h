@@ -35,6 +35,12 @@
     GAY, GAP) are silently ignored - only the individual-axis speed commands (GSY,
     GSP) actually move that model, so both rate and (closed-loop) angle control for
     the C11 are driven through those instead - see uses_individual_axis_speed_commands()
+  - confirmed on real C13 hardware: GAM/GSM/GSY/GSP/GAY and PTZ left/right are ALL
+    silently ignored (this model does not share the C11's fix) - the only thing that
+    moves yaw/roll at all is the "PTZ" command's fine-tune nudge codes (0x10-0x13),
+    normally documented as small trim adjustments rather than primary controls, sent
+    repeatedly - see uses_finetune_nudge_commands().  Pitch still uses the ordinary
+    PTZ up/down jog (0x01/0x02), same as every other model
  */
 
 #pragma once
@@ -229,6 +235,66 @@ private:
     // - see send_target_rates_individual_axis())
     void send_individual_axis_rate(const Identifier id, float rate_dps);
 
+    // PTZ "fine tune" nudge codes (data byte of the "PTZ" command, 0x10-0x13).
+    // Confirmed on real C13 hardware to be the only commands that move yaw/roll on
+    // that model - GAM/GSM/GSY/GSP/GAY/PTZ-left-right are all confirmed silently
+    // ignored.  Normally documented as small trim adjustments rather than primary
+    // jog/speed controls; a single packet did not produce clearly visible movement
+    // in testing, only a rapid burst did (~15 packets at 0.2s intervals) - exact
+    // degrees-per-nudge, and whether there is a saturating trim range needing
+    // periodic "Clear Fine Tune" (0x14), are NOT YET CHARACTERIZED on real hardware
+    enum class FineTuneCode : uint8_t {
+        YAW_LEFT = 0x10,
+        YAW_RIGHT = 0x11,
+        // roll direction convention vs AP_Mount's roll-right-positive is UNCONFIRMED
+        // on real hardware - only that these two codes move roll in opposite
+        // directions to each other, not which one is "positive" - verify and fix the
+        // mapping in send_target_angles_finetune()/send_target_rates_finetune() on
+        // the next real hardware round if it turns out backwards
+        ROLL_A = 0x12,
+        ROLL_B = 0x13,
+    };
+
+    // true if the connected model is known to only move yaw/roll via PTZ fine-tune
+    // nudges (confirmed on the C13; GAM/GSM/GSY/GSP/GAY/PTZ-left-right are all
+    // silently ignored on that model).  Pitch uses the ordinary PTZ up/down jog,
+    // same as every other model, so isn't gated by this - see
+    // send_target_angles_finetune()/send_target_rates_finetune()
+    bool uses_finetune_nudge_commands() const {
+        return _got_model_name && strncmp(_model_name, "C13", 3) == 0;
+    }
+
+    // send angle target for models needing PTZ fine-tune nudges for yaw/roll (e.g.
+    // C13).  Pitch closes the loop with the ordinary PTZ up/down jog, yaw/roll with
+    // repeated fine-tune nudges - both duty-cycled (PWM-style) as the error shrinks
+    // rather than run at full speed right up to a hard deadzone, to approximate
+    // proportional control from an actuator that has none - see duty_from_error()/
+    // duty_cycle_active() in the .cpp
+    void send_target_angles_finetune(const MountAngleTarget& angle_rad);
+
+    // send rate target for models needing PTZ fine-tune nudges for yaw/roll (e.g.
+    // C13) - duty-cycled the same way, from duty_from_rate()
+    void send_target_rates_finetune(const MountRateTarget& rate_rads);
+
+    // send a single PTZ pitch jog direction (-1=down, 0=stop, +1=up), deduped
+    // against the last direction sent - same "press and hold" mechanism used by
+    // every model's pitch control.  Callers duty-cycle by toggling direction
+    // on/off between calls (see send_target_angles_finetune()/
+    // send_target_rates_finetune()) rather than this function knowing about duty
+    // cycling itself
+    void send_ptz_pitch_direction(int8_t direction);
+
+    // send a fine-tune nudge code at up to AP_MOUNT_SKYDROID_FINETUNE_NUDGE_INTERVAL_MS
+    // (a hard floor - never exceed the empirically-tested rate), further gated by
+    // duty (0-1, see duty_cycle_active()) so the effective average nudge rate tapers
+    // off as duty shrinks.  Unlike PTZ's jog codes, repeated identical fine-tune
+    // sends are NOT deduped - each packet is believed to be a small discrete step,
+    // not a "hold to keep moving" command, so sending the same code repeatedly (at
+    // whatever the duty-gated rate works out to) is the intended way to keep moving.
+    // last_send_ms is the caller's own per-axis timestamp (yaw and roll are
+    // throttled independently)
+    void send_finetune_nudge(FineTuneCode code, uint32_t &last_send_ms, float duty);
+
     // attitude information analysis of gimbal (response to GAA, arrives as "GAC")
     void gimbal_angle_analyse();
 
@@ -276,6 +342,9 @@ private:
     uint32_t _last_current_angle_ms;                            // system time (in milliseconds) that angle information received from the gimbal
     uint32_t _last_req_current_info_ms;                         // system time that this driver last requested current gimbal information
     uint32_t _last_model_request_ms;                            // system time this driver last requested the model name (retried fast, independent of the 1hz loop below, until _got_model_name is true)
+    uint8_t _last_ptz_pitch_code;                               // last PTZ pitch jog code sent (0=stop, 1=up, 2=down), deduped like every other model's PTZ pitch control.  Zero-initialised like the rest of this class's members, which correctly matches the real "not moving" state before anything has been commanded
+    uint32_t _last_yaw_nudge_ms;                                // system time of the last yaw fine-tune nudge sent (models using uses_finetune_nudge_commands() only)
+    uint32_t _last_roll_nudge_ms;                               // system time of the last roll fine-tune nudge sent (models using uses_finetune_nudge_commands() only)
     uint8_t _last_req_step;                                     // 10hz request loop step (different requests are sent at various steps)
     uint8_t _msg_buff[AP_MOUNT_SKYDROID_PACKETLEN_MAX];         // buffer holding bytes from latest packet received.  only used to calculate crc
     uint8_t _msg_buff_len;                                      // number of bytes in the msg buffer
