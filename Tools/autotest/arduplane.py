@@ -9590,7 +9590,12 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
 
                     time.sleep(DRAIN_INTERVAL_S)
 
-                except NotAchievedException:
+                except Exception:
+                    # Not just NotAchievedException: AutoTestTimeoutException is a
+                    # sibling, not a subclass (both derive from ErrorException), and
+                    # both vehicles are armed for the entire loop above -- any
+                    # exception here needs the same disarm before it propagates, or
+                    # the follower is left armed for suite teardown to deal with.
                     self.set_rc(7, 1000)
                     self.disarm_vehicle(force=True)
                     self.disarm_vehicle(mav=target_mav, force=True, target_sysid=target_sysid)
