@@ -241,7 +241,7 @@ private:
     AP_Float    _uav_z;
 #endif
     // multi-thread support for avoidance
-    HAL_Semaphore _rsem;
+    mutable HAL_Semaphore _rsem;
 
     static AP_Avoidance *_singleton;
 };

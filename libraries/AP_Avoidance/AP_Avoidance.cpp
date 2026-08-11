@@ -842,6 +842,9 @@ float AP_Avoidance::distance_to_obstacle(const Vector3f &start_NED_m, const Vect
                                             Obstacle &closest_aircraft
                                         ) const
 {
+    // guard the obstacle database against concurrent updates from the MAVLink thread
+    WITH_SEMAPHORE(_rsem);
+
     float distance_new_m = FLT_MAX;
     float aircraft_distance_m = FLT_MAX;
 
@@ -899,6 +902,9 @@ float AP_Avoidance::distance_to_aircraft(const Vector3f &vehicle_NED_m, const fl
                                             Obstacle &avoid_obstacle
                                         ) const
 {
+    // guard the obstacle database against concurrent updates from the MAVLink thread
+    WITH_SEMAPHORE(_rsem);
+
     float distance_new_msq  = lookahead_m * lookahead_m;
     //float distance_new_m    = lookahead_m;
 
