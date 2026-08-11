@@ -1207,10 +1207,6 @@ function Location_ud:offset(ofs_north, ofs_east) end
 ---@return number -- horizontal distance in meters
 function Location_ud:get_distance(loc) end
 
--- Given an other Location copies the altitude and it's frame into this location
----@param loc Location_ud -- location to use as the source altitude/frame
-function Location_ud:copy_alt_from(loc) end
-
 --get altitude (in cm) in the desired frame
 -- does not modify ret_alt_cm unless true is returned
 -- returns false on failure to get altitude in the desired frame which can only happen if the original frame or desired frame is:
@@ -4665,7 +4661,7 @@ function OAObstacle_ud:emitter_type(value) end
 ---@return integer -- obstacle type
 ---| '0'  # GENERAL
 ---| '1'  # MAV_SYSID
----| '2'  # GENERAL_AVIATION
+---| '2'  # AIRCRAFT
 ---| '3'  # WEATHER
 ---| '4'  # BIRD_MIGRATORY
 ---| '5'  # BIRD_OF_PREY
@@ -4686,14 +4682,6 @@ function OAObstacle_ud:obstacle_type(value) end
 -- get label field - label for display to the user. for GA vehicles this is an ICAO code
 ---@return string
 function OAObstacle_ud:label() end
-
--- get is_aircraft field - true if the obstacle is an aircraft
----@return boolean
-function OAObstacle_ud:is_aircraft() end
-
--- get is_drone field - true if the obstacle is a drone
----@return boolean
-function OAObstacle_ud:is_drone() end
 
 -- get location field - the Location of this obstacle
 ---@return Location_ud
