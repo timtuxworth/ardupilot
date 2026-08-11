@@ -516,11 +516,12 @@ void AP_OAScripting::_populate_scripting_obstacle(OAObstacle &script_obstacle, c
 {
     script_obstacle.timestamp_ms    = avoid_obstacle->timestamp_ms;
 
+    // icao_code must be set before _get_obstacle_type(): that helper classifies on it
+    script_obstacle.icao_code       = avoid_obstacle->src_id & 0xFFFFFF;
     script_obstacle.obstacle_type   = static_cast<uint8_t>(_get_obstacle_type(avoid_obstacle->emitter_type, script_obstacle.icao_code));
     script_obstacle.label           = _get_obstacle_label(avoid_obstacle->emitter_type, avoid_obstacle->src_id);
     script_obstacle.src_id          = avoid_obstacle->src_id;
 
-    script_obstacle.icao_code       = avoid_obstacle->src_id & 0xFFFFFF;
     script_obstacle.emitter_type    = avoid_obstacle->emitter_type;
 
     script_obstacle.is_aircraft     = AP_Avoidance::is_adsb_aircraft(avoid_obstacle->emitter_type);
