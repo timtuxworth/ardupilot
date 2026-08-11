@@ -166,7 +166,7 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
     return false;
 }
 
-// Lua binding to find the nearest crewed aircraft (GA/GENERAL_AVIATION) 
+// Lua binding to find the nearest crewed aircraft (ObstacleType::AIRCRAFT) 
 // this is needed because avoiding aircraft is often a higher priority than avoiding other obstacles
 bool AP_OAScripting::find_aircraft(const Location &vehicle_loc, const float lookahead_m, const float vertical_lookahead_m,
                                             float       &distance_m,
@@ -456,7 +456,7 @@ AP_OAScripting::ObstacleType AP_OAScripting::_get_obstacle_type(uint8_t emitter_
     } else if (icao_code >= 0xB20000 && icao_code <= 0xB30000) {
         return ObstacleType::BIRD_OF_PREY;
     } else if (AP_Avoidance::is_adsb_aircraft(emitter_type)) {
-        return ObstacleType::GENERAL_AVIATION;
+        return ObstacleType::AIRCRAFT;
     }
     return ObstacleType::GENERAL;
 }
@@ -469,8 +469,6 @@ void AP_OAScripting::_populate_fence_obstacle(OAObstacle &fence_obstacle, AP_OAS
     fence_obstacle.src_id          = 0;
     fence_obstacle.icao_code       = 0;
     fence_obstacle.emitter_type    = 0;
-    fence_obstacle.is_aircraft     = false;
-    fence_obstacle.is_drone        = false;
     switch (obstacle_type)
     {
     case AP_OAScripting::ObstacleType::FENCE_HOME:
@@ -515,9 +513,6 @@ void AP_OAScripting::_populate_scripting_obstacle(OAObstacle &script_obstacle, c
     script_obstacle.src_id          = avoid_obstacle->src_id;
 
     script_obstacle.emitter_type    = avoid_obstacle->emitter_type;
-
-    script_obstacle.is_aircraft     = AP_Avoidance::is_adsb_aircraft(avoid_obstacle->emitter_type);
-    script_obstacle.is_drone        = AP_Avoidance::is_adsb_uav(avoid_obstacle->emitter_type);
 
     script_obstacle.velocity_NED_ms = avoid_obstacle->_velocity_ned_ms;
     script_obstacle.location        = avoid_obstacle->_location;
