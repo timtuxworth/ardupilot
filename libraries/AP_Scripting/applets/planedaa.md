@@ -330,7 +330,7 @@ The `ObjT` field uses the following `OBSTACLE_TYPE` enumeration:
 |-------|------|-------------|
 | 0  | GENERAL | Generic obstacle of unknown type |
 | 1  | MAV_SYSID | Another MAVLink drone with a MAV_SYSID |
-| 2  | GENERAL_AVIATION | Aircraft, usually with an ICAO ADSB identifier |
+| 2  | AIRCRAFT | Aircraft, usually with an ICAO ADSB identifier |
 | 3  | WEATHER | Weather |
 | 4  | BIRD_MIGRATORY | Migratory bird(s), e.g. Canada Geese |
 | 5  | BIRD_OF_PREY | A bird that might attack the vehicle |
