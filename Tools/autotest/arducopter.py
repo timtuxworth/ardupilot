@@ -8357,6 +8357,19 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         the C13 shares the same wire protocol as the C11 (same AP_Mount_SkyDroid
         driver) but has a roll axis (-45..+45 deg) that the C11 doesn't, so this
         test exercises that in addition to the usual pitch/yaw checks'''
+        # pitch_rc_neutral=1818: with RC6 min=1000 max=2000 trim=1500 and
+        # default MNT1_PITCH_MIN=-90 / MNT1_PITCH_MAX=20, norm_input=0.636
+        # maps to exactly 0 deg pitch.
+        pitch_rc_neutral = 1818
+        # centre RC6 *before* the parameter changes below reboot the FC - same fix as
+        # MountSkyDroid() needed, and for the same reason: confirmed on real hardware
+        # that the C13 needs its own control mechanism entirely (PTZ pitch jog plus
+        # fine-tune nudges for yaw/roll - see AP_Mount_SkyDroid::uses_finetune_nudge_commands()),
+        # which is no longer the fast, uncapped GAM-based closed loop this test
+        # originally passed with.  Without this, the mount's default RC_TARGETING
+        # boot mode drifts toward RC6's un-centred default before the test can select
+        # NEUTRAL, and the slower bang-bang jog can't out-run that transient in time
+        self.set_rc(6, pitch_rc_neutral)
         self.set_parameters({
             "MNT1_TYPE": 15,      # SkyDroid
             "CAM1_TYPE": 4,       # Mount
@@ -8374,7 +8387,11 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             expected_fw_version=1,
             expected_cap_flags=0x43,
         )
-        self.mount_test_body(pitch_rc_neutral=1818, do_rate_tests=False)
+        # neutral_tol_deg=3.5: confirmed on real hardware that the C13 needs PTZ pitch
+        # jog (3deg deadzone) plus fine-tune nudges for yaw/roll (2deg deadzone,
+        # unvalidated) instead of the original fast GAM-based closed loop this test
+        # was written against - see MountSkyDroid()'s identical comment for the C11
+        self.mount_test_body(pitch_rc_neutral=pitch_rc_neutral, do_rate_tests=False, neutral_tol_deg=3.5)
 
         # exercise the roll axis, which the C11 doesn't have
         self.progress("Testing mount roll targeting (C13-only axis)")
