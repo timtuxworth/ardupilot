@@ -6,6 +6,8 @@
 #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
 
 #include "SITL_State_common.h"
+#include "SITL_SharedMem.h"
+#include "SITL_SwarmInfo.h"
 
 #if defined(HAL_BUILD_AP_PERIPH)
 #include "SITL_Periph_State.h"
@@ -50,6 +52,20 @@ public:
                                 float &yaw_degrees);
     
     uint8_t get_instance() const { return _instance; }
+
+    // shared memory for multi-instance clock synchronisation; accessible
+    // from SIM_Aircraft::sync_frame_time() via hal_sitl.get_sitl_state()
+    AP_SITL_SharedMem _shared_mem;
+
+    // convenience wrapper to read a peer instance's published swarm info
+    // (position/velocity/heading); see AP_SITL_SwarmInfo. Returns false if
+    // the instance is inactive or the read failed.
+    bool get_swarm_info(uint8_t instance_id, AP_SITL_SwarmInfo &info) const {
+        if (!_shared_mem.instance_active(instance_id)) {
+            return false;
+        }
+        return _shared_mem.read_payload(instance_id, &info, sizeof(info));
+    }
 
 private:
     void _parse_command_line(int argc, char * const argv[]);
