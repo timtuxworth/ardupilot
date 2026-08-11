@@ -9759,7 +9759,7 @@ class TestSuite(abc.ABC):
     def wait_not_ready_to_arm(self):
         self.wait_sensor_state(mavutil.mavlink.MAV_SYS_STATUS_PREARM_CHECK, True, True, False)
 
-    def wait_prearm_sys_status_healthy(self, timeout=60, mav=None):
+    def wait_prearm_sys_status_healthy(self, timeout=60, mav=None, target_sysid=None):
         self.do_timesync_roundtrip(mav=mav)
         tstart = self.get_sim_time(mav=mav)
         while True:
@@ -9767,7 +9767,7 @@ class TestSuite(abc.ABC):
             if t2 - tstart > timeout:
                 self.progress("Prearm bit never went true.  Attempting arm to elicit reason from autopilot")
                 try:
-                    self.arm_vehicle()
+                    self.arm_vehicle(mav=mav, target_sysid=target_sysid)
                 except Exception:  # noqa: BLE001
                     pass
                 raise AutoTestTimeoutException("Prearm bit never went true")
@@ -9891,7 +9891,7 @@ class TestSuite(abc.ABC):
             self.wait_gps_sys_status_not_present_or_enabled_and_healthy(mav=mav)
             self.poll_home_position(mav=mav, target_sysid=target_sysid)
         if check_prearm_bit:
-            self.wait_prearm_sys_status_healthy(timeout=timeout, mav=mav)
+            self.wait_prearm_sys_status_healthy(timeout=timeout, mav=mav, target_sysid=target_sysid)
         armable_time = self.get_sim_time(mav=mav) - start
         self.progress("Took %u seconds to become armable" % armable_time)
         self.total_waiting_to_arm_time += armable_time
@@ -10907,8 +10907,8 @@ class TestSuite(abc.ABC):
         sequence numbers starting from start_index'''
         if mav is None:
             mav = self.mav
-        self.do_timesync_roundtrip()
-        tstart = self.get_sim_time()
+        self.do_timesync_roundtrip(mav=mav)
+        tstart = self.get_sim_time(mav=mav)
         if start_index is not None:
             item_base = start_index
             mav.mav.mission_write_partial_list_send(
@@ -10929,7 +10929,7 @@ class TestSuite(abc.ABC):
         timeout = (10 + len(items)/10.0)
         while True:
             self.drain_all_pexpects()
-            if self.get_sim_time_cached() - tstart > timeout:
+            if self.get_sim_time_cached(mav=mav) - tstart > timeout:
                 raise NotAchievedException("timeout uploading %s" % str(mission_type))
             if len(remaining_to_send) == 0:
                 self.progress("All sent")
