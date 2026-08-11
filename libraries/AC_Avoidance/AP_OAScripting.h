@@ -52,6 +52,9 @@ public:
     enum class ObstacleType : uint8_t {
         GENERAL                     = 0,
         MAV_SYSID                   = 1,
+        // Named GENERAL_AVIATION, not "ADSB", on purpose: the source being ADS-B does not
+        // fix the type. An ADS-B contact with a UAV emitter is a drone (MAV_SYSID above),
+        // so "ADSB" would span two ObstacleTypes. This one is specifically crewed aircraft.
         GENERAL_AVIATION            = 2,
         WEATHER                     = 3,
         BIRD_MIGRATORY              = 4,
@@ -109,7 +112,7 @@ public:
     // non-fence value to search all polygon/circle fences.  Returns true and sets distance_m if a
     // matching polygon/circle fence is found, false otherwise.
     bool fence_distance(const Location &loc, uint8_t fence_type, float &distance_m) const;
-    // This function fines the closed crude aircraft by checking the ADS-B database
+    // This function finds the closest crewed aircraft by checking the ADS-B database
     /*bool find_closest_aircraft(const Location &vehicle_loc, float lookahead_m,
                                             float &distance_m, 
                                             uint16_t &type, 

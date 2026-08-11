@@ -31,11 +31,7 @@
  */
 class AC_Avoid {
 public:
-    AC_Avoid(
-#ifdef AP_SCRIPTING_ENABLED
-#endif
-
-    );
+    AC_Avoid();
 
     /* Do not allow copies */
     CLASS_NO_COPY(AC_Avoid);
