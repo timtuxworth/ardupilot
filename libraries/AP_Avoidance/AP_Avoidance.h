@@ -125,6 +125,8 @@ public:
     // utility functions for classifying ADSB emmitter_type values
     static bool is_adsb_aircraft(uint8_t emitter_type);
     static bool is_adsb_uav(uint8_t emitter_type);
+    // ADS-B surface (ground) vehicle categories - deliberately not avoided by an airborne vehicle
+    static bool is_ground_vehicle(uint8_t emitter_type);
 #endif 
 
     // for holding parameters
