@@ -1224,7 +1224,7 @@ const AC_PolyFence_loader &AC_Fence::polyfence() const
     return _poly_loader;
 }
 
-// returns the closest distance in meters from (start_NE_cm, end_NE_cm) and any "tincal" circle/home based inclusion fence. 
+// returns the closest distance in meters from (start_NE_cm, end_NE_cm) and any "tincan" circle/home based inclusion fence. 
 // the distance will be positive if inside the inclusion "tincan", or -ve if outside
 float AC_Fence::distance_line_to_home_inclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const
 {
