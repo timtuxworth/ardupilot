@@ -1208,8 +1208,6 @@ userdata OAObstacle field icao_code int32_t read write 0 0xFFFFFF
 userdata OAObstacle field emitter_type uint8_t read write 0 UINT8_MAX
 userdata OAObstacle field obstacle_type uint8_t read write 0 UINT8_MAX
 userdata OAObstacle field label string read
-userdata OAObstacle field is_aircraft boolean read
-userdata OAObstacle field is_drone boolean read
 userdata OAObstacle field location Location read
 userdata OAObstacle field position_NED_m Vector3f read
 userdata OAObstacle field velocity_NED_ms Vector3f read
