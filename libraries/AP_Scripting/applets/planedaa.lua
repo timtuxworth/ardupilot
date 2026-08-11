@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-047"
+SCRIPT_VERSION      = "4.8.0-048"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -548,7 +548,8 @@ local margin_uav_m            = DAA_MARGIN_UAV:get()
 local margin_weather_m        = DAA_MARGIN_WTH:get()
 local margin_ais_m            = DAA_MARGIN_AIS:get()
 local margin_proximity_m      = DAA_MARGIN_PRX:get()
-local refresh_rate          = 1000.0 / DAA_UPDATE_RATE:get()
+-- refresh_period_ms is the loop period in ms; DAA_UPDATE_RATE is in Hz (floored at 1 Hz to avoid /0)
+local refresh_period_ms     = 1000.0 / math.max(DAA_UPDATE_RATE:get(), 1.0)
 local bendy_ratio           = DAA_BR_RATIO:get()
 local bendy_angle           = DAA_BR_ANGLE:get()
 local wp_loiter_rad_m         = WP_LOITER_RAD:get()
@@ -702,7 +703,7 @@ local function get_vehicle_state()
         margin_weather_m      = DAA_MARGIN_WTH:get()
         margin_ais_m          = DAA_MARGIN_AIS:get()
         margin_proximity_m    = DAA_MARGIN_PRX:get()
-        refresh_rate        = 1000.0 / DAA_UPDATE_RATE:get()
+        refresh_period_ms   = 1000.0 / math.max(DAA_UPDATE_RATE:get(), 1.0)
         bendy_ratio         = DAA_BR_RATIO:get()
         bendy_angle         = DAA_BR_ANGLE:get()
         wp_loiter_rad_m       = WP_LOITER_RAD:get()
@@ -2523,8 +2524,12 @@ local DAA = {
                 current_state = STATE.loitering
             end
             return
-        elseif current_state == STATE.hovering or current_state == STATE.avoiding or current_state == STATE.hovering or current_state == STATE.landing then -- luacheck: ignore 542
-            -- do nothing for now
+        -- while mid-manoeuvre (hovering/avoiding/landing) don't re-decide: match here so the
+        -- chain skips the loiter trigger and the monitoring reset, then fall through to
+        -- avoid_obstacle() below. The branch is intentionally empty (luacheck 542 = "empty
+        -- if branch", suppressed on the next line).
+        elseif current_state == STATE.hovering or current_state == STATE.avoiding or current_state == STATE.landing then -- luacheck: ignore 542
+            -- (deliberately empty)
         elseif aircraft_avoiding ~= nil then
             gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITER AIRCRAFT: %s", aircraft_avoiding.label))
             loiteralt.start(ga_avoid_alt_m, ga_avoid_alt_frame, true, airspeed_ms)
@@ -2553,8 +2558,12 @@ local DAA = {
         if loiteralt.active then
             current_state = STATE.loitering
             do_loitering()
-        elseif current_state == STATE.hovering or current_state == STATE.avoiding or current_state == STATE.hovering or current_state == STATE.landing then -- luacheck: ignore 542
-            -- do nothing for now
+        -- while mid-manoeuvre (hovering/avoiding/landing) don't re-decide: match here so the
+        -- chain skips the loiter trigger and the monitoring reset, then fall through to
+        -- avoid_obstacle() below. The branch is intentionally empty (luacheck 542 = "empty
+        -- if branch", suppressed on the next line).
+        elseif current_state == STATE.hovering or current_state == STATE.avoiding or current_state == STATE.landing then -- luacheck: ignore 542
+            -- (deliberately empty)
         elseif aircraft_avoiding ~= nil and assess_obstacle_motion(aircraft_avoiding).is_conflict then
             -- CONSERVATIVE CPA gate on the loiter trigger: an aircraft inside the well-clear
             -- radius is always a conflict (assess_obstacle_motion's range check), so the loiter
@@ -2767,7 +2776,7 @@ local function update()
     end
 end
 
--- wrapper around update(). This calls update() at REFRESHRATE Hz, i.e. every 1000/REFRESH_RATE milliseconds
+-- wrapper around update(). This re-schedules update() every refresh_period_ms ms (= 1000 / DAA_UPDATE_RATE Hz)
 -- and if update faults then an error is displayed, but the script is not stopped
 function Protected_Wrapper()
     local success, err = pcall(update)
@@ -2777,7 +2786,7 @@ function Protected_Wrapper()
        -- down a bit so we don't flood the console with errors
        return Protected_Wrapper, 1000
     end
-    return Protected_Wrapper, 1000 / refresh_rate
+    return Protected_Wrapper, refresh_period_ms
 end
 
 function Delayed_Startup()
