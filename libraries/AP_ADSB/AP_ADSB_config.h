@@ -4,8 +4,6 @@
 
 #include <GCS_MAVLink/GCS_config.h>
 
-#include "GDL90_protocol/GDL90_Message_Structs.h"
-
 #ifndef HAL_ADSB_ENABLED
 #define HAL_ADSB_ENABLED HAL_PROGRAM_SIZE_LIMIT_KB > 1024
 #endif
@@ -20,6 +18,10 @@
  */
 #ifdef HAL_ADSB_UAVIONIX_MAVLINK_ENABLED
 #error "Change 'define HAL_ADSB_UAVIONIX_MAVLINK_ENABLED' to 'define HAL_ADSB_MAVLINK_ENABLED'"
+#endif
+
+#ifndef HAL_ADSB_MAVLINK_ENABLED
+#define HAL_ADSB_MAVLINK_ENABLED HAL_ADSB_BACKEND_DEFAULT_ENABLED && HAL_GCS_ENABLED
 #endif
 
 #ifndef HAL_ADSB_MAVLINK_ENABLED
