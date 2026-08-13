@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-049"
+SCRIPT_VERSION      = "4.8.0-050"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -451,7 +451,7 @@ DAA_CPA_MIN = bind_add_param('CPA_MIN', 32, 2)
 --[[
     // @Param: DAA_TRAP_ACT
     // @DisplayName: Trapped-failsafe action
-    // @Description: What to do when avoidance cannot find a way out (boxed in, or unable to keep clear of an obstacle for DAA_TRAP_S). 0 disables the trapped-failsafe entirely (avoidance just keeps trying). For a VTOL, QLOITER stops forward flight and hovers (zero turn radius) - the safest way out of a tight space. If the aircraft has no VTOL (Q_ENABLE=0) the VTOL options fall back to RTL. Trapped by a fixed obstacle (fence) is sticky (held until the pilot changes mode); trapped by a moving obstacle (drone/aircraft) recovers to the previous mode after DAA_TRAP_CLR_S.
+    // @Description: What to do when avoidance cannot find a way out (boxed in, or unable to keep clear of an obstacle for DAA_TRAP_S). 0 disables the trapped-failsafe entirely (avoidance just keeps trying). For a VTOL, QLOITER stops forward flight and hovers (zero turn radius) - the safest way out of a tight space. If the aircraft has no VTOL (Q_ENABLE=0) the VTOL options fall back to RTL. Trapped by a fixed obstacle (fence) is sticky (held until the pilot changes mode); trapped by a moving obstacle (drone/aircraft) recovers to the previous mode after DAA_TRAP_CLR_S. NOTE: the fence branch of the trap stands down when the core fence library will refuse a scripted mode change - i.e. FENCE_ACTION is non-zero AND FENCE_OPTIONS bit0 (DISABLE_MODE_CHANGE) is set - because in that case the core already handles the breach and the trap's mode change would only be denied. The aircraft near-miss branch (AVD_NMAC_XY/Z) is unaffected.
     // @Values: 0:Disabled,1:RTL,2:QRTL,3:QLOITER,4:QLAND
     // @User: Standard
 --]]
@@ -1512,6 +1512,7 @@ local DAA = {
         local function vtol_act(a) return a == 2 or a == 3 or a == 4 end
         local have_vtol   = (param:get('Q_ENABLE') or 0) > 0
         local fence_act   = param:get('FENCE_ACTION') or 0
+        local fence_opts  = param:get('FENCE_OPTIONS') or 0
         local adsb_type   = param:get('ADSB_TYPE') or 0
         local cruise_ms   = param:get('AIRSPEED_CRUISE') or 0
 
@@ -1535,8 +1536,11 @@ local DAA = {
         -- trapped-failsafe consistency
         if trap_act ~= 0 and not have_vtol and (vtol_act(trap_act) or vtol_act(trap_esc_act)) then
             warn(W, "trap VTOL action but Q_ENABLE=0 -> RTL") end
-        if trap_act ~= 0 and fence_act ~= 0 then
-            warn(I, string.format("TRAP + FENCE_ACTION %.0f: FA pre-empts trap", fence_act)) end
+        -- fence-trap stands down when the core will refuse its mode change: a fence action is set
+        -- (FENCE_ACTION ~= 0) AND FENCE_OPTIONS bit0 (DISABLE_MODE_CHANGE) is on. Only that pair
+        -- pre-empts the fence-trap (a fence action alone, with mode changes allowed, does not).
+        if trap_act ~= 0 and fence_act ~= 0 and (math.floor(fence_opts) % 2) == 1 then
+            warn(I, string.format("fence-trap off: FENCE_OPTS bit0 + FA %.0f", fence_act)) end
         if trap_act ~= 0 and trap_esc_act == trap_act then
             warn(I, "TRAP_ESC_ACT = TRAP_ACT: no escalation") end
         -- slew limit that can never bind (exceeds the achievable turn rate)
@@ -2673,8 +2677,20 @@ local DAA = {
     -- Sustained (DAA_TRAP_S) this is a genuine trap. Altitude fences are vertical
     -- (clamp-and-continue) and are covered by get_breaches, not the aircraft near-miss check.
     local function daa_compromised_now()
+        -- A fence breach is a compromise UNLESS the core fence library is already handling it
+        -- in a way that will refuse the trap's mode change: FENCE_ACTION ~= 0 (core takes a mode
+        -- action) AND FENCE_OPTIONS bit0 (DISABLE_MODE_CHANGE) set. In that pairing set_mode is
+        -- denied "in fence recovery", so firing the trap only spams the pilot with a
+        -- TRAPPED -> denied -> released burst and achieves nothing. Stand the fence branch down;
+        -- DAA.warnings() flags the pairing at enable. The trap still fires for a report-only fence
+        -- (FENCE_ACTION=0) or when mode changes are allowed, and the aircraft near-miss branch
+        -- below is unaffected (a real NMAC still traps regardless of fence config).
         if fence ~= nil and fence:get_breaches() ~= 0 then
-            return true
+            local fence_act  = param:get('FENCE_ACTION') or 0
+            local fence_opts = param:get('FENCE_OPTIONS') or 0
+            if not (fence_act ~= 0 and (math.floor(fence_opts) % 2) == 1) then
+                return true
+            end
         end
         return aircraft_avoiding ~= nil
             and aircraft_avoiding.distance_xy ~= nil
