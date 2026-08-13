@@ -27,6 +27,7 @@
 #include "AP_ADSB.h"
 
 #include "AP_ADSB_uAvionix_MAVLink.h"
+#include "AP_ADSB_MAVLink.h"
 #include "AP_ADSB_uAvionix_UCP.h"
 #include "AP_ADSB_Sagetech.h"
 #include "AP_ADSB_Sagetech_MXS.h"
@@ -66,7 +67,7 @@ AP_ADSB *AP_ADSB::_singleton;
 const AP_Param::GroupInfo AP_ADSB::var_info[] = {
     // @Param: TYPE
     // @DisplayName: ADSB Type
-    // @Description: Type of ADS-B hardware for ADSB-in and ADSB-out configuration and operation. Incoming MAVLink ADSB_VEHICLE messages are processed for every type (they are also emitted by directly-attached MAVLink hardware such as the uAvionix ping). Select 5 (MAVLink) to process ADSB_VEHICLE messages (e.g. forwarded from a companion computer) with no ADS-B hardware backend attached.
+    // @Description: Type of ADS-B hardware for ADSB-in and ADSB-out configuration and operation. Incoming MAVLink ADSB_VEHICLE messages are processed for any non-zero type. Select 5 (MAVLink) to process ADSB_VEHICLE messages (e.g. forwarded from a companion computer) with no ADS-B hardware attached.
     // @Values: 0:Disabled,1:uAvionix-MAVLink,2:Sagetech,3:uAvionix-UCP,4:Sagetech MX Series,5:MAVLink
     // @User: Standard
     // @RebootRequired: True
@@ -232,20 +233,8 @@ void AP_ADSB::init(void)
     }
 
     if (detected_num_instances == 0) {
-        // A MAVLink source needs no hardware backend: incoming ADSB_VEHICLE
-        // messages are handled directly by handle_message(). Only fail init if
-        // there is no source at all (no backend and no MAVLink type selected).
-        bool have_mavlink_source = false;
-        for (uint8_t i=0; i<ADSB_MAX_INSTANCES; i++) {
-            if (get_type(i) == Type::MAVLink) {
-                have_mavlink_source = true;
-                break;
-            }
-        }
-        if (!have_mavlink_source) {
-            _init_failed = true;
-            GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "ADSB: Unable to initialize ADSB driver");
-        }
+        _init_failed = true;
+        GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "ADSB: Unable to initialize ADSB driver");
     }
 }
 
@@ -264,7 +253,7 @@ bool AP_ADSB::check_startup()
     }
 
     if (all_backends_disabled) {
-        // nothing to do if no backend is configured (ADSB_TYPE all None)
+        // nothing to do
         return false;
     }
     if (in_state.vehicle_list == nullptr)  {
@@ -314,9 +303,11 @@ void AP_ADSB::detect_instance(uint8_t instance)
         break;
 
     case Type::MAVLink:
-        // No hardware backend: incoming ADSB_VEHICLE MAVLink messages are handled
-        // directly by AP_ADSB. The vehicle_list is still allocated because
-        // ADSB_TYPE != None, so check_startup() enables ADSB-in processing.
+#if HAL_ADSB_MAVLINK_ENABLED
+        if (AP_ADSB_MAVLink::detect()) {
+            _backend[instance] = NEW_NOTHROW AP_ADSB_MAVLink(*this, instance);
+        }
+#endif
         break;
     }
 
@@ -372,6 +363,7 @@ void AP_ADSB::update(void)
     loc.horizontal_pos_accuracy_is_valid = gps.horizontal_accuracy(loc.horizontal_pos_accuracy);
     loc.vertical_pos_accuracy_is_valid = gps.vertical_accuracy(loc.vertical_pos_accuracy);
     loc.horizontal_vel_accuracy_is_valid = gps.speed_accuracy(loc.horizontal_vel_accuracy);
+
 
     loc.vel_ned = gps.velocity();
 
