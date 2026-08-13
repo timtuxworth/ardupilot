@@ -65,7 +65,7 @@ public:
         Sagetech            = 2,
         uAvionix_UCP        = 3,
         Sagetech_MXS        = 4,
-        MAVLink             = 5,  // no hardware: process incoming ADSB_VEHICLE MAVLink only
+        MAVLink             = 5,  // no hardware: ingest incoming ADSB_VEHICLE MAVLink messages only
     };
 
     struct adsb_vehicle_t {
@@ -171,17 +171,10 @@ public:
     // extract a location out of a vehicle item
     Location get_location(const adsb_vehicle_t &vehicle) const;
 
-    // ADSB is considered enabled if there are any configured backends, or a
-    // backend-less MAVLink source (ADSB_TYPE=5) that ingests incoming
-    // ADSB_VEHICLE messages directly (detected_num_instances stays 0 for it).
+    // ADSB is considered enabled if there are any configured backends
     bool enabled() const {
         for (uint8_t instance=0; instance<detected_num_instances; instance++) {
             if (_type[instance] > 0) {
-                return true;
-            }
-        }
-        for (uint8_t instance=0; instance<ADSB_MAX_INSTANCES; instance++) {
-            if ((Type)_type[instance].get() == Type::MAVLink) {
                 return true;
             }
         }
