@@ -7906,7 +7906,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         self.set_parameters({
             "SCR_ENABLE": 1,
             "SCR_VM_I_COUNT": 1000000,
-            "ADSB_TYPE": 5,     # MAVLink: ingest ADSB_VEHICLE with no ADS-B hardware
+            "ADSB_TYPE": 1,     # MAVLink: ingest ADSB_VEHICLE with no ADS-B hardware
             "AVD_ENABLE": 1,    # required for AP_Avoidance to pull ADSB samples
             # pin the UAV avoidance envelope so the test is independent of the
             # defaults: horizontal radius and the vertical gate the intruder
@@ -8001,7 +8001,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         self.set_parameters({
             "SCR_ENABLE": 1,
             "SCR_VM_I_COUNT": 1000000,
-            "ADSB_TYPE": 5,     # MAVLink: ingest ADSB_VEHICLE with no ADS-B hardware
+            "ADSB_TYPE": 1,     # MAVLink: ingest ADSB_VEHICLE with no ADS-B hardware
             "AVD_ENABLE": 1,    # required for AP_Avoidance to pull ADSB samples
             "AVD_UAV_XY": 150,  # horizontal UAV standoff
             "AVD_UAV_Z": 25,    # vertical gate; the intruder (+10 m) sits inside it
@@ -8163,7 +8163,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         self.set_parameters({
             "SCR_ENABLE": 1,
             "SCR_VM_I_COUNT": 1000000,
-            "ADSB_TYPE": 5,     # MAVLink: ingest ADSB_VEHICLE with no ADS-B hardware
+            "ADSB_TYPE": 1,     # MAVLink: ingest ADSB_VEHICLE with no ADS-B hardware
             "AVD_ENABLE": 1,    # required for AP_Avoidance to pull ADSB samples
             "AVD_WCLR_XY": 200,
             "AVD_WCLR_Z": 50,
@@ -8278,7 +8278,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         self.set_parameters({
             "SCR_ENABLE": 1,
             "SCR_VM_I_COUNT": 1000000,
-            "ADSB_TYPE": 5,
+            "ADSB_TYPE": 1,     # MAVLink: ingest ADSB_VEHICLE with no ADS-B hardware
             "AVD_ENABLE": 1,
             "AVD_WCLR_XY": 200,     # well-clear radius; detection band is 200..250 m
             "AVD_WCLR_Z": 100,      # generous vertical gate so altitude never gates detection
@@ -8362,7 +8362,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         self.set_parameters({
             "SCR_ENABLE": 1,
             "SCR_VM_I_COUNT": 1000000,
-            "ADSB_TYPE": 5,         # MAVLink: ingest ADSB_VEHICLE with no ADS-B hardware
+            "ADSB_TYPE": 1,         # MAVLink: ingest ADSB_VEHICLE with no ADS-B hardware
             "AVD_ENABLE": 1,        # required for AP_Avoidance to pull ADSB samples
             "AVD_WCLR_XY": 200,     # well-clear radius; detection band is 200..250 m
             "AVD_WCLR_Z": 100,      # generous vertical gate so altitude never gates detection
@@ -8470,7 +8470,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         self.set_parameters({
             "SCR_ENABLE": 1,
             "SCR_VM_I_COUNT": 1000000,
-            "ADSB_TYPE": 5,
+            "ADSB_TYPE": 1,     # MAVLink: ingest ADSB_VEHICLE with no ADS-B hardware
             "AVD_ENABLE": 1,
             "AVD_UAV_XY": 75,       # drone standoff (get_standoff for MAV_SYSID)
             "AVD_UAV_Z": 50,        # generous so altitude never gates detection here
