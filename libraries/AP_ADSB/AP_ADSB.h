@@ -65,7 +65,6 @@ public:
         Sagetech            = 2,
         uAvionix_UCP        = 3,
         Sagetech_MXS        = 4,
-        MAVLink             = 5,  // no hardware: ingest incoming ADSB_VEHICLE MAVLink messages only
     };
 
     struct adsb_vehicle_t {
