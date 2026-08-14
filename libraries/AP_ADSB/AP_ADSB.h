@@ -42,7 +42,7 @@ class AP_ADSB_Backend;
 class AP_ADSB {
 public:
     friend class AP_ADSB_Backend;
-    friend class AP_ADSB_uAvionix_MAVLink;
+    friend class AP_ADSB_MAVLink;
     friend class AP_ADSB_uAvionix_UCP;
     friend class AP_ADSB_Sagetech;
     friend class AP_ADSB_Sagetech_MXS;

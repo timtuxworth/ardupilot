@@ -26,7 +26,7 @@
 
 #include "AP_ADSB.h"
 
-#include "AP_ADSB_uAvionix_MAVLink.h"
+#include "AP_ADSB_MAVLink.h"
 #include "AP_ADSB_uAvionix_UCP.h"
 #include "AP_ADSB_Sagetech.h"
 #include "AP_ADSB_Sagetech_MXS.h"
@@ -270,9 +270,9 @@ void AP_ADSB::detect_instance(uint8_t instance)
         return;
 
     case Type::uAvionix_MAVLink:
-#if HAL_ADSB_UAVIONIX_MAVLINK_ENABLED
-        if (AP_ADSB_uAvionix_MAVLink::detect()) {
-            _backend[instance] = NEW_NOTHROW AP_ADSB_uAvionix_MAVLink(*this, instance);
+#if HAL_ADSB_MAVLINK_ENABLED
+        if (AP_ADSB_MAVLink::detect()) {
+            _backend[instance] = NEW_NOTHROW AP_ADSB_MAVLink(*this, instance);
         }
 #endif
         break;
