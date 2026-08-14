@@ -65,7 +65,7 @@ Detection of aircraft, drones and other MAVLink/ADS-B traffic is served from the
 | Parameter | Value | Notes |
 |-----------|-------|-------|
 | `AVD_ENABLE` | `1` | **Required.** Without it the avoidance database stays empty and `OAScripting:find_aircraft()`/`find_threats()` see no dynamic traffic. |
-| `ADSB_TYPE` | per hardware | Set to match your ADS-B receiver so `ADSB_VEHICLE` messages are processed. In SITL this is the path used to inject simulated traffic. |
+| `ADSB_TYPE` | per hardware | Set to match your ADS-B receiver so `ADSB_VEHICLE` messages are processed. Use `1` (MAVLink) when the traffic arrives as `ADSB_VEHICLE` over a MAVLink link with no ADS-B hardware attached, such as a feed from a companion computer. In SITL this is the path used to inject simulated traffic. |
 
 The Well Clear and Near Mid-Air Collision (NMAC) volumes that DAA reads at
 startup default to the **ASTM F3442M-23** thresholds for crewed aircraft (with
