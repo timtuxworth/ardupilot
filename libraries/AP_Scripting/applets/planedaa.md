@@ -257,6 +257,52 @@ reversals; this is deliberate — the heading is slew-rate limited (`DAA_SLEW_DP
 so the motion stays bounded, and responsiveness is preferred over a smoother but
 laggier committed path.
 
+### Sizing the traffic standoff
+
+The effective standoff held around a drone is `AVD_UAV_XY + DAA_MARGIN_UAV` (and
+around a crewed aircraft, `AVD_WCLR_XY + DAA_MARGIN_GA`). **Size it larger than the
+avoidance turn radius `R`**, or the geometry is unwinnable: once the aircraft is
+already inside the standoff it cannot turn out of it, and the bendy ruler can only
+spiral — which shows up in the log as a heading that sweeps through hundreds of
+degrees while the separation keeps shrinking. Symptomatically, avoidance that is
+_acquired_ at long range resolves with a small, smooth heading change, while the
+same aircraft acquiring the same traffic from inside the standoff produces a violent
+turn and still misses by less than the standoff. The startup check warns when
+`AVD_UAV_XY` is below `WP_LOITER_RAD`, which is a deliberately conservative proxy —
+see the turn-radius note above, and prefer sizing from `R ≈ v²/(g·tan φ)`.
+
+Add reaction distance on top of the turn radius: closing speed times the time it
+takes to acquire, decide and roll in. For a head-on encounter that closing speed is
+the sum of both groundspeeds, so a standoff sized only for the turn radius is
+already too small.
+
+`DAA_SLEW_DPS` must be **below the turn rate the airframe can actually fly**,
+`deg(AIRSPEED_CRUISE / R)`, or the limiter never binds and the smoothing does
+nothing. The startup check only warns above `1.5 ×` that rate, so a value between
+the achievable rate and 1.5× is silently inert — check it by hand. A limit that
+does bind is still safe for urgent manoeuvres: it is bypassed when the estimated
+time-to-conflict falls below `DAA_SLEW_URG`.
+
+### Network-fed traffic and data-link quality
+
+If traffic reaches the autopilot over a network link (a companion computer, an LTE
+or telemetry feed) rather than a directly attached receiver, the feed usually
+arrives in bursts rather than at a steady cadence. Two consequences:
+
+- The obstacle's position is held stale between bursts, so the geometry the bendy
+  ruler works from lags reality by up to one gap. **Add that lag, times the closing
+  speed, to the standoff** — a one-second hold at a 40 m/s closing speed is 40 m of
+  position error before any of the turn-radius sizing applies.
+- Set `DAA_STALE_S` just above the feed's normal gap, not far above it. Too high and
+  it only reports a link that has already collapsed rather than one degrading.
+
+The `Age` field in the `DAAV` log record measures the time since the last update
+_arrived_, so it reveals gaps and jitter but **cannot see a constant transport
+delay** — a uniformly delayed feed looks perfectly fresh. To characterise the feed
+itself, set `ADSB_LOG=2` (log all) for a per-message `ADSB` record across the whole
+flight; `DAAV` is only written while actively avoiding, so on its own it cannot show
+what the feed was doing before an obstacle was acquired.
+
 ### Trapped failsafe
 
 If avoidance cannot find any clear heading — boxed in by fences, or unable to
@@ -269,7 +315,12 @@ these fall back to `RTL`. Set `DAA_TRAP_ACT=0` to disable the failsafe entirely
 aircraft near-miss. Because the autopilot's own `FENCE_ACTION` (if non-zero) acts
 first on a fence breach in every mode, it pre-empts the trap's fence case — leaving
 the trap as the nav-mode backstop for aircraft (and for fences too when
-`FENCE_ACTION=0`).
+`FENCE_ACTION=0`). The fence case additionally **stands down entirely** when
+`FENCE_ACTION` is non-zero _and_ `FENCE_OPTIONS` bit 0 (`DISABLE_MODE_CHANGE`) is
+set, because the core would refuse the trap's mode change anyway; the startup check
+reports this. Between that and `DAA_TRAP_ACT=0`, it is easy to end up with no escape
+mechanism at all in exactly the boxed-in situation the trap exists for — worth
+confirming against the startup messages rather than assuming it is armed.
 
 Recovery depends on what caused the trap:
 
@@ -290,6 +341,14 @@ The script writes the following messages to the dataflash log to record its
 DAA (Detect, Alert, Avoid) decisions. All location fields (`TLat`/`TLng`) are in
 degrees, altitudes (`TAlt`) in metres, and distances in metres. The altitude
 frame field `TFra` is `0` = AMSL, `1` = home-relative, `3` = terrain-relative.
+
+Two settings outside the applet are worth enabling when investigating its
+behaviour, neither of which is on by default:
+
+| Parameter | Value | What it adds |
+|-----------|-------|--------------|
+| `SCR_DEBUG_OPTS` | bit 3 (`8`) | an `SCR` record per script run with its runtime and Lua heap use — the only place either is visible in a log, and the way to check headroom against `SCR_VM_I_COUNT` and `SCR_HEAP_SIZE` |
+| `ADSB_LOG` | `2` | an `ADSB` record per received `ADSB_VEHICLE`, across the whole flight rather than only while avoiding |
 
 ### DAAD — Detect
 
