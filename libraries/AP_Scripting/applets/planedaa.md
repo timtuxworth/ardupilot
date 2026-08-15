@@ -31,7 +31,24 @@ not present.
 | Parameter | Value | Notes |
 |-----------|-------|-------|
 | `SCR_ENABLE` | `1` | Enable Lua scripting (reboot required). |
-| `SCR_VM_I_COUNT` | `1000000` | **Increase from the default.** `planedaa.lua` is large and the per-loop instruction budget must be raised or the VM will fault. |
+| `SCR_VM_I_COUNT` | `1000000` | **Increase from the default.** `planedaa.lua` is large and the per-loop instruction budget must be raised or the VM will fault. The applet warns at startup below `150000`. |
+
+Do not treat `SCR_VM_I_COUNT` as a value to trim. It is an _instruction_ budget,
+not a memory allocation — raising it costs no RAM. `1000000` is the top of the
+parameter's documented range, and the scripting thread runs at the lowest
+priority in the system, so a script that runs long cannot delay flight control;
+it only delays other scripts and its own next update.
+
+Overrunning the budget, by contrast, is not recoverable in flight: the Lua VM
+does not skip an update, it kills the script outright, so avoidance stops for
+the rest of the flight and the resulting sticky error then fails the pre-arm
+check on the next arm. The heaviest thing the applet does is the candidate-heading
+sweep when the aircraft is boxed in and no heading clears, which is exactly the
+situation where losing avoidance matters most.
+
+To measure the applet's real cost on your airframe, set `SCR_DEBUG_OPTS` bit 3
+(value `8`). That logs an `SCR` record per script run carrying its runtime and
+Lua heap use, which is the only place either is visible in a dataflash log.
 
 **You must install TWO files, and they go in DIFFERENT places.** This trips
 people up: `planedaa.lua` depends on the `mavlink_wrappers` module, which it
