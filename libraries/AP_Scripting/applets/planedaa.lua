@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-050"
+SCRIPT_VERSION      = "4.8.0-051"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -581,6 +581,19 @@ local bearing_inc_deg = DAA_HEADING_INC:get() or DEFAULT_HEADING_INC_DEG
 if bearing_inc_deg <= 0 then
     bearing_inc_deg = DEFAULT_HEADING_INC_DEG
 end
+
+-- The candidate-heading sweep in DAA.detect() runs coarse-to-fine: it steps at
+-- COARSE_SWEEP_MULT * DAA_HEADING_INC, then refines around the winner at the full
+-- DAA_HEADING_INC. The final resolution is unchanged; the worst case (boxed in, no
+-- heading clears, so every candidate is probed) costs ~COARSE_SWEEP_MULT times less.
+-- Not a parameter: DAA_HEADING_INC already exposes the resolution-vs-CPU trade, and
+-- this only sets how the same search is scheduled.
+COARSE_SWEEP_MULT = 4
+
+-- Floor for SCR_VM_I_COUNT below which DAA.warnings() complains. Overrunning the VM
+-- instruction budget kills the script outright (and then blocks arming), so this is a
+-- safety-relevant setting, not a tuning one. See planedaa.md for the recommended value.
+MIN_VM_I_COUNT = 150000
 
 COLLISION_DETECTED = false
 
@@ -1555,6 +1568,15 @@ local DAA = {
         elseif adsb_type == 0 then
             warn(W, "ADSB_TYPE = 0: no traffic source")
         end
+        -- Lua VM instruction budget. The bendy-ruler sweep is by far the most expensive thing
+        -- this script does, and its worst case (boxed in, every candidate heading probed) is
+        -- hit exactly when avoidance matters most. Overrunning SCR_VM_I_COUNT does not skip a
+        -- cycle - the VM kills the script, so avoidance is gone for the rest of the flight and
+        -- the sticky error then fails the pre-arm check. Warn while the pilot can still fix it.
+        local vm_i_count = param:get('SCR_VM_I_COUNT') or 0
+        if vm_i_count < MIN_VM_I_COUNT then
+            -- keep this inside the 50-char STATUSTEXT limit (6 of which are the "pDAA: " prefix)
+            warn(W, string.format("SCR_VM_I_COUNT %.0f < %.0f: may stop DAA", vm_i_count, MIN_VM_I_COUNT)) end
         if daa_action == 0 then warn(W, "AVD_ACTION = 0: avoidance manoeuvres OFF") end
         if trap_act == 0 then warn(I, "TRAP_ACT = 0: trap failsafe OFF") end
         if slew_dps == 0 and side_hold_s == 0 then warn(I, "smoothing OFF (SLEW_DPS=0 SIDE_HOLD=0)") end
@@ -1921,9 +1943,11 @@ local DAA = {
         return distance_found_m, bearing_test_deg, obstacle_found
     end
 
-    -- This method checks whether we will collide with any obstacle if we fly at a given bearing bearing_deg + i * bearing_inc_deg
-    local function test_step1(full_distance, bearing_deg, i, target_loc)
-        local bearing_delta_deg = i * bearing_inc_deg / 2.0
+    -- This method checks whether we will collide with any obstacle if we fly at a given bearing bearing_deg + i * inc_deg
+    -- inc_deg is the sweep step: the coarse pass of DAA.detect() passes a multiple of
+    -- DAA_HEADING_INC, and the refine pass probes explicit bearings via probe_bearing().
+    local function test_step1(full_distance, bearing_deg, i, target_loc, inc_deg)
+        local bearing_delta_deg = i * inc_deg / 2.0
         if i % 2 == 1 then
             -- Alternate between left and right of the target
             bearing_delta_deg = -bearing_delta_deg
@@ -2180,13 +2204,26 @@ local DAA = {
         -- Try increments around a circle, alternating left and right. The first heading
         -- that clears all obstacles for two look-ahead steps wins (a bounded downwind
         -- preference is applied afterwards, once we know we are avoiding).
-        for i = 0, (360 / bearing_inc_deg) do
-            local distance_found_m, bearing_found_deg, obstacle_found = test_step1(distance_to_target_m, bearing_deg, i, target_loc)
+        --
+        -- The sweep is coarse-to-fine. A full-resolution sweep is 360/DAA_HEADING_INC
+        -- candidates (241 at the 1.5 deg default) and it only exits early when a heading
+        -- clears, so the boxed-in case - no heading clears at all - runs every candidate
+        -- and each one costs an obstacle probe. That worst case can exceed SCR_VM_I_COUNT,
+        -- which does not merely skip a cycle: the VM kills the script outright, mid
+        -- avoidance, and it stays dead for the rest of the flight. Sweeping at
+        -- COARSE_SWEEP_MULT x the increment and refining only around the winner keeps the
+        -- final angular resolution while cutting the worst case by ~COARSE_SWEEP_MULT.
+        local coarse_inc_deg  = bearing_inc_deg * COARSE_SWEEP_MULT
+        local clear_delta_deg = nil     -- signed deflection of the first clear coarse heading
+
+        for i = 0, math.floor(360 / coarse_inc_deg) do
+            local distance_found_m, bearing_found_deg, obstacle_found = test_step1(distance_to_target_m, bearing_deg, i, target_loc, coarse_inc_deg)
             if distance_found_m > best_distance_m then
                 best_distance_m = distance_found_m
                 best_bearing_deg = bearing_found_deg
             end
             if obstacle_found == nil then -- found a path with no obstacles - done!
+                clear_delta_deg = wrap_180(bearing_found_deg - bearing_deg)
                 goto continue
             end
             if distance_found_m < obstacle_distance_m then
@@ -2195,6 +2232,63 @@ local DAA = {
             end
         end
         ::continue::
+
+        -- Refine. The clear coarse heading sits one coarse step beyond the last blocked one,
+        -- so the smallest deflection that actually clears lies inside that window. Walk the
+        -- window at the full DAA_HEADING_INC resolution, nearest-to-target first, and take the
+        -- first heading that still clears - which restores the "least deflection that works"
+        -- result of the original fine sweep. Nothing to refine when the direct bearing was
+        -- already clear, or when we are boxed in and no heading cleared: skipping the refine in
+        -- the boxed-in case is exactly what keeps that (most expensive) case cheap.
+        if clear_delta_deg ~= nil and clear_delta_deg ~= 0 then
+            local sign     = (clear_delta_deg > 0) and 1 or -1
+            local clear_mag = math.abs(clear_delta_deg)
+            local prev_mag  = math.max(clear_mag - coarse_inc_deg, 0)   -- last blocked candidate this side
+            for k = 1, COARSE_SWEEP_MULT do
+                local test_mag = prev_mag + k * bearing_inc_deg
+                if test_mag >= clear_mag then
+                    break   -- reached the known-clear coarse heading; keep it
+                end
+                local distance_found_m, bearing_found_deg, obstacle_found =
+                        probe_bearing(wrap_180(bearing_deg + sign * test_mag), bearing_deg, distance_to_target_m, target_loc, false)
+                if obstacle_found == nil then
+                    -- a smaller deflection also clears, so prefer it (closer to the direct path)
+                    best_distance_m  = distance_found_m
+                    best_bearing_deg = bearing_found_deg
+                    break
+                end
+                if distance_found_m < obstacle_distance_m then
+                    obstacle_avoiding = obstacle_found
+                    obstacle_distance_m = distance_found_m
+                end
+            end
+        elseif obstacle_avoiding ~= nil then
+            -- Boxed in: no coarse heading cleared. A gap narrower than the coarse step can be
+            -- stepped straight over, so probe outwards from the most open coarse candidate at
+            -- the full resolution before accepting that we are trapped. Bounded at
+            -- 2 * (COARSE_SWEEP_MULT - 1) extra probes, and it also restores full-resolution
+            -- steering for the boxed-in case itself, which the coarse pass alone would leave
+            -- on the coarse grid.
+            local centre_deg = best_bearing_deg
+            for j = 1, 2 * (COARSE_SWEEP_MULT - 1) do
+                -- alternate either side of the most open heading: +1, -1, +2, -2, ... steps
+                local step_n = math.floor((j + 1) / 2)
+                local sign   = (j % 2 == 1) and 1 or -1
+                local distance_found_m, bearing_found_deg, obstacle_found =
+                        probe_bearing(wrap_180(centre_deg + sign * step_n * bearing_inc_deg), bearing_deg, distance_to_target_m, target_loc, false)
+                if obstacle_found == nil then
+                    -- there was a gap after all; steer for it (still avoiding, so
+                    -- obstacle_avoiding stays set, exactly as the full sweep would leave it)
+                    best_distance_m  = distance_found_m
+                    best_bearing_deg = bearing_found_deg
+                    break
+                end
+                if distance_found_m < obstacle_distance_m then
+                    obstacle_avoiding = obstacle_found
+                    obstacle_distance_m = distance_found_m
+                end
+            end
+        end
 
         -- we need to independently detect aircraft because even if an aircraft may not be the closest obstacle found by bendy ruler, we may still need to deal with it
         -- in other words, sometimes aircraft have higher priority than any other obstacles
