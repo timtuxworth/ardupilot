@@ -61,7 +61,7 @@ public:
     // ADSB driver types
     enum class Type {
         None                = 0,
-        uAvionix_MAVLink    = 1,
+        MAVLink             = 1,
         Sagetech            = 2,
         uAvionix_UCP        = 3,
         Sagetech_MXS        = 4,

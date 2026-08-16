@@ -269,7 +269,7 @@ void AP_ADSB::detect_instance(uint8_t instance)
     case Type::None:
         return;
 
-    case Type::uAvionix_MAVLink:
+    case Type::MAVLink:
 #if HAL_ADSB_MAVLINK_ENABLED
         if (AP_ADSB_MAVLink::detect()) {
             _backend[instance] = NEW_NOTHROW AP_ADSB_MAVLink(*this, instance);
