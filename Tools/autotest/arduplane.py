@@ -7669,17 +7669,14 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             {"radius": 400, "loc": circle_centre},
         )])
 
+        self.reboot_sitl()
+
         # mission: takeoff → waypoint 800 m north (outside the fence) → RTL
-        self.upload_simple_relhome_mission([
+        self.start_flying_simple_relhome_mission([
             (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 80),
             (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 800, 0, 80),
             (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
         ])
-
-        self.reboot_sitl()
-        self.wait_ready_to_arm()
-        self.arm_vehicle()
-        self.change_mode("AUTO")
 
         # Enable the fence once the plane is airborne.  Home is inside the
         # exclusion circle so the breach is immediate — no force-arm needed.
@@ -7757,15 +7754,6 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             ("home circle", 2, None, "contain"),
         ]
 
-        # mission: takeoff then a waypoint 2 km north, then RTL.  The
-        # exclusion fences make the waypoint reachable only via a detour;
-        # the inclusion fences put it out of reach entirely.
-        self.upload_simple_relhome_mission([
-            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 50),
-            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 2000, 0, 80),
-            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
-        ])
-
         for (name, fence_type, fence_items, expectation) in scenarios:
             self.start_subtest("planedaa avoids %s fence" % name)
             self.context_push()
@@ -7788,8 +7776,14 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             # most of the margin while skirting along a fence boundary.
             self.set_parameter("DAA_MARGIN_FENCE", 100)
 
-            self.arm_vehicle()
-            self.change_mode("AUTO")
+            # mission: takeoff then a waypoint 2 km north, then RTL.  The
+            # exclusion fences make the waypoint reachable only via a detour;
+            # the inclusion fences put it out of reach entirely.
+            self.start_flying_simple_relhome_mission([
+                (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 50),
+                (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 2000, 0, 80),
+                (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+            ])
 
             # enable the fence once takeoff is complete; during the takeoff
             # climb the plane tracks the runway heading and cannot dodge.
@@ -7857,18 +7851,16 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             ]),
         ]
         self.upload_fences_from_locations(fences)
-        self.upload_simple_relhome_mission([
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+        self.set_parameter("DAA_MARGIN_FENCE", 50)
+        self.context_collect('STATUSTEXT')
+        self.start_flying_simple_relhome_mission([
             (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 80),
             (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 600, 0, 80),     # 2 north run-in
             (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, -150, 0, 80),    # 3 south, past the circle
             (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
         ])
-        self.reboot_sitl()
-        self.wait_ready_to_arm()
-        self.set_parameter("DAA_MARGIN_FENCE", 50)
-        self.context_collect('STATUSTEXT')
-        self.arm_vehicle()
-        self.change_mode("AUTO")
         self.wait_current_waypoint(2, timeout=120)
         self.do_fence_enable()
         self.wait_current_waypoint(4, timeout=400)   # reached WP-B (past the circle) -> RTL
@@ -7926,14 +7918,11 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         drone_loc = self.offset_location_ne(home, 1000, 0)
         icao = 0xF00080
 
-        self.upload_simple_relhome_mission([
+        self.start_flying_simple_relhome_mission([
             (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 50),
             (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 2000, 0, 80),
             (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
         ])
-
-        self.arm_vehicle()
-        self.change_mode("AUTO")
         self.wait_current_waypoint(2, timeout=120)
 
         # planedaa announces itself once its STARTUP_DELAY has elapsed
@@ -8014,12 +8003,6 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         home = self.home_position_as_location()
         icao = 0xF00099
 
-        self.upload_simple_relhome_mission([
-            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 50),
-            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 2000, 0, 80),
-            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
-        ])
-
         # a slow-overtake crossing: the drone tracks north a little slower than
         # the plane, so the plane closes only a few m/s and the conflict lasts
         # tens of seconds, while the drone drifts steadily west across the track.
@@ -8032,8 +8015,11 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         drone_speed = math.sqrt(drone_vn ** 2 + drone_vw ** 2)
         drone_hdg_deg = math.degrees(math.atan2(-drone_vw, drone_vn)) % 360
 
-        self.arm_vehicle()
-        self.change_mode("AUTO")
+        self.start_flying_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 50),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 2000, 0, 80),
+            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+        ])
         self.wait_current_waypoint(2, timeout=120)
         self.wait_text("Plane DAA", check_context=True, timeout=60)
 
@@ -8204,14 +8190,11 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
                 1200,   # squawk
             )
 
-        self.upload_simple_relhome_mission([
+        self.start_flying_simple_relhome_mission([
             (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 60),
             (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 3000, 0, 80),
             (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
         ])
-
-        self.arm_vehicle()
-        self.change_mode("AUTO")
         self.wait_current_waypoint(2, timeout=120)
         self.wait_text("Plane DAA", check_context=True, timeout=60)
 
@@ -8313,14 +8296,11 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
                 1, 65535, 1200,
             )
 
-        self.upload_simple_relhome_mission([
+        self.start_flying_simple_relhome_mission([
             (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 60),
             (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 3000, 0, 80),
             (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
         ])
-
-        self.arm_vehicle()
-        self.change_mode("AUTO")
         self.wait_current_waypoint(2, timeout=120)
         self.wait_text("Plane DAA", check_context=True, timeout=60)
 
@@ -8401,14 +8381,11 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
                 1, 65535, 1200,
             )
 
-        self.upload_simple_relhome_mission([
+        self.start_flying_simple_relhome_mission([
             (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 60),
             (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 3000, 0, cruise_alt_m),
             (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
         ])
-
-        self.arm_vehicle()
-        self.change_mode("AUTO")
         self.wait_current_waypoint(2, timeout=120)
         self.wait_text("Plane DAA", check_context=True, timeout=60)
         # settle at cruise before injecting: reach cruise, then let it level off, so the
@@ -8503,14 +8480,11 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
                 1, 65535, 1200,
             )
 
-        self.upload_simple_relhome_mission([
+        self.start_flying_simple_relhome_mission([
             (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 50),
             (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 2000, 0, 80),
             (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
         ])
-
-        self.arm_vehicle()
-        self.change_mode("AUTO")
         self.wait_current_waypoint(2, timeout=120)
         self.wait_text("Plane DAA", check_context=True, timeout=60)
 
@@ -8550,19 +8524,17 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             {"radius": 200, "loc": self.offset_location_ne(home, 1200, 0)},
         )]
         self.upload_fences_from_locations(excl)
-        self.upload_simple_relhome_mission([
-            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 50),
-            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 2000, 0, 80),
-            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
-        ])
         self.context_collect('STATUSTEXT')
         self.reboot_sitl()
         self.wait_ready_to_arm()
         self.set_parameter("DAA_MARGIN_FENCE", 100)
         self.set_parameter("DAA_TRAP_ACT", 1)   # RTL - obvious if it wrongly fired
         self.set_parameter("DAA_TRAP_S", 5)
-        self.arm_vehicle()
-        self.change_mode("AUTO")
+        self.start_flying_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 50),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 2000, 0, 80),
+            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+        ])
         self.wait_current_waypoint(2, timeout=120)
         self.do_fence_enable()
         self.wait_text("Plane DAA", check_context=True, timeout=60)
@@ -8618,11 +8590,6 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             {"radius": 200, "loc": self.offset_location_ne(home, 1000, 0)},
         )]
         self.upload_fences_from_locations(excl)
-        self.upload_simple_relhome_mission([
-            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 50),
-            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 1500, 0, 80),
-            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
-        ])
         self.context_collect('STATUSTEXT')
         self.reboot_sitl()
         self.wait_ready_to_arm()
@@ -8631,8 +8598,11 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         # would toggle it off on the first loop).
         self.set_rc(7, 1000)
 
-        self.arm_vehicle()
-        self.change_mode("AUTO")
+        self.start_flying_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 50),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 1500, 0, 80),
+            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+        ])
 
         # enable the fence once takeoff is complete; during the takeoff climb the
         # plane tracks the runway heading and cannot dodge.
@@ -8708,12 +8678,6 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             {"radius": excl_radius, "loc": circle_centre},
         )])
 
-        self.upload_simple_relhome_mission([
-            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 50),
-            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 2000, 0, 80),
-            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
-        ])
-
         def fly_one_arm(wind_marg, label):
             self.context_push()
             self.context_collect('STATUSTEXT')
@@ -8725,8 +8689,11 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
                 "DAA_MARGIN_FENCE": base_margin,
                 "DAA_WIND_MARG": wind_marg,
             })
-            self.arm_vehicle()
-            self.change_mode("AUTO")
+            self.start_flying_simple_relhome_mission([
+                (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 50),
+                (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 2000, 0, 80),
+                (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+            ])
 
             # enable the fence once takeoff is complete; during the climb the
             # plane tracks the runway heading and cannot dodge.
@@ -8872,17 +8839,6 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
                 "FENCE_ALT_MIN": s["alt_min"],
             })
 
-            # takeoff, a level cruise leg, then the altitude-violating leg.
-            # the cruise leg lets planedaa finish its STARTUP_DELAY and become
-            # active (with the plane safely clear of the fence) before the
-            # climb/descent begins, so there is no startup race with the fence.
-            self.upload_simple_relhome_mission([
-                (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, s["cruise_alt"]),
-                (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 600, 0, s["cruise_alt"]),
-                (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 2600, 0, s["breach_alt"]),
-                (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
-            ])
-
             self.reboot_sitl()
             if terrain:
                 # reboot clears the terrain cache; reload before relying on AGL
@@ -8892,8 +8848,16 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             # DAA parameters only exist once the script has registered them at boot
             self.set_parameter("DAA_MARGIN_ALT", 20)
 
-            self.arm_vehicle()
-            self.change_mode("AUTO")
+            # takeoff, a level cruise leg, then the altitude-violating leg.
+            # the cruise leg lets planedaa finish its STARTUP_DELAY and become
+            # active (with the plane safely clear of the fence) before the
+            # climb/descent begins, so there is no startup race with the fence.
+            self.start_flying_simple_relhome_mission([
+                (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, s["cruise_alt"]),
+                (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 600, 0, s["cruise_alt"]),
+                (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 2600, 0, s["breach_alt"]),
+                (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+            ])
 
             # takeoff complete: now on the level cruise leg, clear of the fence
             self.wait_current_waypoint(2, timeout=180)
