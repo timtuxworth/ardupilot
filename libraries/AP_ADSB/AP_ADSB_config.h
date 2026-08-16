@@ -12,10 +12,14 @@
 #define HAL_ADSB_BACKEND_DEFAULT_ENABLED HAL_ADSB_ENABLED
 #endif
 
+/*
+ * sanity check that hwdefs are up-to-date in terms of how they are
+ * trying to configure the MAVLink ADSB backend:
+ */
 #ifdef HAL_ADSB_UAVIONIX_MAVLINK_ENABLED
-// HAL_ADSB_UAVIONIX_MAVLINK_ENABLED is deprecated. Use HAL_ADSB_MAVLINK_ENABLED instead.
-#define HAL_ADSB_MAVLINK_ENABLED HAL_ADSB_UAVIONIX_MAVLINK_ENABLED
+#error "Change 'define HAL_ADSB_UAVIONIX_MAVLINK_ENABLED' to 'define HAL_ADSB_MAVLINK_ENABLED'"
 #endif
+
 #ifndef HAL_ADSB_MAVLINK_ENABLED
 #define HAL_ADSB_MAVLINK_ENABLED HAL_ADSB_BACKEND_DEFAULT_ENABLED && HAL_GCS_ENABLED
 #endif
