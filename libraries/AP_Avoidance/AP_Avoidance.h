@@ -30,7 +30,6 @@
 #if AP_ADSB_AVOIDANCE_ENABLED
 
 #include <AP_ADSB/AP_ADSB.h>
-#include <AP_ADSB/GDL90_protocol/GDL90_Message_Structs.h>
 
 #define AP_AVOIDANCE_STATE_RECOVERY_TIME_MS                 2000    // we will not downgrade state any faster than this (2 seconds)
 

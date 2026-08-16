@@ -672,37 +672,35 @@ void AP_Avoidance::handle_msg(const mavlink_message_t &msg)
 // the definition of "Well Clear" (2000ft = 609.6m) is from ASTM F3442M-23
 float AP_Avoidance::get_obstacle_radius_m(uint8_t emitter_type) const
 {
-    switch (static_cast<ADSB_EMITTER>(emitter_type))
+    switch (static_cast<ADSB_EMITTER_TYPE>(emitter_type))
     {
-    case ADSB_EMITTER_NO_INFO:
-    case ADSB_EMITTER_LIGHT:
-    case ADSB_EMITTER_SMALL:
-    case ADSB_EMITTER_LARGE:
-    case ADSB_EMITTER_HIGH_VORTEX_LARGE:
-    case ADSB_EMITTER_HEAVY:
-    case ADSB_EMITTER_HIGHLY_MANUV:
+    case ADSB_EMITTER_TYPE_NO_INFO:
+    case ADSB_EMITTER_TYPE_LIGHT:
+    case ADSB_EMITTER_TYPE_SMALL:
+    case ADSB_EMITTER_TYPE_LARGE:
+    case ADSB_EMITTER_TYPE_HIGH_VORTEX_LARGE:
+    case ADSB_EMITTER_TYPE_HEAVY:
+    case ADSB_EMITTER_TYPE_HIGHLY_MANUV:
         return _well_clear_xy;                           // crewed aircraft (AVD_WCLR_XY)
-    case ADSB_EMITTER_ROTOCRAFT:
+    case ADSB_EMITTER_TYPE_ROTOCRAFT:
         return _well_clear_xy;                           // helicopters (AVD_WCLR_XY)
     // 8 Unassigned
-    case ADSB_EMITTER_GLIDER:
-    case ADSB_EMITTER_LIGHTER_AIR:
-    case ADSB_EMITTER_PARACHUTE:
-    case ADSB_EMITTER_ULTRA_LIGHT:
+    case ADSB_EMITTER_TYPE_GLIDER:
+    case ADSB_EMITTER_TYPE_LIGHTER_AIR:
+    case ADSB_EMITTER_TYPE_PARACHUTE:
+    case ADSB_EMITTER_TYPE_ULTRA_LIGHT:
         return _well_clear_xy;                           // also use well clear for these
     // 13 Unassigned
-    case ADSB_EMITTER_UAV:                               // drone/UAV horizontal radius (AVD_UAV_XY)
+    case ADSB_EMITTER_TYPE_UAV:                          // drone/UAV horizontal radius (AVD_UAV_XY)
         return _uav_xy;
-    case ADSB_EMITTER_SPACE:
+    case ADSB_EMITTER_TYPE_SPACE:
         return 9600;                                     // lets give rockets a wide berth, 5nm
     // Surface types
-    case ADSB_EMITTER_EMERGENCY_SURFACE:
-    case ADSB_EMITTER_SERVICE_SURFACE:
+    case ADSB_EMITTER_TYPE_EMERGENCY_SURFACE:
+    case ADSB_EMITTER_TYPE_SERVICE_SURFACE:
         return 150;
     // Obstacle types
-    case ADSB_EMITTER_POINT_OBSTACLE:
-    case ADSB_EMITTER_CLUSTER_OBSTACLE:
-    case ADSB_EMITTER_LINE_OBSTACLE:
+    case ADSB_EMITTER_TYPE_POINT_OBSTACLE:
         return 50.0;
     default:
         return 100;
@@ -713,37 +711,35 @@ float AP_Avoidance::get_obstacle_radius_m(uint8_t emitter_type) const
 // the definition of "Well Clear" (2000ft = 609.6m) is from ASTM F3442M-23
 float AP_Avoidance::get_obstacle_height_m(uint8_t emitter_type) const
 {
-    switch (static_cast<ADSB_EMITTER>(emitter_type))
+    switch (static_cast<ADSB_EMITTER_TYPE>(emitter_type))
     {
-    case ADSB_EMITTER_NO_INFO:
-    case ADSB_EMITTER_LIGHT:
-    case ADSB_EMITTER_SMALL:
-    case ADSB_EMITTER_LARGE:
-    case ADSB_EMITTER_HIGH_VORTEX_LARGE:
-    case ADSB_EMITTER_HEAVY:
-    case ADSB_EMITTER_HIGHLY_MANUV:
+    case ADSB_EMITTER_TYPE_NO_INFO:
+    case ADSB_EMITTER_TYPE_LIGHT:
+    case ADSB_EMITTER_TYPE_SMALL:
+    case ADSB_EMITTER_TYPE_LARGE:
+    case ADSB_EMITTER_TYPE_HIGH_VORTEX_LARGE:
+    case ADSB_EMITTER_TYPE_HEAVY:
+    case ADSB_EMITTER_TYPE_HIGHLY_MANUV:
         return _well_clear_z;                           // crewed aircraft (AVD_WCLR_Z)
-    case ADSB_EMITTER_ROTOCRAFT:
+    case ADSB_EMITTER_TYPE_ROTOCRAFT:
         return _well_clear_z;                           // helicopters (AVD_WCLR_Z)
     // 8 Unassigned
-    case ADSB_EMITTER_GLIDER:
-    case ADSB_EMITTER_LIGHTER_AIR:
-    case ADSB_EMITTER_PARACHUTE:
-    case ADSB_EMITTER_ULTRA_LIGHT:
+    case ADSB_EMITTER_TYPE_GLIDER:
+    case ADSB_EMITTER_TYPE_LIGHTER_AIR:
+    case ADSB_EMITTER_TYPE_PARACHUTE:
+    case ADSB_EMITTER_TYPE_ULTRA_LIGHT:
         return _well_clear_z;                           // also use well clear for these
     // 13 Unassigned
-    case ADSB_EMITTER_UAV:                               // drone/UAV vertical gate (AVD_UAV_Z)
+    case ADSB_EMITTER_TYPE_UAV:                          // drone/UAV vertical gate (AVD_UAV_Z)
         return _uav_z;
-    case ADSB_EMITTER_SPACE:
+    case ADSB_EMITTER_TYPE_SPACE:
         return 9600;                                     // lets give rockets a wide berth, 5nm
     // Surface types - lets make this unlimited
-    case ADSB_EMITTER_EMERGENCY_SURFACE:
-    case ADSB_EMITTER_SERVICE_SURFACE:
+    case ADSB_EMITTER_TYPE_EMERGENCY_SURFACE:
+    case ADSB_EMITTER_TYPE_SERVICE_SURFACE:
         return FLT_MAX;
     // Obstacle types - also unlimited
-    case ADSB_EMITTER_POINT_OBSTACLE:
-    case ADSB_EMITTER_CLUSTER_OBSTACLE:
-    case ADSB_EMITTER_LINE_OBSTACLE:
+    case ADSB_EMITTER_TYPE_POINT_OBSTACLE:
         return FLT_MAX;
     default:        // Default to infinite height if we don't have a specific height
         return FLT_MAX;
@@ -752,9 +748,9 @@ float AP_Avoidance::get_obstacle_height_m(uint8_t emitter_type) const
 
 bool AP_Avoidance::is_adsb_uav(uint8_t emitter_type)
 {
-    switch (static_cast<ADSB_EMITTER>(emitter_type) )
+    switch (static_cast<ADSB_EMITTER_TYPE>(emitter_type) )
     {
-    case ADSB_EMITTER_UAV:              // Drones
+    case ADSB_EMITTER_TYPE_UAV:         // Drones
         return true;
     default:
         return false;
@@ -766,10 +762,10 @@ bool AP_Avoidance::is_adsb_uav(uint8_t emitter_type)
 // an airborne vehicle has no requirement to manoeuvre around a vehicle on the ground.
 bool AP_Avoidance::is_ground_vehicle(uint8_t emitter_type)
 {
-    switch (static_cast<ADSB_EMITTER>(emitter_type))
+    switch (static_cast<ADSB_EMITTER_TYPE>(emitter_type))
     {
-    case ADSB_EMITTER_EMERGENCY_SURFACE:
-    case ADSB_EMITTER_SERVICE_SURFACE:
+    case ADSB_EMITTER_TYPE_EMERGENCY_SURFACE:
+    case ADSB_EMITTER_TYPE_SERVICE_SURFACE:
         return true;
     default:
         return false;
@@ -778,36 +774,34 @@ bool AP_Avoidance::is_ground_vehicle(uint8_t emitter_type)
 
 bool AP_Avoidance::is_adsb_aircraft(uint8_t emitter_type)
 {
-    switch (static_cast<ADSB_EMITTER>(emitter_type) )
+    switch (static_cast<ADSB_EMITTER_TYPE>(emitter_type) )
     {
-    case ADSB_EMITTER_LIGHT:
-    case ADSB_EMITTER_SMALL:
-    case ADSB_EMITTER_LARGE:
-    case ADSB_EMITTER_HIGH_VORTEX_LARGE:
-    case ADSB_EMITTER_HEAVY:
-    case ADSB_EMITTER_HIGHLY_MANUV:
-    case ADSB_EMITTER_ROTOCRAFT:        // Helicopter
+    case ADSB_EMITTER_TYPE_LIGHT:
+    case ADSB_EMITTER_TYPE_SMALL:
+    case ADSB_EMITTER_TYPE_LARGE:
+    case ADSB_EMITTER_TYPE_HIGH_VORTEX_LARGE:
+    case ADSB_EMITTER_TYPE_HEAVY:
+    case ADSB_EMITTER_TYPE_HIGHLY_MANUV:
+    case ADSB_EMITTER_TYPE_ROTOCRAFT:   // Helicopter
     // 8 Unassigned
-    case ADSB_EMITTER_GLIDER:
-    case ADSB_EMITTER_LIGHTER_AIR:
-    case ADSB_EMITTER_ULTRA_LIGHT:
+    case ADSB_EMITTER_TYPE_GLIDER:
+    case ADSB_EMITTER_TYPE_LIGHTER_AIR:
+    case ADSB_EMITTER_TYPE_ULTRA_LIGHT:
     // 13 Unassigned
-    case ADSB_EMITTER_SPACE:            // Call this aircraft for now
+    case ADSB_EMITTER_TYPE_SPACE:       // Call this aircraft for now
     // 16 Unassigned
         return true;
 
-    case ADSB_EMITTER_NO_INFO:
-    case ADSB_EMITTER_PARACHUTE:
-    case ADSB_EMITTER_UAV:              // Drones
+    case ADSB_EMITTER_TYPE_NO_INFO:
+    case ADSB_EMITTER_TYPE_PARACHUTE:
+    case ADSB_EMITTER_TYPE_UAV:         // Drones
 
     // Surface types
-    case ADSB_EMITTER_EMERGENCY_SURFACE:
-    case ADSB_EMITTER_SERVICE_SURFACE:
+    case ADSB_EMITTER_TYPE_EMERGENCY_SURFACE:
+    case ADSB_EMITTER_TYPE_SERVICE_SURFACE:
 
     // Stationary Obstacle types
-    case ADSB_EMITTER_POINT_OBSTACLE:
-    case ADSB_EMITTER_CLUSTER_OBSTACLE:
-    case ADSB_EMITTER_LINE_OBSTACLE:
+    case ADSB_EMITTER_TYPE_POINT_OBSTACLE:
         return false;
 
     default:
