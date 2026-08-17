@@ -327,7 +327,7 @@ void AP_Avoidance::get_adsb_samples()
                    vehicle.info.heading * 0.01,         // convert cm-up to m-down
                    vehicle.info.hor_velocity * 0.01,
                    -vehicle.info.ver_velocity * 0.01,
-                   vehicle.info.emitter_type); 
+                   vehicle.info.emitter_type);
     }
 }
 
@@ -814,7 +814,7 @@ bool AP_Avoidance::is_adsb_aircraft(uint8_t emitter_type)
 // For AP_AOScripting to check for obstacles and return the closest one
 // as it is looping through all obstacles, also finds the closest aircraft it finds as well
 // we do this because crewed aircraft need special treatment when avoiding obstacles
-float AP_Avoidance::distance_to_obstacle(const Vector3f &start_NED_m, const Vector3f &end_NED_m, 
+float AP_Avoidance::distance_to_obstacle(const Vector3f &start_NED_m, const Vector3f &end_NED_m,
                                             // return values
                                             Obstacle &avoid_obstacle,
                                             Obstacle &closest_aircraft
@@ -840,7 +840,7 @@ float AP_Avoidance::distance_to_obstacle(const Vector3f &start_NED_m, const Vect
         Vector2f obstacle_NE_m;
         if (obstacle_loc.get_vector_xy_from_origin_NE_m(obstacle_NE_m)
                 && obstacle_loc.get_vector_from_origin_NEU_m(obstacle_NED_m)) {
-            
+
             // until we get the new NED functions
             obstacle_NED_m.z = -obstacle_NED_m.z;
 
@@ -871,8 +871,8 @@ float AP_Avoidance::distance_to_obstacle(const Vector3f &start_NED_m, const Vect
             }
 
             const uint8_t emitter_type = obstacle.emitter_type;
-            if (is_adsb_aircraft(emitter_type) 
-                    && distance_m < aircraft_distance_m 
+            if (is_adsb_aircraft(emitter_type)
+                    && distance_m < aircraft_distance_m
                     && height_difference_m < get_obstacle_height_m(obstacle.emitter_type)) {
                 closest_aircraft = obstacle;
             }
@@ -897,13 +897,13 @@ float AP_Avoidance::distance_to_aircraft(const Vector3f &vehicle_NED_m, const fl
         const Obstacle obstacle         = _obstacles[i];
         const Location obstacle_loc     = _obstacles[i]._location;
         Vector3f obstacle_NED_m;
-       
+
         Vector2f vehicle_NE_m(vehicle_NED_m.x, vehicle_NED_m.y);
         Vector2f obstacle_NE_m;
 
         // this needs to account for the moving obstacle as done in closest_approach_ne_m
 
-        if(is_adsb_aircraft(obstacle.emitter_type)  
+        if(is_adsb_aircraft(obstacle.emitter_type)
                 && obstacle_loc.get_vector_xy_from_origin_NE_m(obstacle_NE_m)
                 && obstacle_loc.get_vector_from_origin_NEU_m(obstacle_NED_m)) {
 
