@@ -1224,7 +1224,7 @@ const AC_PolyFence_loader &AC_Fence::polyfence() const
     return _poly_loader;
 }
 
-// returns the closest distance in meters from (start_NE_cm, end_NE_cm) and any "tincan" circle/home based inclusion fence. 
+// returns the closest distance in meters from (start_NE_cm, end_NE_cm) and any "tincan" circle/home based inclusion fence.
 // the distance will be positive if inside the inclusion "tincan", or -ve if outside
 float AC_Fence::distance_line_to_home_inclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const
 {
@@ -1243,7 +1243,7 @@ float AC_Fence::distance_line_to_home_inclusion(const Vector2f& start_NE_cm, con
     return distance_new_m - _margin_m;
 }
 
-// returns the closest distance in meters from (start_NE_cm, end_NE_cm) and any circle inclusion fence. 
+// returns the closest distance in meters from (start_NE_cm, end_NE_cm) and any circle inclusion fence.
 // the distance will be positive if we are outside the inclusion circle, or -ve if outside the circle
 float AC_Fence::distance_line_to_circle_inclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const
 {
@@ -1253,7 +1253,7 @@ float AC_Fence::distance_line_to_circle_inclusion(const Vector2f& start_NE_cm, c
     return _poly_loader.distance_line_to_circle_inclusion(start_NE_cm, end_NE_cm) - _margin_m;
 }
 
-// returns the closest distance in meters from (start_NE_cm, end_NE_cm) and any circle exclusion fence. 
+// returns the closest distance in meters from (start_NE_cm, end_NE_cm) and any circle exclusion fence.
 // the distanced will be positive if we are outside the exclusion circle, or -ve if inside the circle
 float AC_Fence::distance_line_to_circle_exclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const
 {
@@ -1264,7 +1264,7 @@ float AC_Fence::distance_line_to_circle_exclusion(const Vector2f& start_NE_cm, c
     return _poly_loader.distance_line_to_circle_exclusion(start_NE_cm, end_NE_cm) - _margin_m;
 }
 
-// returns the closest distance in meters from (start_NE_cm, end_NE_cm) and any polygon inclusion fence. 
+// returns the closest distance in meters from (start_NE_cm, end_NE_cm) and any polygon inclusion fence.
 // the distance will be positive if the vehicles is inside the inclusion, or -ve if it is outside
 float AC_Fence::distance_line_to_polygon_inclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const
 {
@@ -1275,7 +1275,7 @@ float AC_Fence::distance_line_to_polygon_inclusion(const Vector2f& start_NE_cm, 
     return _poly_loader.distance_line_to_polygon_inclusion(start_NE_cm, end_NE_cm) - _margin_m;
 }
 
-// returns the closest distance in meters from (start_NE_cm, end_NE_cm) and any polygon exclusion fence. 
+// returns the closest distance in meters from (start_NE_cm, end_NE_cm) and any polygon exclusion fence.
 // the distance will be positive if the vehicle is outside the exclusion, or -ve if inside it
 float AC_Fence::distance_line_to_polygon_exclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const
 {
