@@ -4608,7 +4608,7 @@ function OAScripting:fence_distance(loc, fence_type) end
 ---@param lookahead_m number -- the furthest distance out from the line to check
 ---@return number|nil distance_min_m -- distance to the closest obstacle found, or nil if none
 ---@return integer|nil type -- the AP_OAAvoidance::ObstacleType of the type of object found
----@return string|nil label -- label of the obstacle for display to the user. for GA vehicles will be an ICAO code
+---@return string|nil label -- label of the obstacle for display to the user. for crewed aircraft will be an ICAO code
 ---@return uint32_t_ud|nil src_id -- the MAV_SYSID of the obstacle if relevant. For MAVLink this will be the MAV_SYSID of the vehicle
 ---@return Location_ud|nil location -- Location of the obstacle found
 ---@return Vector3f_ud|nil pos_NED_m -- position of the obstacle found in m NED from the origin
@@ -4661,7 +4661,7 @@ function OAObstacle_ud:emitter_type(value) end
 ---@return integer -- obstacle type
 ---| '0'  # GENERAL
 ---| '1'  # MAV_SYSID
----| '2'  # AIRCRAFT
+---| '2'  # CREWED_AIRCRAFT
 ---| '3'  # WEATHER
 ---| '4'  # BIRD_MIGRATORY
 ---| '5'  # BIRD_OF_PREY
@@ -4679,7 +4679,7 @@ function OAObstacle_ud:obstacle_type() end
 ---@param value integer
 function OAObstacle_ud:obstacle_type(value) end
 
--- get label field - label for display to the user. for GA vehicles this is an ICAO code
+-- get label field - label for display to the user. for crewed aircraft this is an ICAO code
 ---@return string
 function OAObstacle_ud:label() end
 
