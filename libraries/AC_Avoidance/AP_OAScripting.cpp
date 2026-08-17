@@ -164,7 +164,7 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
     return false;
 }
 
-// Lua binding to find the nearest crewed aircraft (ObstacleType::AIRCRAFT)
+// Lua binding to find the nearest crewed aircraft (ObstacleType::CREWED_AIRCRAFT)
 // this is needed because avoiding aircraft is often a higher priority than avoiding other obstacles
 bool AP_OAScripting::find_aircraft(const Location &vehicle_loc, const float lookahead_m, const float vertical_lookahead_m,
                                             float       &distance_m,
@@ -454,7 +454,7 @@ AP_OAScripting::ObstacleType AP_OAScripting::_get_obstacle_type(uint8_t emitter_
     } else if (icao_code >= 0xB20000 && icao_code <= 0xB30000) {
         return ObstacleType::BIRD_OF_PREY;
     } else if (AP_Avoidance::is_adsb_aircraft(emitter_type)) {
-        return ObstacleType::AIRCRAFT;
+        return ObstacleType::CREWED_AIRCRAFT;
     }
     return ObstacleType::GENERAL;
 }
