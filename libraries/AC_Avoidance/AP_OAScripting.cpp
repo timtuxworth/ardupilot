@@ -102,7 +102,7 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
     }
 
     // "objects" are stored in the AP_OADatabase - they are typically populated by proximity sensors
-    distance_new_m = _distance_to_object(start_NED_m, end_NED_m, obstacle_found); 
+    distance_new_m = _distance_to_object(start_NED_m, end_NED_m, obstacle_found);
     if (distance_new_m < distance_m) {
         obstacle            = obstacle_found;
         proximity_obstacle  = obstacle_found;
@@ -116,8 +116,8 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
         const Vector2f start_NE_cm(start_NED_m.x * 100.0f, start_NED_m.y * 100.0f);
         const Vector2f end_NE_cm(end_NED_m.x * 100.0f, end_NED_m.y * 100.0f);
 
-        // We do each type of fence one at a time, because 
-        // a. they are stored in separate lists and 
+        // We do each type of fence one at a time, because
+        // a. they are stored in separate lists and
         // b. we want to tell the user which fence type of fence it is
         distance_new_m = fence->distance_line_to_home_inclusion(start_NE_cm, end_NE_cm);
         if (distance_new_m < distance_m) {
@@ -164,7 +164,7 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
     return false;
 }
 
-// Lua binding to find the nearest crewed aircraft (ObstacleType::AIRCRAFT) 
+// Lua binding to find the nearest crewed aircraft (ObstacleType::AIRCRAFT)
 // this is needed because avoiding aircraft is often a higher priority than avoiding other obstacles
 bool AP_OAScripting::find_aircraft(const Location &vehicle_loc, const float lookahead_m, const float vertical_lookahead_m,
                                             float       &distance_m,
@@ -288,11 +288,11 @@ bool AP_OAScripting::fence_distance(const Location &loc, uint8_t fence_type, flo
 //   the use of the word "obstacle" is intended to be generic, unfortunately one of the cases of ArduPilot is "Obstacles" stored in the AP_OAAvoidance library
 // Note that the distance is the distance to any margin around the obstacles. AP_OAAvoidance obstacles have this as do fences. So the distance can be negative if you are too close.
 bool AP_OAScripting::find_closest_obstacle(const Location &start_loc, const Location &end_loc, float lookahead_m,
-                                            float &distance_m, 
-                                            uint16_t &type, 
-                                            char *&label, 
+                                            float &distance_m,
+                                            uint16_t &type,
+                                            char *&label,
                                             uint32_t &sysid,
-                                            Location &location, 
+                                            Location &location,
                                             Vector3f &pos_NED_m,
                                             Vector3f &velocity_NED_ms
                                             ) const
@@ -326,7 +326,7 @@ bool AP_OAScripting::find_closest_obstacle(const Location &start_loc, const Loca
     }
 
     // "objects" are stored in the AP_OADatabase - they are typically populated by proximity sensors
-    distance_new_m = _distance_to_object(start_NED_m, end_NED_m, obstacle_found); 
+    distance_new_m = _distance_to_object(start_NED_m, end_NED_m, obstacle_found);
     if (distance_new_m < distance_m) {
         obstacle    = obstacle_found;
         distance_m  = distance_new_m;
@@ -339,8 +339,8 @@ bool AP_OAScripting::find_closest_obstacle(const Location &start_loc, const Loca
         const Vector2f start_NE_cm(start_NED_m.x * 100.0f, start_NED_m.y * 100.0f);
         const Vector2f end_NE_cm(end_NED_m.x * 100.0f, end_NED_m.y * 100.0f);
 
-        // We do each type of fence one at a time, because 
-        // a. they are stored in separate lists and 
+        // We do each type of fence one at a time, because
+        // a. they are stored in separate lists and
         // b. we want to tell the user which fence type of fence it is
         distance_new_m = fence->distance_line_to_home_inclusion(start_NE_cm, end_NE_cm);
         if (distance_new_m < distance_m) {
@@ -391,7 +391,7 @@ bool AP_OAScripting::find_closest_obstacle(const Location &start_loc, const Loca
 float AP_OAScripting::_distance_to_object(const Vector3f &start_NED_m, const Vector3f end_NED_m, OAObstacle &script_obstacle) const
 {
     float distance_new_m = FLT_MAX;
-    
+
     // exit immediately if db is empty
     AP_OADatabase *oaDb = AP::oadatabase();
     if (oaDb == nullptr || !oaDb->healthy() || oaDb->database_count() == 0) {
@@ -529,7 +529,7 @@ void AP_OAScripting::_populate_scripting_obstacle(OAObstacle &script_obstacle, c
 //
 
 // Distance to objects in the AP_Avoidance database from a line from START_NED_cm to  end_NED_cm
-float AP_OAScripting::_distance_to_avoidance(const Vector3f &start_NED_cm, const Vector3f &end_NED_cm, 
+float AP_OAScripting::_distance_to_avoidance(const Vector3f &start_NED_cm, const Vector3f &end_NED_cm,
                                                 // return values
                                                 OAObstacle &script_any_obstacle,
                                                 OAObstacle &script_aircraft_obstacle
