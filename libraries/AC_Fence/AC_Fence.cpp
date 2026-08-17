@@ -1240,7 +1240,7 @@ float AC_Fence::distance_line_to_home_inclusion(const Vector2f& start_NE_cm, con
         float distance_m = _circle_radius_m - far_cm * 0.01f;
         distance_new_m = (distance_m < distance_new_m) ? distance_m : distance_new_m;
     }
-    return distance_new_m - _margin_m;
+    return distance_new_m - get_margin_ne_m();
 }
 
 // returns the closest distance in meters from (start_NE_cm, end_NE_cm) and any circle inclusion fence.
@@ -1250,7 +1250,7 @@ float AC_Fence::distance_line_to_circle_inclusion(const Vector2f& start_NE_cm, c
     if ( !(get_enabled_fences() & AC_FENCE_TYPE_POLYGON) ) {    // Yes POLYGON - a circle (in AC_Fence) is a type of polygon
         return FLT_MAX;
     }
-    return _poly_loader.distance_line_to_circle_inclusion(start_NE_cm, end_NE_cm) - _margin_m;
+    return _poly_loader.distance_line_to_circle_inclusion(start_NE_cm, end_NE_cm) - get_margin_ne_m();
 }
 
 // returns the closest distance in meters from (start_NE_cm, end_NE_cm) and any circle exclusion fence.
@@ -1261,7 +1261,7 @@ float AC_Fence::distance_line_to_circle_exclusion(const Vector2f& start_NE_cm, c
         return FLT_MAX;
     }
 
-    return _poly_loader.distance_line_to_circle_exclusion(start_NE_cm, end_NE_cm) - _margin_m;
+    return _poly_loader.distance_line_to_circle_exclusion(start_NE_cm, end_NE_cm) - get_margin_ne_m();
 }
 
 // returns the closest distance in meters from (start_NE_cm, end_NE_cm) and any polygon inclusion fence.
@@ -1272,7 +1272,7 @@ float AC_Fence::distance_line_to_polygon_inclusion(const Vector2f& start_NE_cm, 
         return FLT_MAX;
     }
 
-    return _poly_loader.distance_line_to_polygon_inclusion(start_NE_cm, end_NE_cm) - _margin_m;
+    return _poly_loader.distance_line_to_polygon_inclusion(start_NE_cm, end_NE_cm) - get_margin_ne_m();
 }
 
 // returns the closest distance in meters from (start_NE_cm, end_NE_cm) and any polygon exclusion fence.
@@ -1283,7 +1283,7 @@ float AC_Fence::distance_line_to_polygon_exclusion(const Vector2f& start_NE_cm, 
         return FLT_MAX;
     }
 
-    return _poly_loader.distance_line_to_polygon_exclusion(start_NE_cm, end_NE_cm) - _margin_m;
+    return _poly_loader.distance_line_to_polygon_exclusion(start_NE_cm, end_NE_cm) - get_margin_ne_m();
 }
 
 #else  // build type is not appropriate; provide a dummy implementation:
