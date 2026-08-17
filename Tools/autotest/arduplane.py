@@ -8767,31 +8767,48 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             # ------------------------------------------------------------
             # 2. Start the TARGET (sysid=2, instance 1)
             # ------------------------------------------------------------
-            target_sitl, target_mav = self.start_additional_vehicle(
-                instance=1,
-                sysid=target_sysid,
-                model='plane',
-                rundir='target-plane',
-                defaults_filepath=os.path.join(
-                    util.reltopdir('Tools/autotest/models'), 'plane.parm'),
-                customisations=['--serial5=mcast:'],
-                param_defaults={
-                    "SERIAL5_PROTOCOL": 2,
-                    # Same airspeed envelope as the follower, but cruising
-                    # slower than it so the follower can close a gap.
-                    "AIRSPEED_MIN": AIRSPEED_MIN,
-                    "AIRSPEED_MAX": AIRSPEED_MAX,
-                    "AIRSPEED_CRUISE": TARGET_AIRSPEED_CRUISE,
-                    # MAVn_ params are numbered by MAVLink channel, in
-                    # serial-port order: SERIAL0=MAV1, SERIAL1=MAV2,
-                    # SERIAL2=MAV3, SERIAL5=MAV4.  We want position and
-                    # attitude streamed on the multicast link (SERIAL5):
-                    "MAV4_POSITION": 10,
-                    "MAV4_EXTRA1": 10,
-                    "MAV4_EXTRA3": 2,
-                    "MAV4_OPTIONS": 2,
-                },
-            )
+            # SITL_INSTANCE_COUNT tells AP_SITL_SharedMem how many peers to
+            # expect. Setting it only around the target's spawn is enough:
+            # sync_with_peers() re-reads the shared, highest-value-wins
+            # total_instances field on every call rather than caching what
+            # was current at the FOLLOWER's own (earlier) init(), so the
+            # follower picks up the fleet size of 2 as soon as the target
+            # registers. This barrier-syncs both vehicles' simulated clocks
+            # to within a few ms of each other every physics frame -- see
+            # https://github.com/ArduPilot/ardupilot/pull/34019.
+            old_instance_count = os.environ.get('SITL_INSTANCE_COUNT')
+            os.environ['SITL_INSTANCE_COUNT'] = '2'
+            try:
+                target_sitl, target_mav = self.start_additional_vehicle(
+                    instance=1,
+                    sysid=target_sysid,
+                    model='plane',
+                    rundir='target-plane',
+                    defaults_filepath=os.path.join(
+                        util.reltopdir('Tools/autotest/models'), 'plane.parm'),
+                    customisations=['--serial5=mcast:'],
+                    param_defaults={
+                        "SERIAL5_PROTOCOL": 2,
+                        # Same airspeed envelope as the follower, but cruising
+                        # slower than it so the follower can close a gap.
+                        "AIRSPEED_MIN": AIRSPEED_MIN,
+                        "AIRSPEED_MAX": AIRSPEED_MAX,
+                        "AIRSPEED_CRUISE": TARGET_AIRSPEED_CRUISE,
+                        # MAVn_ params are numbered by MAVLink channel, in
+                        # serial-port order: SERIAL0=MAV1, SERIAL1=MAV2,
+                        # SERIAL2=MAV3, SERIAL5=MAV4.  We want position and
+                        # attitude streamed on the multicast link (SERIAL5):
+                        "MAV4_POSITION": 10,
+                        "MAV4_EXTRA1": 10,
+                        "MAV4_EXTRA3": 2,
+                        "MAV4_OPTIONS": 2,
+                    },
+                )
+            finally:
+                if old_instance_count is None:
+                    os.environ.pop('SITL_INSTANCE_COUNT', None)
+                else:
+                    os.environ['SITL_INSTANCE_COUNT'] = old_instance_count
 
             def get_target_param(name, timeout=10):
                 target_mav.mav.param_request_read_send(target_sysid, 1, name.encode(), -1)
@@ -9523,7 +9540,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             self.ScriptedArmingChecksAppletEStop,
             self.ScriptedArmingChecksAppletRally,
             self.PlaneFollowAppletSanity,
-            Test(self.PlaneFollowApplet, speedup=15),
+            Test(self.PlaneFollowApplet, speedup=100),
             self.PreflightRebootComponent,
             self.UTMGlobalPosition,
             self.UTMGlobalPositionWaypoint,
