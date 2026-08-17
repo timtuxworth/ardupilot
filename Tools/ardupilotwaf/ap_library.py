@@ -183,6 +183,9 @@ class ap_library_check_headers(Task.Task):
         # into Lua; it is gated to ArduPlane via APM_BUILD_TYPE, which must live in
         # the header so the class is not even declared on other vehicles.
         'libraries/AC_Avoidance/AP_OAScripting.h',
+        # AP_AVOIDANCE_SCRIPTING_ENABLED keeps the DAA standoff parameters and their
+        # distance queries off non-Plane vehicles; the definition needs APM_BUILD_TYPE.
+        'libraries/AP_Avoidance/AP_Avoidance_config.h',
     )
     whitelist = tuple(os.path.join(*p.split('/')) for p in whitelist)
 
