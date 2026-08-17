@@ -871,6 +871,19 @@ local function pretty_obstacle_type(type, src_id)
     return "unknown"
 end
 
+-- true for the horizontal fence obstacle types.  A fence is a boundary rather than a
+-- point, so it carries no usable location and its real range has to come from
+-- OAScripting:fence_distance().  The altitude fences (FENCE_ALT_MAX/MIN) are handled
+-- separately and are deliberately not in this list.
+local function is_fence_obstacle(obstacle_type)
+    return obstacle_type == OBSTACLE_TYPE.FENCE_HOME
+        or obstacle_type == OBSTACLE_TYPE.FENCE_CIRCLE_INCLUSION
+        or obstacle_type == OBSTACLE_TYPE.FENCE_CIRCLE_EXCLUSION
+        or obstacle_type == OBSTACLE_TYPE.FENCE_POLYGON_INCLUSION
+        or obstacle_type == OBSTACLE_TYPE.FENCE_POLYGON_EXCLUSION
+        or obstacle_type == OBSTACLE_TYPE.FENCE_LUA
+end
+
 local function populate_obstacle(distance_m, any_obstacle)
     local obstacle = {}
     obstacle.distance_m   = distance_m                      -- this is the Projected distance based on lookahead
@@ -882,20 +895,18 @@ local function populate_obstacle(distance_m, any_obstacle)
     obstacle.location     = any_obstacle:location()
     obstacle.pos_NED_m    = any_obstacle:position_NED_m()
     obstacle.vel_NED_ms   = any_obstacle:velocity_NED_ms()
-    -- these are the actual distances based on current location with no lookahead
-    -- note that for polygons there is no "location", so it's not easy to find the simple distance, so we just use the OA distance
-    if obstacle.location == nil then
+    -- these are the actual distances based on current location with no lookahead.
+    -- A fence is a boundary, not a point: C++ leaves its location un-set, and the binding
+    -- hands back a Location userdata regardless (never nil), so a range computed from it
+    -- would be a range to lat/lng 0,0.  Fall back to the bendy-ruler distance for every
+    -- fence type; obstacle_report_distance() asks C++ for the real edge distance when a
+    -- fence has to be reported to the pilot.
+    if obstacle.location == nil or is_fence_obstacle(obstacle.type) then
         obstacle.distance_xy = obstacle.distance_m
         obstacle.distance_z  = 0
     else
         obstacle.distance_xy  = obstacle.location:get_distance(current_loc)
         obstacle.distance_z   = math.abs(obstacle.location:get_distance_NED(current_loc):z())
-        if obstacle.type == OBSTACLE_TYPE.FENCE_CIRCLE_EXCLUSION then
-            obstacle.distance_xy = obstacle.distance_xy - any_obstacle:radius_m() - any_obstacle:margin_m()
-        elseif obstacle.type == OBSTACLE_TYPE.FENCE_CIRCLE_INCLUSION then
-            -- not too sure about the math here
-            obstacle.distance_xy = any_obstacle:radius_m() - obstacle.distance_xy - any_obstacle:margin_m()
-        end
     end
 
     return obstacle
@@ -909,12 +920,7 @@ end
 local function obstacle_report_distance(obstacle)
     if current_loc == nil then return nil end
     local t = obstacle.type
-    if t == OBSTACLE_TYPE.FENCE_HOME
-        or t == OBSTACLE_TYPE.FENCE_CIRCLE_INCLUSION
-        or t == OBSTACLE_TYPE.FENCE_CIRCLE_EXCLUSION
-        or t == OBSTACLE_TYPE.FENCE_POLYGON_INCLUSION
-        or t == OBSTACLE_TYPE.FENCE_POLYGON_EXCLUSION
-        or t == OBSTACLE_TYPE.FENCE_LUA then
+    if is_fence_obstacle(t) then
         -- horizontal fences carry no single usable "location"; ask C++ for the real edge distance
         -- to a fence of THIS type (so an "Excl. Circle" label reports the nearest exclusion
         -- circle, not a nearer polygon).  Returns the distance in metres, or nil if none.
@@ -1007,13 +1013,7 @@ local function find_closest_obstacle(loc1, loc2, lookahead_m, wind_ms)
     -- If any fence is currently breached, skip all fence avoidance.
     -- When inside an exclusion zone or outside an inclusion zone the bendy ruler sees every
     -- exit/return path as "blocked", trapping the plane. Let it navigate freely instead.
-    local is_fence_type = obstacle_type_val == OBSTACLE_TYPE.FENCE_HOME
-        or obstacle_type_val == OBSTACLE_TYPE.FENCE_CIRCLE_INCLUSION
-        or obstacle_type_val == OBSTACLE_TYPE.FENCE_CIRCLE_EXCLUSION
-        or obstacle_type_val == OBSTACLE_TYPE.FENCE_POLYGON_INCLUSION
-        or obstacle_type_val == OBSTACLE_TYPE.FENCE_POLYGON_EXCLUSION
-        or obstacle_type_val == OBSTACLE_TYPE.FENCE_LUA
-    if is_fence_type and fence ~= nil and fence:get_breaches() ~= 0 then
+    if is_fence_obstacle(obstacle_type_val) and fence ~= nil and fence:get_breaches() ~= 0 then
         return FLT_MAX, nil
     end
 
