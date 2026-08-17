@@ -1196,7 +1196,7 @@ singleton AP_OSD_Backend method get_screen uint8_t
 singleton AP_OSD_Backend method display_disabled boolean
 
 -- ---- AP_OAScripting - scripted avoidance Library ----
-include AC_Avoidance/AP_OAScripting.h 
+include AC_Avoidance/AP_OAScripting.h
 
 
 userdata OAObstacle rename OAObstacle
