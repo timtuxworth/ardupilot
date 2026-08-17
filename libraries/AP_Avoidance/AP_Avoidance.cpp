@@ -879,8 +879,6 @@ float AP_Avoidance::distance_to_obstacle(const Vector3f &start_NED_m, const Vect
         }
     }
 
-//    GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL,"ADSB distance %.0f", distance_new_m);
-
     return distance_new_m;
 }
 
@@ -894,18 +892,14 @@ float AP_Avoidance::distance_to_aircraft(const Vector3f &vehicle_NED_m, const fl
     WITH_SEMAPHORE(_rsem);
 
     float distance_new_msq  = lookahead_m * lookahead_m;
-    //float distance_new_m    = lookahead_m;
 
     for(uint8_t i = 0; i < _obstacle_count; i++) {
         const Obstacle obstacle         = _obstacles[i];
-        // const uint32_t src_id           = _obstacles[i].src_id;
         const Location obstacle_loc     = _obstacles[i]._location;
         Vector3f obstacle_NED_m;
        
         Vector2f vehicle_NE_m(vehicle_NED_m.x, vehicle_NED_m.y);
         Vector2f obstacle_NE_m;
-        // only obstacles with src_id > 256 and < 20000 are ADS-B aircraft. This is a bit dodgy and relies on MAV_SYSID being < 256 which will break in the future
-        //if (obstacle_loc.get_vector_xy_from_origin_NE_m(obstacle_NE_m) && src_id > 256 && src_id < 20000) {
 
         // this needs to account for the moving obstacle as done in closest_approach_ne_m
 
@@ -931,8 +925,6 @@ float AP_Avoidance::distance_to_aircraft(const Vector3f &vehicle_NED_m, const fl
             }
         }
     }
-
-//    GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL,"aircraft distance %.0f", safe_sqrt(distance_new_msq));
 
     // we need to do one square root here at the end. But by using squared above we avoid lots of them
     return safe_sqrt(distance_new_msq);
