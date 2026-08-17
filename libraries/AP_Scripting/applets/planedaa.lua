@@ -149,7 +149,7 @@ function bind_add_param(name, idx, default_value)
 end
 
 -- setup follow mode specific parameters
-assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 39), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
+assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 34), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
 
 --[[
     // @Param: DAA_ACT_FN
@@ -168,44 +168,12 @@ DAA_ACT_FN = bind_add_param("ACT_FN", 1, 308)
 DAA_MARGIN_FENCE = bind_add_param('MARGIN_FENCE', 2, 0)
 
 --[[
-  // @Param: DAA_MARGIN_DYN
-  // @DisplayName: dynamic margin
-  // @Description: Avoidance margin for dynamic objects
-  // @Units: m
---]]
-DAA_MARGIN_DYN   = bind_add_param('MARGIN_DYN', 3, 20)
-
---[[
-  // @Param: DAA_MARGIN_EXCL
-  // @DisplayName: exclusion zone margin
-  // @Description: Avoidance margin for exclusion zones
-  // @Units: m
---]]
-DAA_MARGIN_EXCL   = bind_add_param('MARGIN_EXCL', 4, 20)
-
---[[
-  // @Param: DAA_MARGIN_WIDE
-  // @DisplayName: wide avoidance margin
-  // @Description: Avoidance margin for wide avoidance
-  // @Units: m
---]]
-DAA_MARGIN_WIDE   = bind_add_param('MARGIN_WIDE', 5, 30)
-
---[[
-  // @Param: DAA_MARGIN_HGT
-  // @DisplayName: height avoidance margin
-  // @Description: Avoidance margin for height avoidance 
-  // @Units: m
---]]
-DAA_MARGIN_HGT   = bind_add_param('MARGIN_HGT', 6, 60)
-
---[[
   // @Param: DAA_LKAHD
   // @DisplayName: avoidance lookahead distance
   // @Description: Avoidance lookahead distance
   // @Units: m
 --]]
-DAA_LKAHD  = bind_add_param('LKAHD', 7, 1000)
+DAA_LKAHD  = bind_add_param('LKAHD', 3, 1000)
 
 --[[
   // @Param: DAA_UPDATE_RATE
@@ -213,15 +181,7 @@ DAA_LKAHD  = bind_add_param('LKAHD', 7, 1000)
   // @Description: Avoidance processing rate
   // @Units: Hz
 --]]
-DAA_UPDATE_RATE  = bind_add_param('UPDATE_RATE', 8, 10.0)
-
---[[
-  // @Param: DAA_HEIGHT_USE
-  // @DisplayName: Include height differences
-  // @Description: Avoidance will consider height differences when calculating collisions
-  // @Values: 0:Use Height,1:Ignore Height
---]]
-DAA_HEIGHT_USE  = bind_add_param('HEIGHT_USE', 9, 0)
+DAA_UPDATE_RATE  = bind_add_param('UPDATE_RATE', 4, 10.0)
 
 --[[
   // @Param: DAA_MARGIN_GA
@@ -229,7 +189,7 @@ DAA_HEIGHT_USE  = bind_add_param('HEIGHT_USE', 9, 0)
   // @Description: Avoidance margin for Fixed Wing aircraft/General Aviation (Helicopters? eVTOL?) over and above the Well Clear margin AVD_WCLR_XY
   // @Units: m
 --]]
-DAA_MARGIN_GA  = bind_add_param('MARGIN_GA', 10, 50)
+DAA_MARGIN_GA  = bind_add_param('MARGIN_GA', 5, 50)
 
 --[[
   // @Param: DAA_MARGIN_WTH
@@ -237,7 +197,7 @@ DAA_MARGIN_GA  = bind_add_param('MARGIN_GA', 10, 50)
   // @Description: Avoidance radius for Weather/Clouds/Rain 
   // @Units: m
 --]]
-DAA_MARGIN_WTH  = bind_add_param('MARGIN_WTH', 11, 173)
+DAA_MARGIN_WTH  = bind_add_param('MARGIN_WTH', 6, 173)
 
 --[[
   // @Param: DAA_MARGIN_BIRD
@@ -245,7 +205,7 @@ DAA_MARGIN_WTH  = bind_add_param('MARGIN_WTH', 11, 173)
   // @Description: Avoidance margin for Migratory Birds 
   // @Units: m
 --]]
-DAA_MARGIN_BIRD  = bind_add_param('MARGIN_BIRD', 12, 100)
+DAA_MARGIN_BIRD  = bind_add_param('MARGIN_BIRD', 7, 100)
 
 --[[
   // @Param: DAA_MARGIN_PREY
@@ -253,7 +213,7 @@ DAA_MARGIN_BIRD  = bind_add_param('MARGIN_BIRD', 12, 100)
   // @Description: Avoidance radius for Birds of Prey
   // @Units: m
 --]]
-DAA_MARGIN_PREY  = bind_add_param('MARGIN_PREY', 13, 200)
+DAA_MARGIN_PREY  = bind_add_param('MARGIN_PREY', 8, 200)
 
 --[[
   // @Param: DAA_MARGIN_UAV
@@ -261,7 +221,7 @@ DAA_MARGIN_PREY  = bind_add_param('MARGIN_PREY', 13, 200)
   // @Description: Avoidance radius for UAV/drone (MAVLink sourced)
   // @Units: m
 --]]
-DAA_MARGIN_UAV  = bind_add_param('MARGIN_UAV', 14, 50)
+DAA_MARGIN_UAV  = bind_add_param('MARGIN_UAV', 9, 50)
 
 --[[
   // @Param: DAA_MARGIN_AIS
@@ -269,7 +229,7 @@ DAA_MARGIN_UAV  = bind_add_param('MARGIN_UAV', 14, 50)
   // @Description: Avoidance radius for AIS (MAVLink sourced)
   // @Units: m
 --]]
-DAA_MARGIN_AIS  = bind_add_param('MARGIN_AIS', 15, 50)
+DAA_MARGIN_AIS  = bind_add_param('MARGIN_AIS', 10, 50)
 
 --[[
   // @Param: DAA_MARGIN_PRX
@@ -277,7 +237,7 @@ DAA_MARGIN_AIS  = bind_add_param('MARGIN_AIS', 15, 50)
   // @Description: Avoidance radius for obstacles detected by proximity sensors. Typically pretty close
   // @Units: m
 --]]
-DAA_MARGIN_PRX  = bind_add_param('MARGIN_PRX', 16, 50)
+DAA_MARGIN_PRX  = bind_add_param('MARGIN_PRX', 11, 50)
 
 --[[
     // @Param: DAA_BR_RATIO
@@ -287,7 +247,7 @@ DAA_MARGIN_PRX  = bind_add_param('MARGIN_PRX', 16, 50)
     // @Increment: 0.1
     // @User: Standard
 --]]
-DAA_BR_RATIO = bind_add_param('BR_RATIO', 17, 1.5)
+DAA_BR_RATIO = bind_add_param('BR_RATIO', 12, 1.5)
 
 --[[
     // @Param: DAA_BR_ANGLE
@@ -297,7 +257,7 @@ DAA_BR_RATIO = bind_add_param('BR_RATIO', 17, 1.5)
     // @Increment: 5
     // @User: Standard
 --]]
-DAA_BR_ANGLE = bind_add_param('BR_ANGLE', 18, 45)
+DAA_BR_ANGLE = bind_add_param('BR_ANGLE', 13, 45)
 
 --[[
     // @Param: DAA_AVD_ALT
@@ -307,7 +267,7 @@ DAA_BR_ANGLE = bind_add_param('BR_ANGLE', 18, 45)
     // @Increment: 5
     // @User: Standard
 --]]
-DAA_AVD_ALT = bind_add_param('AVD_ALT', 19, 50)
+DAA_AVD_ALT = bind_add_param('AVD_ALT', 14, 50)
 
 --[[
     // @Param: DAA_AVD_ALT_TP
@@ -317,7 +277,7 @@ DAA_AVD_ALT = bind_add_param('AVD_ALT', 19, 50)
     // @Increment: 5
     // @User: Standard
 --]]
-DAA_AVD_ALT_TP = bind_add_param('AVD_ALT_TP', 20, 3)
+DAA_AVD_ALT_TP = bind_add_param('AVD_ALT_TP', 15, 3)
 
 --[[
     // @Param: DAA_AVD_ALERT
@@ -326,7 +286,7 @@ DAA_AVD_ALT_TP = bind_add_param('AVD_ALT_TP', 20, 3)
     // @Values: 0: None, 1: Alert
     // @User: Standard
 --]]
-DAA_AVD_ALERT = bind_add_param('AVD_ALERT', 21, 1)
+DAA_AVD_ALERT = bind_add_param('AVD_ALERT', 16, 1)
 
 --[[
     // @Param: DAA_AVD_ACTION
@@ -335,7 +295,7 @@ DAA_AVD_ALERT = bind_add_param('AVD_ALERT', 21, 1)
     // @Values: 0: None, 1: Avoid
     // @User: Standard
 --]]
-DAA_AVD_ACTION = bind_add_param('AVD_ACTION', 22, 1)
+DAA_AVD_ACTION = bind_add_param('AVD_ACTION', 17, 1)
 
 --[[
     // @Param: DAA_MARGIN_ALT
@@ -346,7 +306,7 @@ DAA_AVD_ACTION = bind_add_param('AVD_ACTION', 22, 1)
     // @Increment: 1
     // @User: Standard
 --]]
-DAA_MARGIN_ALT = bind_add_param('MARGIN_ALT', 23, 20)
+DAA_MARGIN_ALT = bind_add_param('MARGIN_ALT', 18, 20)
 
 --[[
     // @Param: DAA_ALT_HYST_M
@@ -357,7 +317,7 @@ DAA_MARGIN_ALT = bind_add_param('MARGIN_ALT', 23, 20)
     // @Increment: 1
     // @User: Standard
 --]]
-DAA_ALT_HYST_M = bind_add_param('ALT_HYST_M', 24, 10)
+DAA_ALT_HYST_M = bind_add_param('ALT_HYST_M', 19, 10)
 
 --[[
     // @Param: DAA_ALT_COOL_S
@@ -368,7 +328,7 @@ DAA_ALT_HYST_M = bind_add_param('ALT_HYST_M', 24, 10)
     // @Increment: 1
     // @User: Standard
 --]]
-DAA_ALT_COOL_S = bind_add_param('ALT_COOL_S', 25, 15)
+DAA_ALT_COOL_S = bind_add_param('ALT_COOL_S', 20, 15)
 
 --[[
     // @Param: DAA_HEADING_INC
@@ -380,7 +340,7 @@ DAA_ALT_COOL_S = bind_add_param('ALT_COOL_S', 25, 15)
     // @User: Advanced
 --]]
 DEFAULT_HEADING_INC_DEG = 1.5
-DAA_HEADING_INC = bind_add_param('HEADING_INC', 26, DEFAULT_HEADING_INC_DEG)
+DAA_HEADING_INC = bind_add_param('HEADING_INC', 21, DEFAULT_HEADING_INC_DEG)
 
 --[[
     // @Param: DAA_WIND_MIN
@@ -391,7 +351,7 @@ DAA_HEADING_INC = bind_add_param('HEADING_INC', 26, DEFAULT_HEADING_INC_DEG)
     // @Increment: 0.5
     // @User: Advanced
 --]]
-DAA_WIND_MIN = bind_add_param('WIND_MIN', 27, 2.0)
+DAA_WIND_MIN = bind_add_param('WIND_MIN', 22, 2.0)
 
 --[[
     // @Param: DAA_WIND_MARG
@@ -402,7 +362,7 @@ DAA_WIND_MIN = bind_add_param('WIND_MIN', 27, 2.0)
     // @Increment: 0.5
     // @User: Advanced
 --]]
-DAA_WIND_MARG = bind_add_param('WIND_MARG', 28, 5.0)
+DAA_WIND_MARG = bind_add_param('WIND_MARG', 23, 5.0)
 
 --[[
     // @Param: DAA_SLEW_DPS
@@ -413,7 +373,7 @@ DAA_WIND_MARG = bind_add_param('WIND_MARG', 28, 5.0)
     // @Increment: 1
     // @User: Advanced
 --]]
-DAA_SLEW_DPS = bind_add_param('SLEW_DPS', 29, 20)
+DAA_SLEW_DPS = bind_add_param('SLEW_DPS', 24, 20)
 
 --[[
     // @Param: DAA_SLEW_URG
@@ -424,7 +384,7 @@ DAA_SLEW_DPS = bind_add_param('SLEW_DPS', 29, 20)
     // @Increment: 0.5
     // @User: Advanced
 --]]
-DAA_SLEW_URG = bind_add_param('SLEW_URG', 30, 4)
+DAA_SLEW_URG = bind_add_param('SLEW_URG', 25, 4)
 
 --[[
     // @Param: DAA_SIDE_HOLD
@@ -435,7 +395,7 @@ DAA_SLEW_URG = bind_add_param('SLEW_URG', 30, 4)
     // @Increment: 0.5
     // @User: Advanced
 --]]
-DAA_SIDE_HOLD = bind_add_param('SIDE_HOLD', 31, 3)
+DAA_SIDE_HOLD = bind_add_param('SIDE_HOLD', 26, 3)
 
 --[[
     // @Param: DAA_CPA_MIN
@@ -446,7 +406,7 @@ DAA_SIDE_HOLD = bind_add_param('SIDE_HOLD', 31, 3)
     // @Increment: 0.5
     // @User: Advanced
 --]]
-DAA_CPA_MIN = bind_add_param('CPA_MIN', 32, 2)
+DAA_CPA_MIN = bind_add_param('CPA_MIN', 27, 2)
 
 --[[
     // @Param: DAA_TRAP_ACT
@@ -455,7 +415,7 @@ DAA_CPA_MIN = bind_add_param('CPA_MIN', 32, 2)
     // @Values: 0:Disabled,1:RTL,2:QRTL,3:QLOITER,4:QLAND
     // @User: Standard
 --]]
-DAA_TRAP_ACT = bind_add_param('TRAP_ACT', 33, 0)
+DAA_TRAP_ACT = bind_add_param('TRAP_ACT', 28, 0)
 
 --[[
     // @Param: DAA_TRAP_S
@@ -466,7 +426,7 @@ DAA_TRAP_ACT = bind_add_param('TRAP_ACT', 33, 0)
     // @Increment: 0.5
     // @User: Standard
 --]]
-DAA_TRAP_S = bind_add_param('TRAP_S', 34, 5)
+DAA_TRAP_S = bind_add_param('TRAP_S', 29, 5)
 
 --[[
     // @Param: DAA_TRAP_CLR_S
@@ -477,7 +437,7 @@ DAA_TRAP_S = bind_add_param('TRAP_S', 34, 5)
     // @Increment: 1
     // @User: Standard
 --]]
-DAA_TRAP_CLR_S = bind_add_param('TRAP_CLR_S', 35, 4)
+DAA_TRAP_CLR_S = bind_add_param('TRAP_CLR_S', 30, 4)
 
 --[[
     // @Param: DAA_TRAP_ESC_ACT
@@ -486,7 +446,7 @@ DAA_TRAP_CLR_S = bind_add_param('TRAP_CLR_S', 35, 4)
     // @Values: 1:RTL,2:QRTL,3:QLOITER,4:QLAND
     // @User: Standard
 --]]
-DAA_TRAP_ESC_ACT = bind_add_param('TRAP_ESC_ACT', 36, 2)
+DAA_TRAP_ESC_ACT = bind_add_param('TRAP_ESC_ACT', 31, 2)
 
 --[[
     // @Param: DAA_STALE_S
@@ -496,7 +456,7 @@ DAA_TRAP_ESC_ACT = bind_add_param('TRAP_ESC_ACT', 36, 2)
     // @Range: 0 30
     // @User: Standard
 --]]
-DAA_STALE_S = bind_add_param('STALE_S', 37, 3)
+DAA_STALE_S = bind_add_param('STALE_S', 32, 3)
 
 --[[
     // @Param: DAA_MARGIN_GA_Z
@@ -506,7 +466,7 @@ DAA_STALE_S = bind_add_param('STALE_S', 37, 3)
     // @Range: 0 200
     // @User: Standard
 --]]
-DAA_MARGIN_GA_Z = bind_add_param('MARGIN_GA_Z', 38, 30)
+DAA_MARGIN_GA_Z = bind_add_param('MARGIN_GA_Z', 33, 30)
 
 --[[
     // @Param: DAA_LTR_COOL_S
@@ -516,7 +476,7 @@ DAA_MARGIN_GA_Z = bind_add_param('MARGIN_GA_Z', 38, 30)
     // @Range: 0 60
     // @User: Standard
 --]]
-DAA_LTR_COOL_S = bind_add_param('LTR_COOL_S', 39, 10)
+DAA_LTR_COOL_S = bind_add_param('LTR_COOL_S', 34, 10)
 
 WARN_DIST_XY                = bind_param("AVD_W_DIST_XY")
 WARN_ACTION                 = bind_param("AVD_W_ACTION")
