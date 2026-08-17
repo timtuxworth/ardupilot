@@ -112,7 +112,7 @@ public:
     // For AP_AOScripting to check for obstacles
     float get_obstacle_radius_m(uint8_t emitter_type) const;
     float get_obstacle_height_m(uint8_t emitter_type) const;
-    float distance_to_obstacle(const Vector3f &start_NED_cm, const Vector3f &end_NED_cm, 
+    float distance_to_obstacle(const Vector3f &start_NED_cm, const Vector3f &end_NED_cm,
                                 Obstacle &avoid_obstacle,
                                 Obstacle &closest_aircraft
                                 ) const;
@@ -126,7 +126,7 @@ public:
     static bool is_adsb_uav(uint8_t emitter_type);
     // ADS-B surface (ground) vehicle categories - deliberately not avoided by an airborne vehicle
     static bool is_ground_vehicle(uint8_t emitter_type);
-#endif 
+#endif
 
     // for holding parameters
     static const struct AP_Param::GroupInfo var_info[];
