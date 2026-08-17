@@ -32,7 +32,7 @@
 #include <GCS_MAVLink/GCS.h>
 
 // Forward declare the class and its nested struct cleanly
-class AP_Avoidance; 
+class AP_Avoidance;
 
 struct OAObstacle;
 
@@ -73,7 +73,7 @@ public:
 
 
 
-    // For efficiency don't want to loop through the obstacles multiple times. so this 
+    // For efficiency don't want to loop through the obstacles multiple times. so this
     // returns both the closes aircraft (from ADS-B) and the closest obstacle in general which might be
     // ADS-B Objects from AP_Avoidance
     // Proximity objects from AP_OADatabase
@@ -90,15 +90,15 @@ public:
     // This function is for Lua, so each Obstacle field gets returned as multiple parameters
     bool find_closest_obstacle(const Location &start_loc, const Location &end_loc, float lookahead_m,
                                     // Return values
-                                    float    &distance_m, 
-                                    uint16_t &type, 
-                                    char    *&label, 
+                                    float    &distance_m,
+                                    uint16_t &type,
+                                    char    *&label,
                                     uint32_t &sys_id,
-                                    Location &location, 
+                                    Location &location,
                                     Vector3f &pos_NED_m,
                                     Vector3f &velocity_NED_ms
                                 ) const;
-    
+
     bool find_aircraft(const Location &vehicle_loc, const float lookahead_m, const float vertical_lookahead_m,
                                     float       &distance_m,
                                     OAObstacle  &aircraft_obstacle
