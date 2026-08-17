@@ -55,7 +55,7 @@ public:
         // Named AIRCRAFT, not "ADSB", on purpose: the source being ADS-B does not
         // fix the type. An ADS-B contact with a UAV emitter is a drone (MAV_SYSID above),
         // so "ADSB" would span two ObstacleTypes. This one is specifically crewed aircraft.
-        AIRCRAFT            = 2,
+        CREWED_AIRCRAFT             = 2,
         WEATHER                     = 3,
         BIRD_MIGRATORY              = 4,
         BIRD_OF_PREY                = 5,
