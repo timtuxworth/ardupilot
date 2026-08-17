@@ -83,7 +83,7 @@ MAV_COLLISION_ACTION = {
 OBSTACLE_TYPE = {
     GENERAL                     = 0,    -- generic obstacle, we don't really know what it is
     MAV_SYSID                   = 1,    -- another MAVLINK drone with a MAV_SYSID
-    AIRCRAFT            = 2,    -- crewed aircraft, usually with an ICAO ADSB identifier
+    AIRCRAFT                    = 2,    -- crewed aircraft, usually with an ICAO ADSB identifier
     WEATHER                     = 3,
     BIRD_MIGRATORY              = 4,    -- typically one or more Canada Geese
     BIRD_OF_PREY                = 5,    -- a bird that might attack the vehicle
@@ -530,27 +530,27 @@ ROLL_LIMIT_DEG              = bind_param("ROLL_LIMIT_DEG")
 WP_LOITER_RAD               = bind_param("WP_LOITER_RAD")
 
 local roll_limit_deg        = ROLL_LIMIT_DEG:get()
-local lookahead_param_m       = DAA_LKAHD:get()
-local margin_fence_m          = DAA_MARGIN_FENCE:get()
+local lookahead_param_m     = DAA_LKAHD:get()
+local margin_fence_m        = DAA_MARGIN_FENCE:get()
 if margin_fence_m <= 0 then margin_fence_m = math.abs(WP_LOITER_RAD:get()) end   -- 0 => use the turn radius so the fence standoff = one loiter circle
-local margin_alt_m            = DAA_MARGIN_ALT:get()
+local margin_alt_m          = DAA_MARGIN_ALT:get()
 local alt_hyst_m            = DAA_ALT_HYST_M:get()
 local alt_cool_ms           = DAA_ALT_COOL_S:get() * 1000
 local loiter_cool_ms        = DAA_LTR_COOL_S:get() * 1000
-local margin_aircraft_m       = DAA_MARGIN_GA:get()
-local margin_vertical_m       = DAA_MARGIN_GA_Z:get()
-local margin_bird_m           = DAA_MARGIN_BIRD:get()
-local margin_prey_m           = DAA_MARGIN_PREY:get()
-local margin_uav_m            = DAA_MARGIN_UAV:get()
-local margin_weather_m        = DAA_MARGIN_WTH:get()
-local margin_ais_m            = DAA_MARGIN_AIS:get()
-local margin_proximity_m      = DAA_MARGIN_PRX:get()
+local margin_aircraft_m     = DAA_MARGIN_GA:get()
+local margin_vertical_m     = DAA_MARGIN_GA_Z:get()
+local margin_bird_m         = DAA_MARGIN_BIRD:get()
+local margin_prey_m         = DAA_MARGIN_PREY:get()
+local margin_uav_m          = DAA_MARGIN_UAV:get()
+local margin_weather_m      = DAA_MARGIN_WTH:get()
+local margin_ais_m          = DAA_MARGIN_AIS:get()
+local margin_proximity_m    = DAA_MARGIN_PRX:get()
 -- refresh_period_ms is the loop period in ms; DAA_UPDATE_RATE is in Hz (floored at 1 Hz to avoid /0)
 local refresh_period_ms     = 1000.0 / math.max(DAA_UPDATE_RATE:get(), 1.0)
 local bendy_ratio           = DAA_BR_RATIO:get()
 local bendy_angle           = DAA_BR_ANGLE:get()
-local wp_loiter_rad_m         = WP_LOITER_RAD:get()
-local ga_avoid_alt_m          = DAA_AVD_ALT:get()
+local wp_loiter_rad_m       = WP_LOITER_RAD:get()
+local ga_avoid_alt_m        = DAA_AVD_ALT:get()
 local ga_avoid_alt_frame    = DAA_AVD_ALT_TP:get()
 local daa_alert             = DAA_AVD_ALERT:get()
 local daa_action            = DAA_AVD_ACTION:get()
@@ -695,14 +695,14 @@ local function get_vehicle_state()
 
     -- refresh parameters every 5 seconds, its not that urgent we know about changs
     if (now_ms - now_params_ms) > 5000 then
-        roll_limit_deg      = ROLL_LIMIT_DEG:get()
+        roll_limit_deg        = ROLL_LIMIT_DEG:get()
         lookahead_param_m     = DAA_LKAHD:get()
         margin_fence_m        = DAA_MARGIN_FENCE:get()
         if margin_fence_m <= 0 then margin_fence_m = math.abs(WP_LOITER_RAD:get()) end   -- 0 => use the turn radius
         margin_alt_m          = DAA_MARGIN_ALT:get()
-        alt_hyst_m          = DAA_ALT_HYST_M:get()
-        alt_cool_ms         = DAA_ALT_COOL_S:get() * 1000
-        loiter_cool_ms      = DAA_LTR_COOL_S:get() * 1000
+        alt_hyst_m            = DAA_ALT_HYST_M:get()
+        alt_cool_ms           = DAA_ALT_COOL_S:get() * 1000
+        loiter_cool_ms        = DAA_LTR_COOL_S:get() * 1000
         margin_aircraft_m     = DAA_MARGIN_GA:get()
         margin_vertical_m     = DAA_MARGIN_GA_Z:get()
         margin_bird_m         = DAA_MARGIN_BIRD:get()
@@ -711,38 +711,38 @@ local function get_vehicle_state()
         margin_weather_m      = DAA_MARGIN_WTH:get()
         margin_ais_m          = DAA_MARGIN_AIS:get()
         margin_proximity_m    = DAA_MARGIN_PRX:get()
-        refresh_period_ms   = 1000.0 / math.max(DAA_UPDATE_RATE:get(), 1.0)
-        bendy_ratio         = DAA_BR_RATIO:get()
-        bendy_angle         = DAA_BR_ANGLE:get()
+        refresh_period_ms     = 1000.0 / math.max(DAA_UPDATE_RATE:get(), 1.0)
+        bendy_ratio           = DAA_BR_RATIO:get()
+        bendy_angle           = DAA_BR_ANGLE:get()
         wp_loiter_rad_m       = WP_LOITER_RAD:get()
         ga_avoid_alt_m        = DAA_AVD_ALT:get()
-        ga_avoid_alt_frame  = DAA_AVD_ALT_TP:get()
-        daa_alert           = DAA_AVD_ALERT:get()
-        daa_action          = DAA_AVD_ACTION:get()
-        wind_min_ms         = DAA_WIND_MIN:get()
-        wind_margin_per_ms  = DAA_WIND_MARG:get()
+        ga_avoid_alt_frame    = DAA_AVD_ALT_TP:get()
+        daa_alert             = DAA_AVD_ALERT:get()
+        daa_action            = DAA_AVD_ACTION:get()
+        wind_min_ms           = DAA_WIND_MIN:get()
+        wind_margin_per_ms    = DAA_WIND_MARG:get()
 
-        bearing_inc_deg     = DAA_HEADING_INC:get() or DEFAULT_HEADING_INC_DEG
+        bearing_inc_deg       = DAA_HEADING_INC:get() or DEFAULT_HEADING_INC_DEG
         if bearing_inc_deg <= 0 then
-            bearing_inc_deg = DEFAULT_HEADING_INC_DEG
+            bearing_inc_deg   = DEFAULT_HEADING_INC_DEG
         end
 
-        well_clear_xy        = AVD_WCLR_XY:get()
-        well_clear_z         = AVD_WCLR_Z:get()
-        uav_clear_xy         = AVD_UAV_XY:get()
-        near_miss_xy         = AVD_NMAC_XY:get()
-        near_miss_z          = AVD_NMAC_Z:get()
-        slew_dps             = DAA_SLEW_DPS:get()
-        slew_urg_s           = DAA_SLEW_URG:get()
-        side_hold_s          = DAA_SIDE_HOLD:get()
-        cpa_min_ms           = DAA_CPA_MIN:get()
-        trap_act             = DAA_TRAP_ACT:get()
-        trap_s               = DAA_TRAP_S:get()
-        trap_clr_s           = DAA_TRAP_CLR_S:get()
-        trap_esc_act         = DAA_TRAP_ESC_ACT:get()
-        stale_s              = DAA_STALE_S:get()
+        well_clear_xy         = AVD_WCLR_XY:get()
+        well_clear_z          = AVD_WCLR_Z:get()
+        uav_clear_xy          = AVD_UAV_XY:get()
+        near_miss_xy          = AVD_NMAC_XY:get()
+        near_miss_z           = AVD_NMAC_Z:get()
+        slew_dps              = DAA_SLEW_DPS:get()
+        slew_urg_s            = DAA_SLEW_URG:get()
+        side_hold_s           = DAA_SIDE_HOLD:get()
+        cpa_min_ms            = DAA_CPA_MIN:get()
+        trap_act              = DAA_TRAP_ACT:get()
+        trap_s                = DAA_TRAP_S:get()
+        trap_clr_s            = DAA_TRAP_CLR_S:get()
+        trap_esc_act          = DAA_TRAP_ESC_ACT:get()
+        stale_s               = DAA_STALE_S:get()
 
-        now_params_ms       = now_ms
+        now_params_ms         = now_ms
     end
 end
 
@@ -1192,48 +1192,48 @@ local DAA = {
    enabled = false,
 }
 (function ()
-    local active            = true;
-    local navigating        = false;
-    local current_loc       = ahrs:get_position() -- luacheck: ignore current_loc
-    local groundspeed_ms    = ahrs:groundspeed_vector():length()
-    local airspeed_ms       = ahrs:airspeed_EAS() or groundspeed_ms
-    local ground_course_deg = wrap_180(math.deg(ahrs:groundspeed_vector():angle()))
-    local wind_dir_rad      = 0.0
-    local wind_speed        = 0.0
-    local obstacle_avoiding = nil
-    local aircraft_avoiding = nil
-    local last_aircraft_ts_ms = nil     -- timestamp_ms of the last aircraft fix acted on (detect de-bounce)
-    local last_aircraft_obstacle = nil  -- obstacle populated from it, reused between fresh fixes
+    local active                = true;
+    local navigating            = false;
+    local current_loc           = ahrs:get_position() -- luacheck: ignore current_loc
+    local groundspeed_ms        = ahrs:groundspeed_vector():length()
+    local airspeed_ms           = ahrs:airspeed_EAS() or groundspeed_ms
+    local ground_course_deg     = wrap_180(math.deg(ahrs:groundspeed_vector():angle()))
+    local wind_dir_rad          = 0.0
+    local wind_speed            = 0.0
+    local obstacle_avoiding     = nil
+    local aircraft_avoiding     = nil
+    local last_aircraft_ts_ms   = nil           -- timestamp_ms of the last aircraft fix acted on (detect de-bounce)
+    local last_aircraft_obstacle = nil          -- obstacle populated from it, reused between fresh fixes
     local last_avoid_bearing_deg = nil
-    local committed_side_sign = 0       -- +1 = right of the direct bearing, -1 = left, 0 = not committed
-    local side_flip_pending  = false    -- true while the opposite side is being preferred (debounce a flip)
-    local side_flip_want_ms  = uint32_t(0)  -- time the opposite side first became preferred
-    local last_cmd_bearing_ms = uint32_t(0) -- time we last issued an avoidance heading (for the slew-rate dt)
-    local trap_active       = false         -- trapped-failsafe is currently controlling the vehicle
-    local trap_since_ms     = uint32_t(0)   -- when the trap condition began (for DAA_TRAP_S)
-    local trap_trigger_ms   = uint32_t(0)   -- when the failsafe fired (for DAA_TRAP_CLR_S recovery)
-    local trap_dynamic      = false         -- trap from a moving obstacle (recoverable) vs a fence (sticky)
-    local trap_prev_mode    = -1            -- mode to restore on recovery
-    local trap_fs_mode      = -1            -- the failsafe mode we commanded
-    local previous_label    = ""
-    local avoiding_label    = ""
+    local committed_side_sign   = 0             -- +1 = right of the direct bearing, -1 = left, 0 = not committed
+    local side_flip_pending     = false         -- true while the opposite side is being preferred (debounce a flip)
+    local side_flip_want_ms     = uint32_t(0)   -- time the opposite side first became preferred
+    local last_cmd_bearing_ms   = uint32_t(0)   -- time we last issued an avoidance heading (for the slew-rate dt)
+    local trap_active           = false         -- trapped-failsafe is currently controlling the vehicle
+    local trap_since_ms         = uint32_t(0)   -- when the trap condition began (for DAA_TRAP_S)
+    local trap_trigger_ms       = uint32_t(0)   -- when the failsafe fired (for DAA_TRAP_CLR_S recovery)
+    local trap_dynamic          = false         -- trap from a moving obstacle (recoverable) vs a fence (sticky)
+    local trap_prev_mode        = -1            -- mode to restore on recovery
+    local trap_fs_mode          = -1            -- the failsafe mode we commanded
+    local previous_label        = ""
+    local avoiding_label        = ""
     -- laggy/dropped traffic-feed watchdog (network-fed moving obstacles carry an update
     -- timestamp; a fence's is always fresh).  Threshold is DAA_STALE_S (0 disables).
-    local feed_watch_label  = ""            -- label of the moving obstacle we are tracking ("" = none)
-    local feed_is_stale     = false         -- its last-seen update was stale
-    local feed_stale_warn_ms = uint32_t(0)  -- throttle for the "traffic stale" GCS text
+    local feed_watch_label      = ""            -- label of the moving obstacle we are tracking ("" = none)
+    local feed_is_stale         = false         -- its last-seen update was stale
+    local feed_stale_warn_ms    = uint32_t(0)   -- throttle for the "traffic stale" GCS text
     -- luacheck: ignore previous_aircraft
-    local previous_aircraft = ""
-    local STATE             = {monitoring = 1, avoiding = 2, loitering = 3, loitering_avoiding = 4, hovering = 5, landing  = 6}
-    local current_state     = STATE.monitoring
-    local LoWC_active       = false
-    local LoWC_label        = ""
-    local NMAC_active       = false
-    local NMAC_label        = ""
+    local previous_aircraft     = ""
+    local STATE                 = {monitoring = 1, avoiding = 2, loitering = 3, loitering_avoiding = 4, hovering = 5, landing  = 6}
+    local current_state         = STATE.monitoring
+    local LoWC_active           = false
+    local LoWC_label            = ""
+    local NMAC_active           = false
+    local NMAC_label            = ""
 
-    local update_target_location_save_loc = nil                 -- this is the saved current_target for use by update_target_location ONLY
-    local navigation_target_loc = nil                           -- this is where the vehicle is trying to get to (i.e. next waypoint if no avoidance)
-    local daa_target_loc = nil                                  -- this is where the DAA is currently trying to go in order to avoid obstacles (nil if not avoiding)
+    local update_target_location_save_loc = nil -- this is the saved current_target for use by update_target_location ONLY
+    local navigation_target_loc = nil           -- this is where the vehicle is trying to get to (i.e. next waypoint if no avoidance)
+    local daa_target_loc        = nil           -- this is where the DAA is currently trying to go in order to avoid obstacles (nil if not avoiding)
 
     -- the distance we look ahead is adjusted dynamically based on avoidance results
     local current_lookahead = lookahead_param_m
@@ -1242,7 +1242,7 @@ local DAA = {
                 -- Get wind estimate and convert to 2D
         local wind_3d = ahrs:get_wind()
         local wind_2d = Vector2f()
-        if wind_3d ~= nil then          -- get_wind returns nil when there is no valid estimate: treat as calm
+        if wind_3d ~= nil then                  -- get_wind returns nil when there is no valid estimate: treat as calm
             wind_2d:x(wind_3d:x())
             wind_2d:y(wind_3d:y())
         end
