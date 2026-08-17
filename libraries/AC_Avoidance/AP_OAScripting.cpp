@@ -29,22 +29,6 @@
 
 #endif // AP_FENCE_ENABLED
 
-static constexpr float OA_MARGIN_MAX_DEFAULT = 609.6;
-
-const AP_Param::GroupInfo AP_OAScripting::var_info[] = {
-
-    // @Param: MARGIN_GA
-    // @DisplayName: Margin for crewed aircraft
-    // @Description: Object Avoidance will ignore aircraft more than this many meters from vehicle
-    // @Units: m
-    // @Range: 0.1 10000
-    // @Increment: 1
-    // @User: Standard
-    AP_GROUPINFO("MARGIN_GA", 1, AP_OAScripting, _margin_aircraft, OA_MARGIN_MAX_DEFAULT),
-
-    AP_GROUPEND
-};
-
 /// Constructor
 AP_OAScripting::AP_OAScripting()
 {
@@ -73,7 +57,7 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
                                             ) const
 {
     float distance_new_m = FLT_MAX;
-    OAObstacle obstacle;
+    OAObstacle obstacle {};
 
     distance_m = lookahead_m;
 
@@ -92,8 +76,8 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
 
     // "obstacles" are stored in AP_Avoidance - the are typically populated by MAVLink (ADSB, GLOBAL_POSITION, FOLLOW_TARGET)
     // These have priority over all other obstacles, especially if they are ADSB messages representing crewed aircraft
-    OAObstacle obstacle_found;
-    OAObstacle aircraft_found;
+    OAObstacle obstacle_found {};
+    OAObstacle aircraft_found {};
     distance_new_m = _distance_to_avoidance(start_NED_m, end_NED_m, obstacle_found, aircraft_found);
     if (distance_new_m < distance_m) {
         obstacle            = obstacle_found;
@@ -109,9 +93,14 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
         distance_m          = distance_new_m;
     }
 
-#ifdef AP_FENCE_ENABLED
+#if AP_FENCE_ENABLED
     const AC_Fence *fence = AC_Fence::get_singleton();
     if (fence != nullptr && fence->enabled()) {
+        // the distance_line_to_* queries walk the loader's boundary arrays, which
+        // load_from_eeprom() frees and rebuilds on any in-flight fence upload.  Take the
+        // same semaphore AP_OADijkstra does before reading them.
+        WITH_SEMAPHORE(fence->polyfence().get_loaded_fence_semaphore());
+
         // fences use cm (for now), so do this once now so we can pass to all the fence methods
         const Vector2f start_NE_cm(start_NED_m.x * 100.0f, start_NED_m.y * 100.0f);
         const Vector2f end_NE_cm(end_NED_m.x * 100.0f, end_NED_m.y * 100.0f);
@@ -119,40 +108,45 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
         // We do each type of fence one at a time, because
         // a. they are stored in separate lists and
         // b. we want to tell the user which fence type of fence it is
+        // radius_m/margin_m must be set BEFORE fence_obstacle is copied out, or the copy
+        // carries the previous branch's values.  Polygon fences have no single radius.
         distance_new_m = fence->distance_line_to_home_inclusion(start_NE_cm, end_NE_cm);
         if (distance_new_m < distance_m) {
             _populate_fence_obstacle(obstacle, ObstacleType::FENCE_HOME);
-            distance_m          = distance_new_m;
             obstacle.radius_m   = fence->get_radius_m();
             obstacle.margin_m   = fence->get_margin_ne_m();
+            fence_obstacle      = obstacle;
+            distance_m          = distance_new_m;
         }
         distance_new_m = fence->distance_line_to_circle_inclusion(start_NE_cm, end_NE_cm);
         if (distance_new_m < distance_m) {
             _populate_fence_obstacle(obstacle, ObstacleType::FENCE_CIRCLE_INCLUSION);
-            fence_obstacle      = obstacle;
-            distance_m          = distance_new_m;
             obstacle.radius_m   = fence->get_radius_m();
             obstacle.margin_m   = fence->get_margin_ne_m();
+            fence_obstacle      = obstacle;
+            distance_m          = distance_new_m;
         }
         distance_new_m = fence->distance_line_to_circle_exclusion(start_NE_cm, end_NE_cm);
         if (distance_new_m < distance_m) {
             _populate_fence_obstacle(obstacle, ObstacleType::FENCE_CIRCLE_EXCLUSION);
-            fence_obstacle      = obstacle;
-            distance_m          = distance_new_m;
             obstacle.radius_m   = fence->get_radius_m();
             obstacle.margin_m   = fence->get_margin_ne_m();
+            fence_obstacle      = obstacle;
+            distance_m          = distance_new_m;
         }
         distance_new_m = fence->distance_line_to_polygon_inclusion(start_NE_cm, end_NE_cm);
         if (distance_new_m < distance_m) {
             _populate_fence_obstacle(obstacle, ObstacleType::FENCE_POLYGON_INCLUSION);
-            fence_obstacle  = obstacle;
-            distance_m      = distance_new_m;
+            obstacle.margin_m   = fence->get_margin_ne_m();
+            fence_obstacle      = obstacle;
+            distance_m          = distance_new_m;
         }
         distance_new_m = fence->distance_line_to_polygon_exclusion(start_NE_cm, end_NE_cm);
         if (distance_new_m < distance_m) {
             _populate_fence_obstacle(obstacle, ObstacleType::FENCE_POLYGON_EXCLUSION);
-            fence_obstacle  = obstacle;
-            distance_m      = distance_new_m;
+            obstacle.margin_m   = fence->get_margin_ne_m();
+            fence_obstacle      = obstacle;
+            distance_m          = distance_new_m;
         }
     }
 #endif
@@ -172,7 +166,7 @@ bool AP_OAScripting::find_aircraft(const Location &vehicle_loc, const float look
                                     ) const
 {
     float distance_new_m = FLT_MAX;
-    OAObstacle obstacle;
+    OAObstacle obstacle {};
 
     distance_m = lookahead_m;
 
@@ -186,7 +180,7 @@ bool AP_OAScripting::find_aircraft(const Location &vehicle_loc, const float look
 
     // "obstacles" are stored in AP_Avoidance - the are typically populated by MAVLink (ADSB, GLOBAL_POSITION, FOLLOW_TARGET)
     // These have priority over all other obstacles, especially if they are ADSB messages representing crewed aircraft
-    OAObstacle obstacle_found;
+    OAObstacle obstacle_found {};
     distance_new_m = _distance_to_aircraft(vehicle_NED_m, distance_m, vertical_lookahead_m, obstacle_found);
     if (distance_new_m < distance_m) {
         obstacle = obstacle_found;
@@ -212,7 +206,7 @@ bool AP_OAScripting::find_aircraft(const Location &vehicle_loc, const float look
 // frame is confined to this function - everything handed back to the caller (Lua) is in metres.
 bool AP_OAScripting::fence_distance(const Location &loc, uint8_t fence_type, float &distance_m) const
 {
-#ifdef AP_FENCE_ENABLED
+#if AP_FENCE_ENABLED
     const AC_Fence *fence = AC_Fence::get_singleton();
     if (fence == nullptr) {
         return false;
@@ -223,6 +217,10 @@ bool AP_OAScripting::fence_distance(const Location &loc, uint8_t fence_type, flo
     }
     const Vector2f point_NE_cm(loc_NEU_m.x * 100.0f, loc_NEU_m.y * 100.0f);
     const AC_PolyFence_loader &poly = fence->polyfence();
+
+    // as in find_threats(): the boundary arrays below can be freed and rebuilt by an
+    // in-flight fence upload, so hold the loader semaphore while walking them
+    WITH_SEMAPHORE(fence->polyfence().get_loaded_fence_semaphore());
 
     // scope the search to the fence category the caller is avoiding, so the returned distance
     // belongs to the same kind of fence the AVOIDING message names (e.g. an "Excl. Circle" label
@@ -298,7 +296,7 @@ bool AP_OAScripting::find_closest_obstacle(const Location &start_loc, const Loca
                                             ) const
 {
     float distance_new_m = FLT_MAX;
-    OAObstacle obstacle;
+    OAObstacle obstacle {};
 
     distance_m = lookahead_m;
 
@@ -317,8 +315,8 @@ bool AP_OAScripting::find_closest_obstacle(const Location &start_loc, const Loca
 
     // "obstacles" are stored in AP_Avoidance - the are typically populated by MAVLink (ADSB, GLOBAL_POSITION, FOLLOW_TARGET)
     // These have priority over all other obstacles, especially if they are ADSB messages representing crewed aircraft
-    OAObstacle obstacle_found;
-    OAObstacle aircraft_found;
+    OAObstacle obstacle_found {};
+    OAObstacle aircraft_found {};
     distance_new_m = _distance_to_avoidance(start_NED_m, end_NED_m, obstacle_found, aircraft_found);
     if (distance_new_m < distance_m) {
         obstacle    = obstacle_found;
@@ -332,7 +330,7 @@ bool AP_OAScripting::find_closest_obstacle(const Location &start_loc, const Loca
         distance_m  = distance_new_m;
     }
 
-#ifdef AP_FENCE_ENABLED
+#if AP_FENCE_ENABLED
     const AC_Fence *fence = AC_Fence::get_singleton();
     if (fence != nullptr) {
         // fences use cm (for now), so do this once now so we can pass to all the fence methods
@@ -467,6 +465,14 @@ void AP_OAScripting::_populate_fence_obstacle(OAObstacle &fence_obstacle, AP_OAS
     fence_obstacle.src_id          = 0;
     fence_obstacle.icao_code       = 0;
     fence_obstacle.emitter_type    = 0;
+    // a fence is a boundary, not a point: it has no location, position or velocity.  Clear
+    // them so a caller re-using this struct cannot leak a previous obstacle's position, and
+    // so Location::initialised() reads false rather than pointing at lat/lng 0,0.
+    fence_obstacle.location        = Location{};
+    fence_obstacle.position_NED_m.zero();
+    fence_obstacle.velocity_NED_ms.zero();
+    fence_obstacle.radius_m        = 0.0f;
+    fence_obstacle.margin_m        = 0.0f;
     switch (obstacle_type)
     {
     case AP_OAScripting::ObstacleType::FENCE_HOME:
