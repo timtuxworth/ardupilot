@@ -146,8 +146,8 @@ Collision volumes, and the `FENCE_*` parameters for the altitude/geo fences.
 | `DAA_MARGIN_FENCE` | 0 | m | Avoidance margin kept clear of the geofence. `0` (default) uses `WP_LOITER_RAD`, so the standoff equals one loiter circle and fences don't thrash; set a non-zero value to override. |
 | `DAA_LKAHD` | 1000 | m | Avoidance lookahead distance. |
 | `DAA_UPDATE_RATE` | 10 | Hz | Rate at which avoidance is processed. |
-| `DAA_MARGIN_GA` | 50 | m | Avoidance margin for fixed-wing/General Aviation aircraft, over and above the Well Clear margin `AVD_WCLR_XY`. |
-| `DAA_MARGIN_GA_Z` | 30 | m | Vertical avoidance margin for fixed-wing/General Aviation aircraft, over and above the Well Clear vertical separation `AVD_WCLR_Z`. An aircraft triggers the loiter-to-altitude only while its altitude difference from the vehicle is below `AVD_WCLR_Z + DAA_MARGIN_GA_Z`. The vertical mirror of `DAA_MARGIN_GA`. |
+| `DAA_MARGIN_CA` | 50 | m | Avoidance margin for crewed aircraft (fixed wing, helicopter, eVTOL), over and above the Well Clear margin `AVD_WCLR_XY`. |
+| `DAA_MARGIN_CA_Z` | 30 | m | Vertical avoidance margin for crewed aircraft, over and above the Well Clear vertical separation `AVD_WCLR_Z`. An aircraft triggers the loiter-to-altitude only while its altitude difference from the vehicle is below `AVD_WCLR_Z + DAA_MARGIN_CA_Z`. The vertical mirror of `DAA_MARGIN_CA`. |
 | `DAA_MARGIN_WTH` | 173 | m | Avoidance radius for weather/clouds/rain. |
 | `DAA_MARGIN_BIRD` | 100 | m | Avoidance margin for migratory birds. |
 | `DAA_MARGIN_PREY` | 200 | m | Avoidance radius for birds of prey. |
@@ -259,7 +259,7 @@ laggier committed path.
 ### Sizing the traffic standoff
 
 The effective standoff held around a drone is `AVD_UAV_XY + DAA_MARGIN_UAV` (and
-around a crewed aircraft, `AVD_WCLR_XY + DAA_MARGIN_GA`). **Size it larger than the
+around a crewed aircraft, `AVD_WCLR_XY + DAA_MARGIN_CA`). **Size it larger than the
 avoidance turn radius `R`**, or the geometry is unwinnable: once the aircraft is
 already inside the standoff it cannot turn out of it, and the bendy ruler can only
 spiral — which shows up in the log as a heading that sweeps through hundreds of
