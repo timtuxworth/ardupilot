@@ -116,9 +116,6 @@ public:
     // This function is for Lua, so each Obstacle field gets returned as multiple parameters
     bool distance_obstacle_test(const Location &start_loc, const Location &end_loc, const float &lookahead_m, float &distance_min_m, Location &location_out) const;
 
-    // Setup for parameters under "AVD" so "AVD_SCR"
-    static const struct AP_Param::GroupInfo var_info[];
-
 private:
 
     static AP_OAScripting *_singleton;
@@ -140,7 +137,6 @@ private:
     Location    _lua_end_loc;
 
     // parameters
-    AP_Float _margin_aircraft;     // what is the margin around aircraft we need to avoid?
 };
 
 struct OAObstacle {
