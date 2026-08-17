@@ -126,6 +126,8 @@ const AP_Param::GroupInfo AP_Avoidance::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("F_ALT_MIN",    12, AP_Avoidance, _fail_altitude_min_m, 0),
 
+// equivalent to AP_AVOIDANCE_SCRIPTING_ENABLED, spelled out because waf decides whether
+// to compile this source per-vehicle by searching the .cpp text for APM_BUILD_TYPE
 #if AP_SCRIPTING_ENABLED && APM_BUILD_TYPE(APM_BUILD_ArduPlane)   // DAA standoff params are Plane-only (consumed only by AP_OAScripting); keep them off Copter/Rover/etc.
     // @Param: WCLR_XY
     // @DisplayName: Well Clear horizontal
@@ -191,6 +193,9 @@ AP_Avoidance::AP_Avoidance(AP_ADSB &adsb) :
 void AP_Avoidance::init(void)
 {
     debug("ADSB initialisation: %d obstacles", _obstacles_max.get());
+    // the scripting-thread readers walk _obstacles[]; publish the allocation under
+    // the same semaphore they take
+    WITH_SEMAPHORE(_rsem);
     if (_obstacles == nullptr) {
         _obstacles = NEW_NOTHROW AP_Avoidance::Obstacle[_obstacles_max];
 
@@ -215,13 +220,24 @@ void AP_Avoidance::init(void)
  */
 void AP_Avoidance::deinit(void)
 {
-    if (_obstacles != nullptr) {
-        delete [] _obstacles;
-        _obstacles = nullptr;
-        _obstacles_allocated = 0;
+    bool was_allocated = false;
+    {
+        // exclude the scripting-thread readers: they walk _obstacles[] up to
+        // _obstacle_count, so the count must reach zero before the array is freed
+        WITH_SEMAPHORE(_rsem);
+        _obstacle_count = 0;
+        if (_obstacles != nullptr) {
+            delete [] _obstacles;
+            _obstacles = nullptr;
+            _obstacles_allocated = 0;
+            was_allocated = true;
+        }
+    }
+    if (was_allocated) {
+        // outside the semaphore: this can change flight mode and must not be
+        // holding a lock the rest of the vehicle may want
         handle_recovery(RecoveryAction::RTL);
     }
-    _obstacle_count = 0;
 }
 
 bool AP_Avoidance::check_startup()
@@ -528,6 +544,10 @@ void AP_Avoidance::check_for_threats()
     // we always check all obstacles to see if they are threats since it
     // is most likely our own position and/or velocity have changed
     // determine the current most-serious-threat
+    // the loop prunes stale entries, so hold off the scripting-thread readers while
+    // _obstacle_count moves.  Scoped to the loop: the mode-changing avoidance handlers
+    // run later, in update(), and must not be called holding this.
+    WITH_SEMAPHORE(_rsem);
     _current_most_serious_threat = -1;
     for (uint8_t i=0; i<_obstacle_count; i++) {
 
@@ -559,7 +579,7 @@ void AP_Avoidance::check_for_threats()
 
 AP_Avoidance::Obstacle *AP_Avoidance::most_serious_threat()
 {
-    if (_current_most_serious_threat < 0) {
+    if (_current_most_serious_threat < 0 || _obstacles == nullptr) {
         // we *really_ should not have been called!
         return nullptr;
     }
@@ -826,8 +846,15 @@ float AP_Avoidance::distance_to_obstacle(const Vector3f &start_NED_m, const Vect
     float distance_new_m = FLT_MAX;
     float aircraft_distance_m = FLT_MAX;
 
+    const uint32_t now_ms = AP_HAL::millis();
     for(uint8_t i = 0; i < _obstacle_count; i++) {
         const Obstacle obstacle         = _obstacles[i];
+        // a contact that stopped transmitting is not a threat at its last known position;
+        // check_for_threats() only prunes a stale entry when it is last in the list, so
+        // filter here rather than trusting the list to be current
+        if (now_ms - obstacle.timestamp_ms > MAX_OBSTACLE_AGE_MS) {
+            continue;
+        }
         // deliberately ignore ground vehicles: an airborne vehicle does not avoid them
         if (is_ground_vehicle(obstacle.emitter_type)) {
             continue;
@@ -894,8 +921,13 @@ float AP_Avoidance::distance_to_aircraft(const Vector3f &vehicle_NED_m, const fl
 
     float distance_new_msq  = lookahead_m * lookahead_m;
 
+    const uint32_t now_ms = AP_HAL::millis();
     for(uint8_t i = 0; i < _obstacle_count; i++) {
         const Obstacle obstacle         = _obstacles[i];
+        // skip contacts that have gone quiet - see distance_to_obstacle()
+        if (now_ms - obstacle.timestamp_ms > MAX_OBSTACLE_AGE_MS) {
+            continue;
+        }
         const Location obstacle_loc     = _obstacles[i]._location;
         Vector3f obstacle_NED_m;
 
