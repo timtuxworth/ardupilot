@@ -28,9 +28,9 @@ Alert - displays GCS text messages which describe threatening vehicles or obstac
             also sends GCS_THREAT messages which can be displayed by a suitably enabled
             GCS such as Mission Planner or MavProxy
 Avoid - implements bendy ruler based heuristic avoidance for most obstacles
-            for GA (General Aviation) or Crude Aircraft also implements more
+            for crewed aircraft it also implements more
             flexible avoidance manoeuvre such as a Standard Right Turn to Altitude.
-            The intention is to come up with a standard library of GA avoidance
+            The intention is to come up with a standard library of crewed-aircraft avoidance
             manoeuvres, will also allowing users to implement there own due to this
             being implemented as Lua.
 --]]
@@ -83,7 +83,7 @@ MAV_COLLISION_ACTION = {
 OBSTACLE_TYPE = {
     GENERAL                     = 0,    -- generic obstacle, we don't really know what it is
     MAV_SYSID                   = 1,    -- another MAVLINK drone with a MAV_SYSID
-    AIRCRAFT                    = 2,    -- crewed aircraft, usually with an ICAO ADSB identifier
+    CREWED_AIRCRAFT             = 2,    -- crewed aircraft, usually with an ICAO ADSB identifier
     WEATHER                     = 3,
     BIRD_MIGRATORY              = 4,    -- typically one or more Canada Geese
     BIRD_OF_PREY                = 5,    -- a bird that might attack the vehicle
@@ -184,12 +184,12 @@ DAA_LKAHD  = bind_add_param('LKAHD', 3, 1000)
 DAA_UPDATE_RATE  = bind_add_param('UPDATE_RATE', 4, 10.0)
 
 --[[
-  // @Param: DAA_MARGIN_GA
-  // @DisplayName: Margin for General Aviation
-  // @Description: Avoidance margin for Fixed Wing aircraft/General Aviation (Helicopters? eVTOL?) over and above the Well Clear margin AVD_WCLR_XY
+  // @Param: DAA_MARGIN_CA
+  // @DisplayName: Margin for crewed aircraft
+  // @Description: Avoidance margin for crewed aircraft (fixed wing, helicopter, eVTOL) over and above the Well Clear margin AVD_WCLR_XY
   // @Units: m
 --]]
-DAA_MARGIN_GA  = bind_add_param('MARGIN_GA', 5, 50)
+DAA_MARGIN_CA  = bind_add_param('MARGIN_CA', 5, 50)
 
 --[[
   // @Param: DAA_MARGIN_WTH
@@ -262,7 +262,7 @@ DAA_BR_ANGLE = bind_add_param('BR_ANGLE', 13, 45)
 --[[
     // @Param: DAA_AVD_ALT
     // @DisplayName: The altitude to loiter to when avoiding a crewed aircraft
-    // @Description:  DAA will loiter and descent to this altitude if a crewed aircraft is detected within DAA_MARGIN_GA of the vehicle. Ignored if zero (0).
+    // @Description:  DAA will loiter and descent to this altitude if a crewed aircraft is detected within DAA_MARGIN_CA of the vehicle. Ignored if zero (0).
     // @Range: 20 5000
     // @Increment: 5
     // @User: Standard
@@ -459,14 +459,14 @@ DAA_TRAP_ESC_ACT = bind_add_param('TRAP_ESC_ACT', 31, 2)
 DAA_STALE_S = bind_add_param('STALE_S', 32, 3)
 
 --[[
-    // @Param: DAA_MARGIN_GA_Z
-    // @DisplayName: Vertical margin for General Aviation
-    // @Description: Vertical avoidance margin for Fixed Wing aircraft/General Aviation, over and above the Well Clear vertical separation AVD_WCLR_Z. An aircraft is detected (and the loiter-to-altitude triggered) only while the altitude difference between it and the vehicle is less than AVD_WCLR_Z + this margin. This is the vertical mirror of the horizontal DAA_MARGIN_GA.
+    // @Param: DAA_MARGIN_CA_Z
+    // @DisplayName: Vertical margin for crewed aircraft
+    // @Description: Vertical avoidance margin for crewed aircraft, over and above the Well Clear vertical separation AVD_WCLR_Z. An aircraft is detected (and the loiter-to-altitude triggered) only while the altitude difference between it and the vehicle is less than AVD_WCLR_Z + this margin. This is the vertical mirror of the horizontal DAA_MARGIN_CA.
     // @Units: m
     // @Range: 0 200
     // @User: Standard
 --]]
-DAA_MARGIN_GA_Z = bind_add_param('MARGIN_GA_Z', 33, 30)
+DAA_MARGIN_CA_Z = bind_add_param('MARGIN_CA_Z', 33, 30)
 
 --[[
     // @Param: DAA_LTR_COOL_S
@@ -497,8 +497,8 @@ local margin_alt_m          = DAA_MARGIN_ALT:get()
 local alt_hyst_m            = DAA_ALT_HYST_M:get()
 local alt_cool_ms           = DAA_ALT_COOL_S:get() * 1000
 local loiter_cool_ms        = DAA_LTR_COOL_S:get() * 1000
-local margin_aircraft_m     = DAA_MARGIN_GA:get()
-local margin_vertical_m     = DAA_MARGIN_GA_Z:get()
+local margin_crewed_m     = DAA_MARGIN_CA:get()
+local margin_vertical_m     = DAA_MARGIN_CA_Z:get()
 local margin_bird_m         = DAA_MARGIN_BIRD:get()
 local margin_prey_m         = DAA_MARGIN_PREY:get()
 local margin_uav_m          = DAA_MARGIN_UAV:get()
@@ -510,8 +510,8 @@ local refresh_period_ms     = 1000.0 / math.max(DAA_UPDATE_RATE:get(), 1.0)
 local bendy_ratio           = DAA_BR_RATIO:get()
 local bendy_angle           = DAA_BR_ANGLE:get()
 local wp_loiter_rad_m       = WP_LOITER_RAD:get()
-local ga_avoid_alt_m        = DAA_AVD_ALT:get()
-local ga_avoid_alt_frame    = DAA_AVD_ALT_TP:get()
+local crewed_avoid_alt_m        = DAA_AVD_ALT:get()
+local crewed_avoid_alt_frame    = DAA_AVD_ALT_TP:get()
 local daa_alert             = DAA_AVD_ALERT:get()
 local daa_action            = DAA_AVD_ACTION:get()
 local wind_min_ms           = DAA_WIND_MIN:get()
@@ -663,8 +663,8 @@ local function get_vehicle_state()
         alt_hyst_m            = DAA_ALT_HYST_M:get()
         alt_cool_ms           = DAA_ALT_COOL_S:get() * 1000
         loiter_cool_ms        = DAA_LTR_COOL_S:get() * 1000
-        margin_aircraft_m     = DAA_MARGIN_GA:get()
-        margin_vertical_m     = DAA_MARGIN_GA_Z:get()
+        margin_crewed_m     = DAA_MARGIN_CA:get()
+        margin_vertical_m     = DAA_MARGIN_CA_Z:get()
         margin_bird_m         = DAA_MARGIN_BIRD:get()
         margin_prey_m         = DAA_MARGIN_PREY:get()
         margin_uav_m          = DAA_MARGIN_UAV:get()
@@ -675,8 +675,8 @@ local function get_vehicle_state()
         bendy_ratio           = DAA_BR_RATIO:get()
         bendy_angle           = DAA_BR_ANGLE:get()
         wp_loiter_rad_m       = WP_LOITER_RAD:get()
-        ga_avoid_alt_m        = DAA_AVD_ALT:get()
-        ga_avoid_alt_frame    = DAA_AVD_ALT_TP:get()
+        crewed_avoid_alt_m        = DAA_AVD_ALT:get()
+        crewed_avoid_alt_frame    = DAA_AVD_ALT_TP:get()
         daa_alert             = DAA_AVD_ALERT:get()
         daa_action            = DAA_AVD_ACTION:get()
         wind_min_ms           = DAA_WIND_MIN:get()
@@ -778,7 +778,7 @@ local function pretty_label(script_obstacle)
         return string.format("SYSID:%d", script_obstacle:src_id())
 
     -- this will have arrived as an ADSB_VEHICLE
-    elseif obstacle_type == OBSTACLE_TYPE.AIRCRAFT or emitter_type == 100 then
+    elseif obstacle_type == OBSTACLE_TYPE.CREWED_AIRCRAFT or emitter_type == 100 then
         return string.format("%06X", script_obstacle:icao_code())
 
     -- fake generated obstacles from mavproxy_genobstacles have these special case "emitters" for SITL/testing
@@ -826,7 +826,7 @@ local function pretty_obstacle_type(type, src_id)
         end
         return "mavdrone"
     end
-    if type == OBSTACLE_TYPE.AIRCRAFT then
+    if type == OBSTACLE_TYPE.CREWED_AIRCRAFT then
         return "aircraft"
     end
     if type == OBSTACLE_TYPE.WEATHER then
@@ -973,10 +973,10 @@ local function find_closest_obstacle(loc1, loc2, lookahead_m, wind_ms)
     local obstacle_margin = 0;
     -- NOTE: the per-type margins below duplicate limits find_threats() already
     -- applies internally; parameterising them there would remove the duplication.
-    if obstacle_type_val == OBSTACLE_TYPE.AIRCRAFT then
-        obstacle_margin = well_clear_xy + margin_aircraft_m
+    if obstacle_type_val == OBSTACLE_TYPE.CREWED_AIRCRAFT then
+        obstacle_margin = well_clear_xy + margin_crewed_m
     elseif obstacle_type_val == OBSTACLE_TYPE.MAV_SYSID then
-        -- drone/UAV (ADSB emitter 14): mirrors the GA line but with the UAV horizontal
+        -- drone/UAV (ADSB emitter 14): mirrors the crewed-aircraft line but with the UAV horizontal
         -- reference (AVD_UAV_XY) instead of the aircraft "well clear" (AVD_WCLR_XY), and
         -- no aircraft loiter-to-alt; bendy ruler handles it via obstacle_avoiding
         obstacle_margin = uav_clear_xy + margin_uav_m
@@ -1924,13 +1924,13 @@ local DAA = {
             return
         end
 
-        -- search out to the well clear distance (plus the GA margin), matching the GA
+        -- search out to the well clear distance (plus the crewed-aircraft margin), matching the
         -- treatment in the bendy ruler path, so aircraft are detected and logged at a
-        -- useful range rather than only once they are within DAA_MARGIN_GA of us
+        -- useful range rather than only once they are within DAA_MARGIN_CA of us
         -- pass the full gate distance for each axis (computed here, applied in C++): the
-        -- horizontal gate is well_clear_xy + margin_aircraft_m, the vertical gate is
+        -- horizontal gate is well_clear_xy + margin_crewed_m, the vertical gate is
         -- well_clear_z + margin_vertical_m
-        local distance_m, aircraft_obstacle = OAScripting:find_aircraft(current_loc, well_clear_xy + margin_aircraft_m, well_clear_z + margin_vertical_m)
+        local distance_m, aircraft_obstacle = OAScripting:find_aircraft(current_loc, well_clear_xy + margin_crewed_m, well_clear_z + margin_vertical_m)
 
         if distance_m == nil or aircraft_obstacle == nil then
             aircraft_avoiding = nil
@@ -2315,7 +2315,7 @@ local DAA = {
             end
             -- reset the target back to the original target
             new_target_loc = nil
-        elseif obstacle.type == OBSTACLE_TYPE.AIRCRAFT and false then
+        elseif obstacle.type == OBSTACLE_TYPE.CREWED_AIRCRAFT and false then
             -- depending on the obstacle we might do different things. Specifically if the obstacle is a crewed aircraft
             -- in Canada we want to do a "Right 2" circuit descending to XXX altitude
             -- which for now we are doing by simply doing a loiter to alt in guided mode
@@ -2325,14 +2325,14 @@ local DAA = {
                 return
             end
 
-            loiteralt.start(ga_avoid_alt_m, ga_avoid_alt_frame, true, airspeed_ms)
+            loiteralt.start(crewed_avoid_alt_m, crewed_avoid_alt_frame, true, airspeed_ms)
             current_state = STATE.loitering
 
             gcs:send_named_string("DAA-AVOID", "loiter")
             if aircraft_avoiding ~= nil then
                 gcs:send_named_string("DAA-ARCRFT", aircraft_avoiding.label)
             end
-            gcs:send_named_float("DAA-LOITER", ga_avoid_alt_m)
+            gcs:send_named_float("DAA-LOITER", crewed_avoid_alt_m)
 
             return
         end
@@ -2372,13 +2372,13 @@ local DAA = {
             return
         end
         -- Release the loiter only when the aircraft is no longer detected at all. The
-        -- "gone" distance must match the DETECTION distance (well_clear_xy + margin_aircraft_m),
-        -- NOT the bare margin_aircraft_m: a plane sitting steadily inside the detection volume
+        -- "gone" distance must match the DETECTION distance (well_clear_xy + margin_crewed_m),
+        -- NOT the bare margin_crewed_m: a plane sitting steadily inside the detection volume
         -- (e.g. 200 m out, well within ~660 m but far beyond 50 m) would otherwise satisfy
         -- both "still detected" (start) and "far enough to stop" (stop) every cycle and flip
         -- GUIDED<->AUTO. Hysteresis is provided by the 10 s aircraft_seen() dwell in
         -- loiteralt.stop(false), so a plane at the boundary cannot thrash the mode.
-        if aircraft_avoiding == nil or (current_loc:get_distance(aircraft_avoiding.location) > (well_clear_xy + margin_aircraft_m)) then
+        if aircraft_avoiding == nil or (current_loc:get_distance(aircraft_avoiding.location) > (well_clear_xy + margin_crewed_m)) then
             if loiteralt.stop(false) then
                 current_state = STATE.monitoring
                 return
@@ -2387,7 +2387,7 @@ local DAA = {
         if aircraft_avoiding ~= nil then
             loiteralt.aircraft_seen()
             if (now_ms - now_loitering_ms) > 5000 then
-                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITERING to %.0f m for AIRCRAFT: %s", ga_avoid_alt_m, aircraft_avoiding.label))
+                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITERING to %.0f m for AIRCRAFT: %s", crewed_avoid_alt_m, aircraft_avoiding.label))
                 now_loitering_ms = now_ms
             end
         end
@@ -2416,11 +2416,11 @@ local DAA = {
             -- (deliberately empty)
         elseif aircraft_avoiding ~= nil then
             gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITER AIRCRAFT: %s", aircraft_avoiding.label))
-            loiteralt.start(ga_avoid_alt_m, ga_avoid_alt_frame, true, airspeed_ms)
+            loiteralt.start(crewed_avoid_alt_m, crewed_avoid_alt_frame, true, airspeed_ms)
             current_state = STATE.loitering
 
             gcs:send_named_string("DAA-AVOID", "LOITER")
-            gcs:send_named_float("DAA-LOITER", ga_avoid_alt_m)
+            gcs:send_named_float("DAA-LOITER", crewed_avoid_alt_m)
             gcs:send_named_string("DAA-ARCRFT", aircraft_avoiding.label)
             gcs:send_named_float("DAA-DIST", aircraft_avoiding.distance_m)
 
@@ -2452,11 +2452,11 @@ local DAA = {
             -- detection band that will miss beyond well-clear AND is not closing is skipped, and it
             -- then falls through to normal monitoring. A missing/uncertain velocity => conflict.
             gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITER AIRCRAFT: %s", aircraft_avoiding.label))
-            loiteralt.start(ga_avoid_alt_m, ga_avoid_alt_frame, true, airspeed_ms)
+            loiteralt.start(crewed_avoid_alt_m, crewed_avoid_alt_frame, true, airspeed_ms)
             current_state = STATE.loitering
 
             gcs:send_named_string("DAA-AVOID", "LOITER")
-            gcs:send_named_float("DAA-LOITER", ga_avoid_alt_m)
+            gcs:send_named_float("DAA-LOITER", crewed_avoid_alt_m)
             gcs:send_named_string("DAA-ARCRFT", aircraft_avoiding.label)
             gcs:send_named_float("DAA-DIST", aircraft_avoiding.distance_m)
 
