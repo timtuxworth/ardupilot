@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-051"
+SCRIPT_VERSION      = "4.8.0-052"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -539,9 +539,6 @@ local alt_cool_ms           = DAA_ALT_COOL_S:get() * 1000
 local loiter_cool_ms        = DAA_LTR_COOL_S:get() * 1000
 local margin_aircraft_m       = DAA_MARGIN_GA:get()
 local margin_vertical_m       = DAA_MARGIN_GA_Z:get()
--- margin_bird_m/prey/weather are parked for planned obstacle types (see the
--- commented-out block in find_closest_obstacle); read but not yet consumed.
--- luacheck: ignore margin_bird_m margin_prey_m margin_weather_m
 local margin_bird_m           = DAA_MARGIN_BIRD:get()
 local margin_prey_m           = DAA_MARGIN_PREY:get()
 local margin_uav_m            = DAA_MARGIN_UAV:get()
@@ -575,7 +572,6 @@ local trap_esc_act          = DAA_TRAP_ESC_ACT:get()
 local stale_s               = DAA_STALE_S:get()
 
 GRAVITY_MSS = 9.80665
-LOCATION_SCALING_FACTOR_INV = 89.83204953368922
 
 local bearing_inc_deg = DAA_HEADING_INC:get() or DEFAULT_HEADING_INC_DEG
 if bearing_inc_deg <= 0 then
@@ -699,7 +695,6 @@ local function get_vehicle_state()
 
     -- refresh parameters every 5 seconds, its not that urgent we know about changs
     if (now_ms - now_params_ms) > 5000 then
-        --warn_act = WARN_ACTION:get()
         roll_limit_deg      = ROLL_LIMIT_DEG:get()
         lookahead_param_m     = DAA_LKAHD:get()
         margin_fence_m        = DAA_MARGIN_FENCE:get()
@@ -768,73 +763,6 @@ local function wrap_180(angle)
     return res
 end
 
-local function length_squared(w)
-    return (w:x() * w:x()) + (w:y() * w:y())
-end
-
-local function dot_product_2vector(p,w)
-    return (w:x() * p:x()) + (w:y() * p:y())
-end
-
--- luacheck: ignore closest_point
-local function closest_point(p, w)
-    local l2 = length_squared(w)
-    if l2 < 1e-6 then
-        return w  -- case v == w
-    end
-    local t = dot_product_2vector(p,w) / l2
-    if t <= 0 then
-        local Vector2=Vector2f()
-        Vector2:x(0)
-        Vector2:y(0)
-        return Vector2
-    elseif t >= 1 then
-        return w
-    else
-        w:x(w:x()*t)
-        w:y(w:y()*t)
-        return w
-    end
-end
-
-local function longitude_scale(lat)
-    local DEG_TO_RAD = math.pi / 180
-    local scale = math.cos(lat * (1.0e-7 * DEG_TO_RAD))
-    return math.max(scale, 0.01)
-end
-
-local function limit_latitude(lat)
-    if lat > 900000000 then
-        lat = 1800000000 - lat
-    elseif lat < -900000000 then
-        lat = -(1800000000 + lat)
-    end
-    return lat
-end
-
-local function wrap_longitude(lon)
-    if lon > 1800000000 then
-        lon = lon - 3600000000
-    elseif lon < -1800000000 then
-        lon = lon + 3600000000
-    end
-    return lon
-end
-
- -- Extrapolate latitude/longitude given bearing and distance
--- luacheck: ignore offset_bearing
-local function offset_bearing(lat, lng, bearing_deg, distance)
-    --local radians = math.rad
-    local ofs_north = math.cos(math.rad(bearing_deg)) * distance
-    local ofs_east  = math.sin(math.rad(bearing_deg)) * distance
-    local dlat = ofs_north * LOCATION_SCALING_FACTOR_INV
-    local dlng = (ofs_east * LOCATION_SCALING_FACTOR_INV) / longitude_scale(lat + dlat / 2.0)
-    lat = lat + dlat
-    lat = limit_latitude(lat)
-    lng = wrap_longitude(dlng + lng)
-    return lat, lng
-end
-
 --[[
     return true if two locations are identical
 --]]
@@ -868,27 +796,10 @@ end
 local function location_project(loc1, bearing_deg, distance, alt_target_loc)
     -- Create a copy of the location projected distance meters in bearing_deg direction
     -- the projection should be in the frame project_in_frame
-    --local loc2 = Location()
-    --loc2=loc1
-    --loc2:offset_bearing(bearing_deg, distance)
-    -- local loc2 = alt_target_loc:copy()
-    -- can now do this with Location
-    --local lat, lon = offset_bearing(loc1:lat(), loc1:lng(), bearing_deg, distance)
-    --loc2:lat(lat)
-    --loc2:lng(lon)
-
     local loc2 = loc1:copy()
     loc2:offset_bearing(bearing_deg, distance)
     copy_alt_from(loc2, alt_target_loc)
 
---    void offset_bearing(ftype bearing_deg, ftype distance);
-
-    -- use the altitude/frame copied from loc1
-    --loc2:alt(loc1:alt())
-    --gcs:send_text(0, string.format("IN: Lat: %.2f, Lon: %.2f", loc1:lat(),loc1:lng()))
-    --gcs:send_text(0, string.format("Dist: %.2f, Bear: %.2f", distance,bearing_deg)) 
-    --gcs:send_text(0, string.format("Out: Lat: %.2f, Lon: %.2f", loc2:lat(),loc2:lng()))  
-    --gcs:send_text(0, string.format("Frame: IN: %d, OUT: %d", loc1:get_alt_frame(),loc2:get_alt_frame()))
     return loc2
 end
 
@@ -940,7 +851,6 @@ local function pretty_label(script_obstacle)
     elseif obstacle_type == OBSTACLE_TYPE.FENCE_ALT_MIN then
         return "Alt Min Fence"
     end
-    -- gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT ..": UNKNOWN: " .. script_obstacle:icao_code() .. " emitter:" .. emitter_type .. " type: " .. obstacle_type)
     return "Unknown"
 end
 
@@ -1101,20 +1011,8 @@ local function find_closest_obstacle(loc1, loc2, lookahead_m, wind_ms)
     local obstacle_type_val = any_obstacle:obstacle_type()
 
     local obstacle_margin = 0;
-    --[[
-    These are currently handled inside find_threats, it would be better if they could be parameterized
-    if obstacle_type_val == OBSTACLE_TYPE.AIRCRAFT then
-        obstacle_margin = margin_aircraft_m
-    elseif obstacle_type_val == OBSTACLE_TYPE.MAV_SYSID then
-        obstacle_margin = margin_uav_m
-    elseif obstacle_type_val == OBSTACLE_TYPE.BIRD_MIGRATORY then
-        obstacle_margin = margin_bird_m
-    elseif obstacle_type_val == OBSTACLE_TYPE.BIRD_OF_PREY then
-        obstacle_margin = margin_prey_m
-    elseif obstacle_type_val == OBSTACLE_TYPE.WEATHER then
-        obstacle_margin = margin_weather_m
-    else
-    --]]
+    -- NOTE: the per-type margins below duplicate limits find_threats() already
+    -- applies internally; parameterising them there would remove the duplication.
     if obstacle_type_val == OBSTACLE_TYPE.AIRCRAFT then
         obstacle_margin = well_clear_xy + margin_aircraft_m
     elseif obstacle_type_val == OBSTACLE_TYPE.MAV_SYSID then
@@ -1141,7 +1039,6 @@ local function find_closest_obstacle(loc1, loc2, lookahead_m, wind_ms)
         end
     end
 
-    -- gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT ..": threat: " .. any_obstacle:label() .. " : " .. distance_m)
     if distance_m > obstacle_margin then
         -- we are further away from the obstacle than we care about
         return FLT_MAX, nil
@@ -1161,13 +1058,6 @@ local function find_closest_obstacle(loc1, loc2, lookahead_m, wind_ms)
     end
 
     obstacle = populate_obstacle(distance_m, any_obstacle)
-
-    --gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT ..": threat: " .. any_obstacle:icao_code() .. " type: " .. any_obstacle:obstacle_type())
-
-    --gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT ..": threat: " .. any_obstacle.: .. " :" .. obstacle.label)
-
-    --gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT ..": threat: " .. any_obstacle.obstacle_type() .. " :" .. obstacle.label)
-
     return distance_m, obstacle
 end
 
@@ -1200,7 +1090,6 @@ local function effective_groundspeed(airspeed, bearing_deg, wind_dir_rad, wind_s
     end
     -- Calculate the final ground speed
     local gs = math.sqrt(gs2)
-    --gcs:send_text(0, string.format("as:%.1f bear:%.1f wind_dir:%.1f ws:%.1f -> gs:%.1f", airspeed, bearing_deg, math.deg(wind_dir_rad), wind_speed, gs)) 
     return gs
 end
 
@@ -1220,11 +1109,8 @@ local loiteralt = {
         local direction
 
         if loiteralt.active then
-            -- gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. ": loiteralt ALREADY ACTIVE: ")
             return nil
         end
-
-        -- gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. ": loiteralt starting: " .. target_alt_m)
 
         if current_loc == nil then
             gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT ..": loiteralt no current_location")
@@ -1233,10 +1119,6 @@ local loiteralt = {
         pre_loiteralt_heading_deg   = math.deg(ahrs:get_yaw_rad())
         target_alt_frame            = new_alt_frame
         target_alt_m                = new_alt_m
-
-        --gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": loiteralt start hdg pre %.0f now %.0f dif %0.1f alt %.0f",
-        --                    pre_loiteralt_heading_deg, current_heading_deg
-        --                    , math.abs(pre_loiteralt_heading_deg - current_heading_deg), target_alt_m) )
 
         -- use the configured loiter radius (a groundspeed-based "standard turn"
         -- radius, (60.0 * speed) / math.pi, was tried previously but not used)
@@ -1249,7 +1131,6 @@ local loiteralt = {
             direction = "left"
             loiteralt_loc:offset_bearing(wrap_360(pre_loiteralt_heading_deg - 90), radius_m)
         end
-        --local new_target_loc, direction = start_loiter(loiteralt.target_alt_agl_m, direction_right, groundspeed_ms)
         gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": LOITER %s to %.0f/%.0f(%.0f) alt radius %.0f m",
                 direction, target_alt_m, target_alt_frame, mavlink_wrappers.alt_frame_to_mavlink(target_alt_frame), radius_m ))
 
@@ -1300,25 +1181,7 @@ local loiteralt = {
             gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": Pilot changed from GUIDED to: %.0f", current_mode ))
             previous_mode = -1
             loiteralt.stop(true)
-            return
         end
-        if not loiteralt.active or current_loc == nil then
-            return
-        end
-
-        -- if we have achieved the target altitude exit immediately and we are pointing to the next WP
-        --local current_agl_m = current_location_agl:alt() * 0.01
-
-        --[[if (math.abs(current_agl_m - loiteralt.target_alt_agl_m)) < 10 and 
-                (math.abs(pre_loiteralt_heading_deg - current_heading_deg) < 45.0) then
-            gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": loiteralt STOP alt curr %.0f trg %.0f max %0.1f",
-                        current_altitude_m, current_amsl_m, altitude_max) )
-            loiteralt.stop()
-        else
-            --airspeed_desired = airspeed_cruise
-            --mavlink.set_vehicle_speed({speed=airspeed_desired})
-        end
-        --]]
     end
 end)()
 
@@ -1389,18 +1252,10 @@ local DAA = {
 
     -- methods to log DAA results DAAD = Detect, DAAA = Alert, DAAV = aVoid
     local function log_detect_result(obstacle_found, distance_found_m, distance_to_target_m, best_bearing_deg, target_loc, obstacle_type)
-        --    log_detect_result(false, distance_found_m, distance_to_target_m, best_bearing_deg, target_loc)
         if target_loc == nil or distance_found_m == nil or distance_to_target_m == nil or best_bearing_deg == nil then
             -- we can't be avoiding if no target, so no loggin required
             return
         end
-        --print(distance_found_m)
-        --print(distance_to_target_m)
-        --print(target_loc:lat())
-        --print(target_loc:lng())
-        --print(target_loc:alt())
-
-        --logger:write('DAAD',                -- D for Detect
         local status, err = pcall(logger.write, logger, "DAAD",
             'Obs,DstF,DstT,HdgB,Tfnd,TLat,TLng,TAlt,TFra,ObjT',
             'BffffLLfBI',                   -- Formats (L for Lat/Lng, f for Alt)
@@ -1428,7 +1283,6 @@ local DAA = {
             return
         end
 
-        --logger:write('DAAG',                    -- G for GA = General Aviation
         local status, err = pcall(logger.write, logger, "DAAG",
             'DstF,TLat,TLng,TAlt,TFra,DstH,DstZ,ICAO',
             'fLLfBffI',                          -- Formats (L for Lat/Lng, f for Alt)
@@ -1457,7 +1311,6 @@ local DAA = {
             return
         end
         local status, err = pcall(logger.write, logger, "DAAV",
-        --logger:write('DAAV',                        -- V for aVoid
             'DstO,TLat,TLng,TAlt,TFra,DstH,DstZ,ObjT,Age',
             'fLLfBffBf',                            -- Formats (L for Lat/Lng, f for Alt)
             'mDUm-mm-s',                            -- Units (D=lat deg, U=lng deg, m=meter, s=second)
@@ -1631,15 +1484,6 @@ local DAA = {
             (not locations_equal(navigation_target_loc, current_target_loc) and
                 not locations_equal(daa_target_loc, current_target_loc)) then
             -- the vehicle navigation code has changed it's target
-            --[[ debug only
-            if navigation_target_loc == nil then
-                --gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. "Set Navigation Target NAV")
-            elseif daa_target_loc == nil then
-                --gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. "Set Navigation Target DAA")
-            elseif not locations_equal(daa_target_loc, current_target_loc) then
-                --gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. "Set Navigation Target diff")
-            end
-            --]]
             navigation_target_loc = current_target_loc:copy()
         end
 
@@ -1850,7 +1694,6 @@ local DAA = {
         local target_loc = loc_test:copy()
         target_loc:offset_bearing(target_bearing, avoid_step2_m)
 
-        -- local obstacle_found = {}
         local bearing_found = target_bearing
         local closest_distance_m  = FLT_MAX
 
@@ -2114,17 +1957,6 @@ local DAA = {
 
     -- crewed aircraft are a special case. We do specific things if there is an aircraft nearby so we need to know the nearest one
     local function detect_aircraft()
-    --[[ local obstacle = {}
-
-        obstacle.distance_m,
-        obstacle.type,
-        obstacle.label,
-        obstacle.sysid,
-        obstacle.location,
-        obstacle.post_NED_m,
-        obstacle.velocity
-    --]]
-
         if current_loc == nil then
             aircraft_avoiding = nil
             last_aircraft_obstacle = nil
@@ -2159,14 +1991,12 @@ local DAA = {
         end
 
         local obstacle = populate_obstacle(distance_m, aircraft_obstacle)
-        --gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" FOUND AIRCRAFT: %s dist: %.0f m alt: %.0f m", obstacle.label, obstacle.distance_m, obstacle.location:alt() * 0.01 ))
 
         aircraft_avoiding = obstacle
         last_aircraft_obstacle = obstacle
         last_aircraft_ts_ms = ts_ms
 
         log_detect_aircraft(aircraft_avoiding)
-        --gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(" DETECTED AIRCRAFT: xy %.0f z %.0f", aircraft_avoiding.distance_xy,aircraft_avoiding.distance_z) )
     end
 
 
@@ -2184,17 +2014,10 @@ local DAA = {
         end
         local target_loc = navigation_target_loc:copy()
 
-        --gcs:send_text(0, "got current lookahead")
-
-        -- local bearing_cd = math.deg(current_loc:get_bearing(target_loc))*100
         local bearing_deg       = math.deg(current_loc:get_bearing(target_loc))
         local best_bearing_deg  = bearing_deg
         local best_distance_m   = -FLT_MAX
 
-        -- get the current ground course
-        -- gcs:send_text(0, string.format("bearing_deg : %.2f",bearing_deg ))
-
-        --local distance_to_target_m = current_loc:get_distance(target_loc)
         local distance_to_target_m = limit_distance(current_loc, target_loc, bearing_deg)
         -- If the full distance is less than 20m, no avoidance is needed
         if distance_to_target_m < 20 then
@@ -2309,13 +2132,10 @@ local DAA = {
                 clamp_alt_to_fence(alt_target_loc)
                 return alt_target_loc
             end
-            --gcs:send_text(MAV_SEVERITY.ERROR, "NO OBSTACLE")
-            --log_detect_result(false, obstacle_distance_m, distance_to_target_m, best_bearing_deg, target_loc, -1)
             return nil -- no avoidance required
         end
 
         if (now_ms - now_debug_ms) > 2000 then
-            --gcs:send_text(MAV_SEVERITY.ERROR, string.format("DETECTED: %s distance: %.0f m", obstacle_avoiding.label, obstacle_avoiding.distance_m))
             now_debug_ms = now_ms
         end
 
@@ -2447,7 +2267,6 @@ local DAA = {
             return
         end
         if (now_ms - now_aircraft_ms) > 5000 then
-            --gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(" ALERT AIRCRAFT: xy %.0f z %.0f", aircraft_avoiding.distance_xy,aircraft_avoiding.distance_z) )
             if aircraft_avoiding.distance_xy < near_miss_xy and aircraft_avoiding.distance_z < near_miss_z then
                 NMAC_triggered(aircraft_avoiding)
             elseif aircraft_avoiding.distance_xy < well_clear_xy and aircraft_avoiding.distance_z < well_clear_z then
@@ -2474,7 +2293,6 @@ local DAA = {
     -- a wrapper around vehicle:update_target_location()
     local function update_target_location(new_target_loc)
         if new_target_loc == nil or update_target_location_save_loc == nil then
-            --gcs:send_text(MAV_SEVERITY.ERROR, "AVOID: UPDATE FAILED nil")
             return false
         end
         -- enforce the altitude fences on every commanded target (clamp-and-continue)
@@ -2484,7 +2302,6 @@ local DAA = {
         if updated_location then
             return true
         end
-        --gcs:send_text(MAV_SEVERITY.ERROR, "AVOID: UPDATE FAILED")
         return false
     end
 
@@ -2493,7 +2310,6 @@ local DAA = {
         if new_target_loc == nil then
             if update_target_location(navigation_target_loc) then
                 daa_target_loc = nil
-                --gcs:send_text(MAV_SEVERITY.WARNING, "AVOID: REVERT target to navigation target")
             end
             return false
         end
@@ -2501,7 +2317,6 @@ local DAA = {
         if not locations_equal(daa_target_loc, new_target_loc) then
             if update_target_location(new_target_loc) then
                 daa_target_loc = new_target_loc:copy()
-                --gcs:send_text(MAV_SEVERITY.WARNING, "AVOID: AVOID set new target")
                 return true
             end
         end
@@ -2605,7 +2420,6 @@ local DAA = {
         -- loiteralt.stop(false), so a plane at the boundary cannot thrash the mode.
         if aircraft_avoiding == nil or (current_loc:get_distance(aircraft_avoiding.location) > (well_clear_xy + margin_aircraft_m)) then
             if loiteralt.stop(false) then
-                -- gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": loiteralt.stop NO aircraft" ))
                 current_state = STATE.monitoring
                 return
             end
@@ -2655,9 +2469,6 @@ local DAA = {
             current_state = STATE.monitoring
         end
         avoid_obstacle(new_target_loc, obstacle_avoiding)
-        --if loiteralt.active then
-        --    current_state = STATE.loitering -- deal with avoiding an obstacle (e.g. a drone) while currently in a loiter (to avoid a plane)
-        --end
     end
 
     -- execute avoidance maneuvers depending on the nature of the obstacle
@@ -2870,7 +2681,6 @@ local function update()
     end
     local switch_state = rc:get_aux_cached(switch_function) or -1
     if (switch_state ~= last_switch_state) then
-	    -- gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " switch:"..switch_state)
         if switch_state == 0 then -- switch Low to disarm - so defaults to on
             DAA.enable()
         elseif switch_state >= 1 then -- switch High to turn off
@@ -2924,110 +2734,3 @@ if arming:is_armed() then
 else
     return Delayed_Startup, 1000 * STARTUP_DELAY
 end
-
-
---[[
-
-  Calculates Modified Tau (tau_mod) for DAA logic.
-  r: Current horizontal range (e.g., in feet)
-  r_dot: Horizontal range rate (e.g., in feet per second). 
-         Note: r_dot must be negative for aircraft that are closing.
-  dmod: Distance Modification threshold (e.g., 4000 or 2000 feet)
-
-function calculate_tau_mod(r, r_dot, dmod)
-    -- If range rate is zero or positive, aircraft are not closing.
-    -- Modified Tau is mathematically undefined or infinite (safe).
-    if r_dot >= 0 then
-        return math.huge
-    end
-
-    -- If range is already within the DMOD buffer, tau_mod is 0.
-    if r <= dmod then
-        return 0
-    end
-
-    -- RTCA DO-365C Modified Tau Formula:
-    -- tau_mod = -(r^2 - dmod^2) / (r * r_dot)
-    local tau_mod = -(math.pow(r, 2) - math.pow(dmod, 2)) / (r * r_dot)
-    
-    return tau_mod
-end
-
--- Example Usage (En Route Scenario):
-local current_range = 15000 -- 15,000 feet away
-local closure_rate = -150   -- Closing at 150 feet per second
-local dmod_enroute = 4000   -- 4,000 feet threshold
-
-local result = calculate_tau_mod(current_range, closure_rate, dmod_enroute)
-
-print(string.format("Modified Tau: %.2f seconds", result))
-
-
--- DO-365C DAA Alerting Script for ArduPilot
--- Thresholds for "Warning" alert (25s) and "Corrective" alert (55s)
-local TAU_WARNING    = 25
-local TAU_CORRECTIVE = 55
-local DMOD_FEET      = 4000 -- En-Route DMOD
-local H_THRESHOLD    = 450  -- Vertical threshold in feet
-
-local FEET_TO_METERS = 0.3048
-local METERS_TO_FEET = 3.28084
-
-function update()
-    -- Get UAS altitude (meters to feet)
-    local my_pos = ahrs:get_location()
-    if not my_pos then return update, 1000 end
-    local my_alt_ft = my_pos:alt() * 0.01 * METERS_TO_FEET 
-
-    -- Iterate through all ADSB intruders
-    local num_vehicles = adsb:get_num_vehicles()
-    for i = 0, num_vehicles - 1 do
-        local vehicle = adsb:get_vehicle_info(i)
-        
-        if vehicle then
-            -- 1. Get Geometry
-            local r_meters = vehicle:get_distance() -- Horizontal distance
-            local r_ft = r_meters * METERS_TO_FEET
-            local r_dot = vehicle:get_horiz_velocity() -- Relative horizontal speed
-            
-            -- In ArduPilot, horiz_velocity is often positive for closure
-            -- but for Tau formula we need it negative for closure.
-            -- We assume the library returns relative closure speed.
-            local r_dot_ft = r_dot * METERS_TO_FEET
-            
-            -- 2. Vertical Separation Check
-            local int_alt_ft = vehicle:get_altitude() * METERS_TO_FEET
-            local dh = math.abs(my_alt_ft - int_alt_ft)
-
-            -- 3. Calculate Modified Tau
-            local tau_mod = 1000 -- Safe default
-            
-            if r_ft <= DMOD_FEET then
-                tau_mod = 0 -- Inside the 'hockey puck'
-            elseif r_dot > 0 then
-                -- Formula: tau_mod = -(r^2 - dmod^2) / (r * r_dot)
-                -- We use r_dot as positive closure rate here to avoid double negative
-                tau_mod = (math.pow(r_ft, 2) - math.pow(DMOD_FEET, 2)) / (r_ft * r_dot_ft)
-            else
-                tau_mod = 1000 -- Moving away
-            end
-
-            -- 4. Decision Logic (Vertical AND Horizontal/Temporal threat)
-            if dh < H_THRESHOLD then
-                if tau_mod <= TAU_WARNING then
-                    gcs:send_text(0, string.format("DAA WARNING: Int %s at %.0fs", vehicle:callsign(), tau_mod))
-                    -- Optional: Trigger automated avoidance here
-                elseif tau_mod <= TAU_CORRECTIVE then
-                    gcs:send_text(6, string.format("DAA Corrective: Int %s at %.0fs", vehicle:callsign(), tau_mod))
-                end
-            end
-        end
-    end
-
-    return update, 500 -- Run at 2Hz
-end
-
-gcs:send_text(6, "DAA DO-365C Script Loaded")
-return update, 1000
-
---]]
