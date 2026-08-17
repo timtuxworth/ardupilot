@@ -52,8 +52,6 @@ AP_OAScripting::AP_OAScripting()
         AP_HAL::panic("Can only be one AP_OAScripting");
     }
     _singleton = this;
-
-    //AP_Param::setup_object_defaults(this, var_info);
 }
 
 // singleton instance
