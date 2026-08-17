@@ -1322,13 +1322,15 @@ bool AC_Fence::sys_status_failed() const { return false; }
 
 float AC_Fence::get_margin_ne_m() const { return 0.0f; }
 
-// methods used by scripted avoidance to detect distances from various fences
-// each method returns true if it finds a fence and false if no related fence is found
-float AC_Fence::distance_line_to_home_inclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const { return 0.0f; }
-float AC_Fence::distance_line_to_circle_inclusion(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm) const { return 0.0f; }
-float AC_Fence::distance_line_to_circle_exclusion(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm) const { return 0.0f; }
-float AC_Fence::distance_line_to_polygon_inclusion(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm) const { return 0.0f; }
-float AC_Fence::distance_line_to_polygon_exclusion(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm) const { return 0.0f; }
+// methods used by scripted avoidance to detect distances from various fences.
+// Each returns the distance in metres to the nearest fence of that kind, or FLT_MAX when
+// there is none.  FLT_MAX, not 0: callers keep the smallest value they see, so returning
+// zero here would read as "a fence right on top of us" on a fence-less build.
+float AC_Fence::distance_line_to_home_inclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const { return FLT_MAX; }
+float AC_Fence::distance_line_to_circle_inclusion(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm) const { return FLT_MAX; }
+float AC_Fence::distance_line_to_circle_exclusion(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm) const { return FLT_MAX; }
+float AC_Fence::distance_line_to_polygon_inclusion(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm) const { return FLT_MAX; }
+float AC_Fence::distance_line_to_polygon_exclusion(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm) const { return FLT_MAX; }
 
 AC_PolyFence_loader &AC_Fence::polyfence()
 {
