@@ -874,7 +874,8 @@ float AP_Avoidance::distance_to_obstacle(const Vector3f &start_NED_m, const Vect
             if (is_adsb_aircraft(emitter_type)
                     && distance_m < aircraft_distance_m
                     && height_difference_m < get_obstacle_height_m(obstacle.emitter_type)) {
-                closest_aircraft = obstacle;
+                aircraft_distance_m = distance_m;
+                closest_aircraft    = obstacle;
             }
         }
     }
