@@ -112,20 +112,9 @@ public:
     // non-fence value to search all polygon/circle fences.  Returns true and sets distance_m if a
     // matching polygon/circle fence is found, false otherwise.
     bool fence_distance(const Location &loc, uint8_t fence_type, float &distance_m) const;
-    // This function finds the closest crewed aircraft by checking the ADS-B database
-    /*bool find_closest_aircraft(const Location &vehicle_loc, float lookahead_m,
-                                            float &distance_m, 
-                                            uint16_t &type, 
-                                            char *&label, 
-                                            uint32_t &sysid,
-                                            Location &location, 
-                                            Vector3f &pos_NED_m,
-                                            Vector3f &velocity_NED_ms
-                                            ) const;*/
 
     // This function is for Lua, so each Obstacle field gets returned as multiple parameters
     bool distance_obstacle_test(const Location &start_loc, const Location &end_loc, const float &lookahead_m, float &distance_min_m, Location &location_out) const;
-    //bool distance_obstacle_test2(const float &lookahead_m, float &distance_min_m) const;
 
     // Setup for parameters under "AVD" so "AVD_SCR"
     static const struct AP_Param::GroupInfo var_info[];
