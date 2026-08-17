@@ -8403,15 +8403,15 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         self.disarm_vehicle(force=True)
 
     def PlaneDAAAircraftLoiterNoFlip(self):
-        '''planedaa must hold GUIDED steadily while a GA aircraft contact stays
+        '''planedaa must hold GUIDED steadily while a crewed aircraft contact stays
         inside the well-clear volume - it must NOT oscillate AUTO<->GUIDED (the
         log_102 loiter-latch limit cycle, caused by the stop distance being the
-        bare DAA_MARGIN_GA instead of the full detection distance).  Also exercises
-        the DAA_MARGIN_GA_Z vertical margin: a contact above the bare AVD_WCLR_Z but
-        within AVD_WCLR_Z + DAA_MARGIN_GA_Z engages, while one above the full
-        vertical gate does not.  A steady GA aircraft (emitter LIGHT, so it takes the
+        bare DAA_MARGIN_CA instead of the full detection distance).  Also exercises
+        the DAA_MARGIN_CA_Z vertical margin: a contact above the bare AVD_WCLR_Z but
+        within AVD_WCLR_Z + DAA_MARGIN_CA_Z engages, while one above the full
+        vertical gate does not.  A steady crewed aircraft (emitter LIGHT, so it takes the
         loiter-to-altitude path, not the drone bendy-ruler) is injected at ~120 m -
-        beyond the 50 m DAA_MARGIN_GA (so the old code would flip) but well inside the
+        beyond the 50 m DAA_MARGIN_CA (so the old code would flip) but well inside the
         250 m detection distance.  The ADSB_VEHICLE is re-sent continuously because
         AP_Avoidance prunes obstacles after 5 s.'''
         self.install_applet_script_context("planedaa.lua")
@@ -8421,8 +8421,8 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         )
 
         # core AVD_ params exist without the script; pin the well-clear volume so the
-        # geometry is deterministic: horizontal detect = AVD_WCLR_XY + DAA_MARGIN_GA
-        # (200 + 50 = 250 m), vertical gate = AVD_WCLR_Z + DAA_MARGIN_GA_Z (50 + 30 = 80 m)
+        # geometry is deterministic: horizontal detect = AVD_WCLR_XY + DAA_MARGIN_CA
+        # (200 + 50 = 250 m), vertical gate = AVD_WCLR_Z + DAA_MARGIN_CA_Z (50 + 30 = 80 m)
         self.set_parameters({
             "SCR_ENABLE": 1,
             "SCR_VM_I_COUNT": 1000000,
@@ -8439,8 +8439,8 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         # DAA_ scripting params only exist once planedaa.lua has added its table
         # (done at script load, before the STARTUP_DELAY), so set them post-reboot
         self.set_parameters({
-            "DAA_MARGIN_GA": 50,
-            "DAA_MARGIN_GA_Z": 30,
+            "DAA_MARGIN_CA": 50,
+            "DAA_MARGIN_CA_Z": 30,
             "DAA_AVD_ALT": 50,
         })
 
@@ -8476,7 +8476,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         self.wait_text("Plane DAA", check_context=True, timeout=60)
 
         # --- engage: contact at +60 m, above the bare AVD_WCLR_Z (50) but inside
-        #     the AVD_WCLR_Z + DAA_MARGIN_GA_Z gate (80). Engaging proves the
+        #     the AVD_WCLR_Z + DAA_MARGIN_CA_Z gate (80). Engaging proves the
         #     vertical margin is applied (a bare-WCLR_Z gate would reject +60 m).
         tstart = self.get_sim_time()
         while self.get_sim_time() - tstart < 60:
@@ -8486,7 +8486,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             self.wait_heartbeat()
         if self.mav.flightmode != "GUIDED":
             raise NotAchievedException(
-                "did not engage loiter (GUIDED) for a GA aircraft inside the vertical margin band")
+                "did not engage loiter (GUIDED) for a crewed aircraft inside the vertical margin band")
 
         # --- no-flip: hold the contact steady for 25 s; the mode must stay GUIDED
         #     the whole time. Pre-fix, the latch oscillated ~2 Hz, so any sample in
@@ -8509,7 +8509,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         #     expires, so the vehicle must cleanly return to AUTO.
         self.wait_mode("AUTO", timeout=30)
 
-        # --- vertical gate upper bound: a contact above AVD_WCLR_Z + DAA_MARGIN_GA_Z
+        # --- vertical gate upper bound: a contact above AVD_WCLR_Z + DAA_MARGIN_CA_Z
         #     (110 m > 80 m) must NOT engage the loiter, so the margin stays bounded.
         tstart = self.get_sim_time()
         while self.get_sim_time() - tstart < 12:
@@ -8517,14 +8517,14 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             self.wait_heartbeat()
             if self.mav.flightmode == "GUIDED":
                 raise NotAchievedException(
-                    "engaged loiter for a contact above the vertical gate (DAA_MARGIN_GA_Z not bounded)")
+                    "engaged loiter for a contact above the vertical gate (DAA_MARGIN_CA_Z not bounded)")
         self.disarm_vehicle(force=True)
 
     def PlaneDAAAircraftCpaGate(self):
         '''planedaa's conservative CPA gate must SUPPRESS the aircraft loiter for a
-        detected GA aircraft that is in the outer well-clear band and clearly diverging
+        detected crewed aircraft that is in the outer well-clear band and clearly diverging
         (opening range, closest approach beyond well-clear).  The plane is injected inside
-        the detection volume (< AVD_WCLR_XY + DAA_MARGIN_GA) but beyond the AVD_WCLR_XY
+        the detection volume (< AVD_WCLR_XY + DAA_MARGIN_CA) but beyond the AVD_WCLR_XY
         well-clear radius, moving directly away, so it is detected but is not a conflict:
         the vehicle must stay in AUTO and not loiter.  (A close or converging aircraft still
         loiters unconditionally - the conservative floor - proven by
@@ -8547,8 +8547,8 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         self.reboot_sitl()
         self.wait_ready_to_arm()
         self.set_parameters({
-            "DAA_MARGIN_GA": 50,    # detection = AVD_WCLR_XY + this = 250 m
-            "DAA_MARGIN_GA_Z": 50,
+            "DAA_MARGIN_CA": 50,    # detection = AVD_WCLR_XY + this = 250 m
+            "DAA_MARGIN_CA_Z": 50,
             "DAA_AVD_ALT": 50,
             "DAA_CPA_MIN": 2,       # closing-speed (m/s) below which a receding contact is "not closing"
         })
@@ -8598,7 +8598,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         self.disarm_vehicle(force=True)
 
     def PlaneDAAAircraftConverging(self):
-        '''planedaa must AVOID a GA aircraft that is in the outer well-clear band but
+        '''planedaa must AVOID a crewed aircraft that is in the outer well-clear band but
         converging, and commit the loiter-to-altitude descent.  This is the mirror of
         PlaneDAAAircraftCpaGate: the same outer-band geometry (contact at 230 m, beyond
         the 200 m AVD_WCLR_XY well-clear radius but inside the 250 m detection band), but
@@ -8607,7 +8607,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         covers together: (1) a converging contact in the outer band engages the loiter
         (conflict via closing/CPA, not mere proximity); (2) the loiter-to-altitude path
         actually DESCENDS the vehicle toward DAA_AVD_ALT (the vertical gap that resolves
-        a GA overflight - the real CF-DQF/log_102 encounter); (3) once the contact stops
+        a crewed-aircraft overflight - the real CF-DQF/log_102 encounter); (3) once the contact stops
         (prunes after 5 s, dwell expires) the vehicle cleanly resumes AUTO.  The
         ADSB_VEHICLE is re-sent each cycle because AP_Avoidance prunes obstacles after
         5 s.'''
@@ -8628,8 +8628,8 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         self.reboot_sitl()
         self.wait_ready_to_arm()
         self.set_parameters({
-            "DAA_MARGIN_GA": 50,    # detection = AVD_WCLR_XY + this = 250 m
-            "DAA_MARGIN_GA_Z": 50,
+            "DAA_MARGIN_CA": 50,    # detection = AVD_WCLR_XY + this = 250 m
+            "DAA_MARGIN_CA_Z": 50,
             "DAA_AVD_ALT": 40,      # loiter-to-altitude descend target ...
             "DAA_AVD_ALT_TP": 1,    # ... 40 m above home (deterministic; below the 100 m cruise)
             "DAA_CPA_MIN": 2,       # closing-speed (m/s) threshold for "is it closing?"
@@ -8681,14 +8681,14 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             self.wait_heartbeat()
         if self.mav.flightmode != "GUIDED":
             raise NotAchievedException(
-                "did not engage loiter (GUIDED) for a converging GA aircraft in the outer "
+                "did not engage loiter (GUIDED) for a converging crewed aircraft in the outer "
                 "well-clear band - CPA gate should treat a closing contact as a conflict")
         engage_alt_m = self.get_altitude(relative=True)
 
         # --- descend: while the conflict persists the loiter-to-altitude path must
         #     drive the vehicle down toward DAA_AVD_ALT (40 m). Prove it sheds a clear
         #     vertical gap (>= 25 m below the engage altitude) - the manoeuvre that
-        #     actually resolves a GA overflight.
+        #     actually resolves a crewed-aircraft overflight.
         descend_floor_m = engage_alt_m - 25
         tstart = self.get_sim_time()
         descended = False
