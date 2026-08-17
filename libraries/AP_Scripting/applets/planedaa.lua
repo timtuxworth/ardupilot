@@ -15,12 +15,12 @@
 
  Detect, Alert, Avoid for Plane
 
- This code implements a DAA function for Plane. 
+ This code implements a DAA function for Plane.
  Detect - relies on MAVLink input from GLOBAL_POSITION_INT, FOLLOW_TARGET or ADSB_VEHICLE
             to provide the location of other aircraft in the vecility
         - This other input can come from a variety of sources including an onboard
             companion computer using vision based AI to generate ADSB_VEHICLE messages
-            for detected obstacles in teh vicinity. 
+            for detected obstacles in teh vicinity.
         - Also uses ArduPilot GeoFences which can be inclusive or exclusive and can used
             to describe no fly zones such as restricted airspace, or towers, buildings or
             other structures that might not show up in terrain.
@@ -30,9 +30,9 @@ Alert - displays GCS text messages which describe threatening vehicles or obstac
 Avoid - implements bendy ruler based heuristic avoidance for most obstacles
             for GA (General Aviation) or Crude Aircraft also implements more
             flexible avoidance manoeuvre such as a Standard Right Turn to Altitude.
-            The intention is to come up with a standard library of GA avoidance 
-            manoeuvres, will also allowing users to implement there own due to this 
-            being implemented as Lua.            
+            The intention is to come up with a standard library of GA avoidance
+            manoeuvres, will also allowing users to implement there own due to this
+            being implemented as Lua.
 --]]
 
 SCRIPT_NAME         = "Plane DAA"
@@ -41,18 +41,18 @@ SCRIPT_VERSION      = "4.8.0-052"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
-PLANE_MODE          = {CIRCLE = 1, STABILIZE = 2, TRAINING = 3, ACRO = 4, FBWA = 4, FBWB = 6, CRUISE = 7, 
-                        AUTOTUNE = 8, AUTO=10, RTL=11, LOITER=12, TAKEOFF = 13, AVOID_ADSB = 14, GUIDED=15, 
-                        QSTABILIZE = 17,  QHOVER=18, QLOITER=19, QLAND = 20, QRTL=21, QAUTOTUNE = 22, QACRO = 23, 
+PLANE_MODE          = {CIRCLE = 1, STABILIZE = 2, TRAINING = 3, ACRO = 4, FBWA = 4, FBWB = 6, CRUISE = 7,
+                        AUTOTUNE = 8, AUTO=10, RTL=11, LOITER=12, TAKEOFF = 13, AVOID_ADSB = 14, GUIDED=15,
+                        QSTABILIZE = 17,  QHOVER=18, QLOITER=19, QLAND = 20, QRTL=21, QAUTOTUNE = 22, QACRO = 23,
                         THERMAL = 24, LOITER_ALT_QLAND = 25, AUTOLAND = 26}
 
 ALT_FRAME           = {GLOBAL = 0, RELATIVE = 1, ORIGIN = 2, TERRAIN = 3}
 
 MAV_SEVERITY        = {EMERGENCY=0, ALERT=1, CRITICAL=2, ERROR=3, WARNING=4, NOTICE=5, INFO=6, DEBUG=7}
-MAV_CMD_INT         = {DO_SET_MODE = 176, DO_CHANGE_SPEED = 178, DO_REPOSITION = 192, 
+MAV_CMD_INT         = {DO_SET_MODE = 176, DO_CHANGE_SPEED = 178, DO_REPOSITION = 192,
                         GUIDED_CHANGE_SPEED = 43000, GUIDED_CHANGE_ALTITUDE = 43001, GUIDED_CHANGE_HEADING = 43002}
 MAV_SPEED_TYPE      = {AIRSPEED = 0, GROUNDSPEED = 1, CLIMB_SPEED = 2, DESCENT_SPEED = 3}
-MAV_HEADING_TYPE    = {COG = 0, HEADING = 1} -- COG = Course over Ground, i.e. where you want to go, HEADING = which way the vehicle points 
+MAV_HEADING_TYPE    = {COG = 0, HEADING = 1} -- COG = Course over Ground, i.e. where you want to go, HEADING = which way the vehicle points
 
 
 -- MAV_COLLISION_THREAT_LEVEL
@@ -70,13 +70,13 @@ MAV_COLLISION_SRC = {
 }
 
 MAV_COLLISION_ACTION = {
-    NONE                        = 0,    -- Ignore any potential collisions 
-    REPORT                      = 1,    -- Report potential collision 
-    ASCEND_OR_DESCEND           = 2,    -- Ascend or Descend to avoid threat 
-    MOVE_HORIZONTALLY           = 3,    -- Move horizontally to avoid threat 
-    MOVE_PERPENDICULAR          = 4,    -- Aircraft to move perpendicular to the collision's velocity vector 
-    RTL                         = 5,    -- Aircraft to fly directly back to its launch point 
-    HOVER                       = 6,    -- Aircraft to stop in place 
+    NONE                        = 0,    -- Ignore any potential collisions
+    REPORT                      = 1,    -- Report potential collision
+    ASCEND_OR_DESCEND           = 2,    -- Ascend or Descend to avoid threat
+    MOVE_HORIZONTALLY           = 3,    -- Move horizontally to avoid threat
+    MOVE_PERPENDICULAR          = 4,    -- Aircraft to move perpendicular to the collision's velocity vector
+    RTL                         = 5,    -- Aircraft to fly directly back to its launch point
+    HOVER                       = 6,    -- Aircraft to stop in place
     LOITERTURN                  = 7,    -- Aircraft to do a loiter turn left or right to lose altitude
 }
 
@@ -161,7 +161,7 @@ DAA_ACT_FN = bind_add_param("ACT_FN", 1, 308)
 
 --[[
   // @Param: DAA_MARGIN_FENCE
-  // @DisplayName: fence margin 
+  // @DisplayName: fence margin
   // @Description: Avoidance margin (m) kept clear of fences. 0 (default) uses the turn radius WP_LOITER_RAD, so the standoff matches a single loiter circle and fences do not thrash.
   // @Units: m
 --]]
@@ -194,7 +194,7 @@ DAA_MARGIN_GA  = bind_add_param('MARGIN_GA', 5, 50)
 --[[
   // @Param: DAA_MARGIN_WTH
   // @DisplayName: Radius for Weather
-  // @Description: Avoidance radius for Weather/Clouds/Rain 
+  // @Description: Avoidance radius for Weather/Clouds/Rain
   // @Units: m
 --]]
 DAA_MARGIN_WTH  = bind_add_param('MARGIN_WTH', 6, 173)
@@ -202,7 +202,7 @@ DAA_MARGIN_WTH  = bind_add_param('MARGIN_WTH', 6, 173)
 --[[
   // @Param: DAA_MARGIN_BIRD
   // @DisplayName: Margin for Birds
-  // @Description: Avoidance margin for Migratory Birds 
+  // @Description: Avoidance margin for Migratory Birds
   // @Units: m
 --]]
 DAA_MARGIN_BIRD  = bind_add_param('MARGIN_BIRD', 7, 100)
@@ -233,7 +233,7 @@ DAA_MARGIN_AIS  = bind_add_param('MARGIN_AIS', 10, 50)
 
 --[[
   // @Param: DAA_MARGIN_PRX
-  // @DisplayName: Margin for proximity 
+  // @DisplayName: Margin for proximity
   // @Description: Avoidance radius for obstacles detected by proximity sensors. Typically pretty close
   // @Units: m
 --]]
@@ -282,7 +282,7 @@ DAA_AVD_ALT_TP = bind_add_param('AVD_ALT_TP', 15, 3)
 --[[
     // @Param: DAA_AVD_ALERT
     // @DisplayName: Alert for DAA Avoidance
-    // @Description: Alert or not Alert 
+    // @Description: Alert or not Alert
     // @Values: 0: None, 1: Alert
     // @User: Standard
 --]]
@@ -589,7 +589,7 @@ local function get_mode_string(mode)
     if mode == PLANE_MODE.AUTO then
         return "Auto"
     elseif mode == PLANE_MODE.RTL then
-        return "RTL" 
+        return "RTL"
     elseif mode == PLANE_MODE.LOITER then
         return "Loiter"
     elseif mode == PLANE_MODE.GUIDED then
@@ -826,7 +826,7 @@ local function pretty_obstacle_type(type, src_id)
         end
         return "mavdrone"
     end
-    if type == OBSTACLE_TYPE.AIRCRAFT then 
+    if type == OBSTACLE_TYPE.AIRCRAFT then
         return "aircraft"
     end
     if type == OBSTACLE_TYPE.WEATHER then
@@ -1028,7 +1028,7 @@ local function effective_groundspeed(airspeed, bearing_deg, wind_dir_rad, wind_s
     -- Ensure airspeed is at least 1.0
     airspeed = math.max(airspeed, 1.0)
     -- Convert bearing to radians
-    local bearing_rad = math.rad(bearing_deg)    
+    local bearing_rad = math.rad(bearing_deg)
     -- Calculate the angle between wind direction and bearing
     local temp = math.pi - (wind_dir_rad - bearing_rad)
     local dangle = wind_speed * math.sin(temp) / airspeed
@@ -1037,13 +1037,13 @@ local function effective_groundspeed(airspeed, bearing_deg, wind_dir_rad, wind_s
         return 0
     end
     -- Calculate the angle alpha using arcsine
-    local alpha = math.asin(dangle)    
+    local alpha = math.asin(dangle)
     -- Calculate yaw
-    local yaw = bearing_rad - alpha    
+    local yaw = bearing_rad - alpha
     -- Calculate beta, the angle between wind direction and yaw
-    local beta = math.pi - (wind_dir_rad - yaw)    
+    local beta = math.pi - (wind_dir_rad - yaw)
     -- Calculate ground speed squared (gs2)
-    local gs2 = airspeed^2 + wind_speed^2 - 2 * airspeed * wind_speed * math.cos(beta)    
+    local gs2 = airspeed^2 + wind_speed^2 - 2 * airspeed * wind_speed * math.cos(beta)
     -- If gs2 is negative or zero, return 0
     if gs2 <= 0 then
         return 0
@@ -1421,7 +1421,7 @@ local DAA = {
         if OAScripting == nil then
             gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " OAScripting object is nil!")
             active = false
-            return 
+            return
         end
 
         if current_loc == nil or current_target_loc == nil then
@@ -1439,7 +1439,7 @@ local DAA = {
         -- if we got here we have a current location (AHRS active) and a current navigation target
         update_target_location_save_loc = current_target_loc:copy()
 
-        -- if the navigation target has changed to some other target not the DAA target, it must be vehicle navigation 
+        -- if the navigation target has changed to some other target not the DAA target, it must be vehicle navigation
         if navigation_target_loc == nil or
             (not locations_equal(navigation_target_loc, current_target_loc) and
                 not locations_equal(daa_target_loc, current_target_loc)) then
@@ -1463,9 +1463,9 @@ local DAA = {
     This function is called when BendyRuler has found a bearing which is obstacles free at at least lookahead_step1_dist and  then lookahead_step2_dist from the present location
     In many situations, this new bearing can be either left or right of the obstacle, and BendyRuler can have a tough time deciding between the two.
     It has the tendency to move the vehicle back and forth, if the margin obtained is even slightly better in the newer iteration.
-    Therefore, this method attempts to avoid changing direction of the vehicle by more than _bendy_angle degrees, 
+    Therefore, this method attempts to avoid changing direction of the vehicle by more than _bendy_angle degrees,
     unless the new margin is atleast _bendy_ratio times better than the margin with previously calculated bearing.
-    We return true if we have resisted the change and will follow the last calculated bearing. 
+    We return true if we have resisted the change and will follow the last calculated bearing.
     --]]
     local function resist_bearing_change(bearing_orig_deg, avoid_step1_m, bearing_deg, distance_found_m)
         if bearing_orig_deg == nil then
@@ -1759,7 +1759,7 @@ local DAA = {
         return probe_bearing(bearing_test_deg, bearing_deg, full_distance, target_loc, i == 0)
     end
 
-    -- if the plane is currently pointing far away from the target, then assume that we 
+    -- if the plane is currently pointing far away from the target, then assume that we
     -- will be turning sharply, so we don't look too far ahead for obstacles
     local function limit_distance(from_loc, to_loc, bearing_deg)
         local distance_to_target_m = from_loc:get_distance(to_loc)
@@ -2178,7 +2178,7 @@ local DAA = {
     local function NMAC_triggered(nmac_obstacle)
         NMAC_active = true
         NMAC_label  = nmac_obstacle.label
-        gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. string.format(" ALERT AIRCRAFT: %s Near Miss: %.0fm/%.0fm", 
+        gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. string.format(" ALERT AIRCRAFT: %s Near Miss: %.0fm/%.0fm",
                         nmac_obstacle.label, nmac_obstacle.distance_xy, nmac_obstacle.distance_z ))
         gcs:send_named_string("DAA-NMAC", "aircraft")
     end
@@ -2197,7 +2197,7 @@ local DAA = {
     local function LoWC_triggered(lowc_obstacle)
         LoWC_active = true
         LoWC_label  = lowc_obstacle.label
-        gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" ALERT AIRCRAFT: %s Loss of Well Clear", 
+        gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" ALERT AIRCRAFT: %s Loss of Well Clear",
                     lowc_obstacle.label ))
         gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" ALERT AIRCRAFT: LoWC: %.0f/%.0fm",
                     lowc_obstacle.distance_xy, lowc_obstacle.distance_z ))
@@ -2232,7 +2232,7 @@ local DAA = {
             elseif aircraft_avoiding.distance_xy < well_clear_xy and aircraft_avoiding.distance_z < well_clear_z then
                 LoWC_triggered(aircraft_avoiding)
             else
-                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" ALERT AIRCRAFT: %s %.0f m", 
+                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" ALERT AIRCRAFT: %s %.0f m",
                                 aircraft_avoiding.label, aircraft_avoiding.distance_xy ))
                 gcs:send_named_string("DAA-ALERT", "aircraft")
             end
@@ -2688,7 +2688,7 @@ function Delayed_Startup()
     return Protected_Wrapper()
 end
 
--- wait a bit for AP to come up cleanly then start running update loop, unless armed 
+-- wait a bit for AP to come up cleanly then start running update loop, unless armed
 if arming:is_armed() then
     return Delayed_Startup()
 else
