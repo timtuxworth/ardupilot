@@ -8470,11 +8470,11 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         # toward whatever angle RC6's un-centred default value maps to the moment
         # it boots, well before the test gets to explicitly select NEUTRAL mode.
         # Harmless for backends with a fast control loop (they recover from that
-        # transient inside the neutral check's 5s budget), but the C11's
+        # transient inside the neutral check's 5s budget), but SkyDroid's
         # individual-axis GSY/GSP commands are calibrated to a real, fairly slow
-        # ~4deg/s max slew rate (see AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_MAX_DPS) that
-        # can't out-run a multi-tens-of-degrees transient in time, so avoid causing
-        # it in the first place instead
+        # ~4deg/s max slew rate (see AP_MOUNT_SKYDROID_AXIS_MAX_DPS) that can't
+        # out-run a multi-tens-of-degrees transient in time, so avoid causing it in
+        # the first place instead
         self.set_rc(6, pitch_rc_neutral)
         self.set_parameters({
             "MNT1_TYPE": 15,      # SkyDroid
@@ -8494,76 +8494,80 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         # AP_Mount_SkyDroid::send_target_angles does clamp pitch/yaw to the
         # configured MNT1_PITCH/YAW_MIN/MAX before sending, so the 68-deg
         # sysid test (which expects that clamp) is exercised here.
-        # neutral_tol_deg=3.5: confirmed on real hardware that the C11 only responds to
-        # the individual-axis GSY/GSP speed commands (GAM/GSM are silently ignored -
-        # see AP_Mount_SkyDroid::uses_individual_axis_speed_commands()); since there's
-        # no working absolute-angle command, the driver closes an angle P-controller
-        # loop on top of them, so allow a little settling tolerance rather than the
-        # exact GAM-based positioning the other backends use
+        # neutral_tol_deg=3.5: confirmed on real hardware that SkyDroid gimbals only
+        # respond to the individual-axis GSY/GSP speed commands (GAM/GSM are silently
+        # ignored); since there's no working absolute-angle command, the driver closes
+        # an angle P-controller loop on top of them, so allow a little settling
+        # tolerance rather than the exact positioning an absolute-angle backend gives
         self.mount_test_body(pitch_rc_neutral=pitch_rc_neutral, do_rate_tests=False, neutral_tol_deg=3.5)
 
     def MountSkyDroidC13(self):
         '''test SkyDroid C13 gimbal using SIM_SkyDroid simulator
 
-        the C13 shares the same wire protocol as the C11 (same AP_Mount_SkyDroid
-        driver) but has a roll axis (-45..+45 deg) that the C11 doesn't, so this
-        test exercises that in addition to the usual pitch/yaw checks'''
+        SkyDroid have confirmed the gimbal-control commands are IDENTICAL across
+        models - the C13's extra features over the C11 are infrared thermal imaging
+        and laser ranging, neither of which this driver uses.  So this test is
+        deliberately the same body as MountSkyDroid(): it is a regression guard
+        that the driver stays model-independent, and that a differently-named model
+        does not take a different control path.  It also asserts roll stays
+        uncontrollable even when MNT1_ROLL_MIN/MAX is configured, since SkyDroid
+        have confirmed roll is self-stabilized with no control command at all'''
         # pitch_rc_neutral=1818: with RC6 min=1000 max=2000 trim=1500 and
         # default MNT1_PITCH_MIN=-90 / MNT1_PITCH_MAX=20, norm_input=0.636
         # maps to exactly 0 deg pitch.
         pitch_rc_neutral = 1818
         # centre RC6 *before* the parameter changes below reboot the FC - same fix as
-        # MountSkyDroid() needed, and for the same reason: confirmed on real hardware
-        # that the C13 needs its own control mechanism entirely (PTZ pitch jog plus
-        # fine-tune nudges for yaw/roll - see AP_Mount_SkyDroid::uses_finetune_nudge_commands()),
-        # which is no longer the fast, uncapped GAM-based closed loop this test
-        # originally passed with.  Without this, the mount's default RC_TARGETING
-        # boot mode drifts toward RC6's un-centred default before the test can select
-        # NEUTRAL, and the slower bang-bang jog can't out-run that transient in time
+        # MountSkyDroid() needed, and for the same reason: see the comment there
         self.set_rc(6, pitch_rc_neutral)
         self.set_parameters({
             "MNT1_TYPE": 15,      # SkyDroid
             "CAM1_TYPE": 4,       # Mount
             "SERIAL5_PROTOCOL": 8,  # gimbal
             "RC6_OPTION": 213,    # MOUNT1_PITCH
+            # deliberately configure a roll range the gimbal cannot actually use, to
+            # prove the driver still refuses to drive roll - see the roll check below
             "MNT1_ROLL_MIN": -45,
             "MNT1_ROLL_MAX": 45,
         })
         self.customise_SITL_commandline(["--serial5=sim:skydroid_c13:"])
         # version "V1.0.0" from SIM_SkyDroid: major=1 | (minor=0)<<8 | (patch=0)<<16 = 1
         # cap flags: CAPTURE_VIDEO | CAPTURE_IMAGE | HAS_BASIC_ZOOM
-        # model name "C13" confirms the roll-capable variant was actually selected
+        # model name "C13" confirms the differently-named variant was actually selected
         self.mount_check_camera_information(
             "SkyDroid", "C13",
             expected_fw_version=1,
             expected_cap_flags=0x43,
         )
-        # neutral_tol_deg=3.5: confirmed on real hardware that the C13 needs PTZ pitch
-        # jog (3deg deadzone) plus fine-tune nudges for yaw/roll (2deg deadzone,
-        # unvalidated) instead of the original fast GAM-based closed loop this test
-        # was written against - see MountSkyDroid()'s identical comment for the C11
+        # identical expectations to MountSkyDroid() - that is the point of this test
         self.mount_test_body(pitch_rc_neutral=pitch_rc_neutral, do_rate_tests=False, neutral_tol_deg=3.5)
 
-        # exercise the roll axis, which the C11 doesn't have
-        self.progress("Testing mount roll targeting (C13-only axis)")
+        # roll must NOT respond: SkyDroid have confirmed roll is self-stabilized by the
+        # gimbal with no control command on any model, so AP_Mount_SkyDroid reports
+        # has_roll_control() == false and never sends a roll command.  This is the
+        # inverse of a test that used to live here, which drove roll via "GAR" and
+        # expected it to move - that command turned out not to be implemented in the
+        # firmware at all despite being in the protocol document
+        self.progress("Testing mount roll stays uncommanded (roll is not controllable)")
         self.context_push()
         self.set_parameters({
             'RC11_OPTION': 212,    # MOUNT1_ROLL
         })
         self.set_mount_mode(mavutil.mavlink.MAV_MOUNT_MODE_RC_TARGETING)
-        self.set_rc(11, 1100)
+        self.set_rc(11, 1100)   # would demand roll to the MNT1_ROLL_MIN extreme
         tstart = self.get_sim_time()
-        achieved = False
+        max_roll_deg = 0
         while self.get_sim_time_cached() - tstart < 10:
             mount_roll_deg, _, _, _ = self.get_mount_roll_pitch_yaw_deg()
             self.progress("roll=%f" % mount_roll_deg)
-            if abs(mount_roll_deg) > 30:
-                achieved = True
-                break
+            max_roll_deg = max(max_roll_deg, abs(mount_roll_deg))
         self.set_rc(11, 1500)
         self.context_pop()
-        if not achieved:
-            raise NotAchievedException("Mount roll not achieved")
+        # 15deg is well clear of the 45deg the RC input demands, while leaving room for
+        # whatever incidental roll the gimbal's own stabilization shows as the vehicle
+        # moves - we are checking nothing *drives* roll, not that it is pinned at zero
+        if max_roll_deg > 15:
+            raise NotAchievedException(
+                "Mount roll moved %.1fdeg - roll should not be commandable" % max_roll_deg)
 
     def MountSkyDroidNetwork(self):
         '''test SkyDroid gimbal connected via a UDP network port rather than a serial port
