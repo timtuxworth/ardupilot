@@ -122,15 +122,12 @@ struct OAObstacle {
     uint32_t                    timestamp_ms;
     uint32_t                    src_id;         // The AP_Avoid src_id
     uint32_t                    icao_code;      // The ICAO code (if relevant) from ADSB
-    uint32_t                    emitter_type;   // The ADSB_EMITTER of the obstacle (if relevant)
+    uint8_t                     emitter_type;   // The ADSB_EMITTER of the obstacle (if relevant)
     uint8_t                     obstacle_type;
 
     Vector3f                    velocity_NED_ms;
     Location                    location;
     Vector3f                    position_NED_m;
-
-    float                       margin_m;       // only for fences
-    float                       radius_m;       // only for circular fences
 };
 
 #endif // AP_OA_SCRIPTING_ENABLED
