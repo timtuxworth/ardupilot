@@ -1077,7 +1077,18 @@ ssize_t UARTDriver::get_system_outqueue_length() const
 #if defined(__CYGWIN__) || defined(__CYGWIN64__) || defined(CYGWIN_BUILD)
     return 0;
 #elif defined(__APPLE__) && defined(__MACH__)
-    return 0;
+    // TIOCOUTQ/SIOCOUTQ aren't available on macOS; SO_NWRITE is the Darwin
+    // equivalent, giving the same "bytes still unwritten in the socket send
+    // buffer" figure.  Without this the caller (see SITL_State::wait_clock())
+    // always sees zero and its serial0-outqueue-full backpressure check can
+    // never engage, throttling the simulated clock to match a slow reader.
+    int size;
+    socklen_t len = sizeof(size);
+    if (getsockopt(_fd, SOL_SOCKET, SO_NWRITE, &size, &len) == -1) {
+        // ::fprintf(stderr, "getsockopt SO_NWRITE failed: %m\n");
+        return 0;
+    }
+    return size;
 #else
     int size;
     if (ioctl(_fd, TIOCOUTQ, &size) == -1) {
