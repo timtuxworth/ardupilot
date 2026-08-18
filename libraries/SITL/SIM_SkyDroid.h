@@ -14,10 +14,16 @@
  */
 /*
   Simulator for SkyDroid gimbal.  This one class simulates every model in
-  SkyDroid's "TOP protocol" gimbal camera family (they all share the same
-  wire protocol); which model is being simulated is selected by the
-  constructor arguments, and registered under separate device names (see
-  SITL_State_common.cpp) since each has different capabilities
+  SkyDroid's "TOP protocol" gimbal camera family: SkyDroid have confirmed the
+  gimbal-control commands are identical across models, so the ONLY thing the
+  simulated model name changes is the "MOD" response.  Registered under two
+  device names (see SITL_State_common.cpp) purely so a test can check the
+  driver behaves identically regardless of which model answers.
+
+  Roll is deliberately not controllable here, matching the real hardware:
+  SkyDroid have confirmed roll is self-stabilized with no control command on
+  any model, so GAR/GSR are absorbed and ignored like any other unimplemented
+  command.
 
 ./Tools/autotest/sim_vehicle.py --gdb --debug -v ArduCopter -A --serial5=sim:skydroid --speedup=1
 
@@ -25,8 +31,8 @@ param set MNT1_TYPE 15       # skydroid
 param set SERIAL5_PROTOCOL 8 # gimbal
 reboot
 
-To simulate a C13 (which has a roll axis, unlike the C11) use
---serial5=sim:skydroid_c13 instead and set MNT1_ROLL_MIN/MAX to -45/45.
+Use --serial5=sim:skydroid_c13 to have the gimbal report itself as a "C13"
+instead of a "C11".  Its control behaviour is identical.
 
 */
 
@@ -45,10 +51,9 @@ class SkyDroid : public Mount {
 public:
 
     // model_name is returned verbatim in response to the "MOD" command (e.g. "C11",
-    // "C13").  has_roll_axis selects whether GAR/GSR (roll angle/rate) commands are
-    // handled; models without a roll axis (e.g. the C11) ignore them
-    SkyDroid(const char *model_name, bool has_roll_axis) :
-        _model_name(model_name), _has_roll_axis(has_roll_axis) {}
+    // "C13").  It affects nothing else - control behaviour is model-independent
+    SkyDroid(const char *model_name) :
+        _model_name(model_name) {}
 
     void update(const Aircraft &aircraft) override;
 
@@ -58,7 +63,6 @@ private:
     Gimbal gimbal;
 
     const char *_model_name;
-    const bool _has_roll_axis;
 
     // input accumulation buffer; also used as working buffer by handle_packet()
     static constexpr uint8_t PACKETLEN_MAX = 28;
@@ -67,46 +71,12 @@ private:
 
     uint32_t _last_attitude_ms;     // time of last attitude packet sent
 
-    // last commanded angles from GAM/GAR packets (wire centidegrees, same sign as sent
-    // by driver i.e. no sign flip: SkyDroid's own protocol is pitch-up-positive same as
-    // AP_Mount).  _commanded_roll_cd is only meaningful if _has_roll_axis.  Only used
-    // for models other than the C11 - confirmed on real C11 hardware that GAM/GSM are
-    // silently ignored, so the "C11" instance ignores these and uses
-    // _commanded_yaw/pitch_speed_lsb instead
-    int16_t _commanded_pitch_cd;
-    int16_t _commanded_yaw_cd;
-    int16_t _commanded_roll_cd;
-
-    // last GSY/GSP speed values received (signed 8bit wire units).  Only meaningful
-    // for the "C11" instance - confirmed on real hardware that these individual-axis
-    // speed commands are the only ones that actually move that model (GAM/GSM/GAY/GAP
-    // are all silently ignored).  Not yet extended to the C13 (untested on real
-    // hardware whether it needs the same treatment)
+    // last GSY/GSP speed values received (signed 8bit wire units).  These
+    // individual-axis speed commands are the only ones that actually move the real
+    // gimbal (GAM/GSM/GAY/GAP are all confirmed silently ignored on real hardware),
+    // so they're the only ones simulated here
     int8_t _commanded_yaw_speed_lsb;
     int8_t _commanded_pitch_speed_lsb;
-
-    // true if this instance should be driven by the individual-axis GSY/GSP speed
-    // commands rather than GAM/GSM, matching
-    // AP_Mount_SkyDroid::uses_individual_axis_speed_commands()'s own model check
-    bool uses_individual_axis_speed_commands() const { return strcmp(_model_name, "C11") == 0; }
-
-    // last PTZ pitch jog code received (0=stop, 1=up, 2=down).  Only meaningful for
-    // the "C13" instance - confirmed on real hardware that this model still uses the
-    // ordinary PTZ jog for pitch (same as every other model) even though yaw/roll
-    // need the fine-tune nudges below instead
-    uint8_t _ptz_pitch_code;
-
-    // accumulated yaw/roll targets built up from fine-tune nudge codes (0x10-0x13).
-    // Only meaningful for the "C13" instance.  The per-nudge step size here is a
-    // SIMULATED GUESS (AP_MOUNT_SKYDROID_SIM_FINETUNE_STEP_RAD below) - not measured
-    // on real hardware yet, just needs to be a working closed loop for SITL
-    float _finetune_yaw_target_rad;
-    float _finetune_roll_target_rad;
-
-    // true if this instance should be driven by PTZ fine-tune nudges for yaw/roll
-    // rather than GAM/GAR, matching
-    // AP_Mount_SkyDroid::uses_finetune_nudge_commands()'s own model check
-    bool uses_finetune_nudge_commands() const { return strcmp(_model_name, "C13") == 0; }
 
     // read and dispatch incoming packets from autopilot
     void update_input();

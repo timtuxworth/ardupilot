@@ -20,27 +20,48 @@
                                             characters (high nibble first)
 
   This one driver covers every model in SkyDroid's "TOP protocol" gimbal camera
-  family (they all share the same wire protocol; only axis ranges and a few
-  optional features differ per model):
+  family:
   - control is over UDP only (no direct UART), source address is always 'U'
-  - axis ranges vary by model, e.g. the C11 has only pitch (-90 to +10 deg) and
-    yaw (-90 to +90 deg), no roll axis; the C13 additionally has roll (-45 to
-    +45 deg).  Configure MNT1_PITCH/YAW/ROLL_MIN/MAX to match your hardware -
-    this driver does not hardcode any model's limits itself
+  - confirmed directly with SkyDroid: the gimbal-control commands are IDENTICAL
+    across models (C11, C13, ...).  There is no model-specific control path, and
+    this driver deliberately has no model-dependent behaviour.  The C13's extra
+    features over the C11 are infrared thermal imaging and laser ranging, neither
+    of which this driver currently uses.  Do not reintroduce per-model dispatch
+    without new information from SkyDroid - an earlier version of this driver had
+    it, and it was wrong
+  - confirmed directly with SkyDroid: ROLL IS SELF-STABILIZED BY THE GIMBAL AND HAS
+    NO CONTROL COMMAND AT ALL, on any model.  The protocol document does describe
+    roll commands ("GAR" angle, "GSR" rate) but the firmware does not implement
+    them, so this driver does not send them and reports has_roll_control() == false.
+    Roll is still parsed from the gimbal's own attitude reports and passed through
+    for telemetry, and our vehicle roll is still pushed to the gimbal ("FAI") to
+    feed its stabilizer
+  - pitch/yaw ranges are configured via MNT1_PITCH/YAW_MIN/MAX (e.g. the C11 has
+    pitch -90 to +10 deg, yaw -90 to +90 deg).  This driver does not hardcode any
+    model's limits itself, so it stays correct across the family
   - SkyDroid's documented sign convention is yaw-right-positive, pitch-up-positive, which
     matches AP_Mount's own convention (no sign flip needed, unlike Topotek's protocol)
   - the connected model (e.g. "C11", "C13") is queried at runtime via the "MOD"
-    command and reported through CAMERA_INFORMATION
-  - confirmed on real C11 hardware: the combined/absolute-angle commands (GAM, GSM,
-    GAY, GAP) are silently ignored - only the individual-axis speed commands (GSY,
-    GSP) actually move that model, so both rate and (closed-loop) angle control for
-    the C11 are driven through those instead - see uses_individual_axis_speed_commands()
-  - confirmed on real C13 hardware: GAM/GSM/GSY/GSP/GAY and PTZ left/right are ALL
-    silently ignored (this model does not share the C11's fix) - the only thing that
-    moves yaw/roll at all is the "PTZ" command's fine-tune nudge codes (0x10-0x13),
-    normally documented as small trim adjustments rather than primary controls, sent
-    repeatedly - see uses_finetune_nudge_commands().  Pitch still uses the ordinary
-    PTZ up/down jog (0x01/0x02), same as every other model
+    command and reported through CAMERA_INFORMATION.  This is INFORMATIONAL ONLY -
+    no control decision depends on it, which matters because "MOD" has been observed
+    on real hardware to take anywhere from under a second to 8+ minutes to answer
+    (SkyDroid's own SDK documents that camera-side commands are only effective once
+    the camera is producing video frames - "需要在出图后设置才有效" - which would
+    explain it).  Gimbal-addressed commands (GSY/GSP/PTZ) have usually been observed
+    to work well before "MOD" answers - but at least once, on real hardware, NOTHING
+    worked (no RC, no GAC, no GCS messages of any kind) for over 5 minutes, so this
+    is not a guarantee - root cause of that particular case is still unknown (raised
+    with SkyDroid, response pending).  Whatever gates it, this driver deliberately
+    does not wait on it: gimbal-addressed commands are always sent unconditionally,
+    for whenever the link does come up
+  - confirmed on real C11 hardware: the combined and absolute-angle commands (GAM,
+    GSM, GAY, GAP) are all silently ignored - only the individual-axis speed
+    commands (GSY, GSP) actually move the gimbal, so both rate and (closed-loop)
+    angle control are driven through those.  This is believed to be a FIRMWARE
+    limitation rather than a model one: SkyDroid's SDK documents its combined
+    yaw+pitch call as requiring gimbal firmware >= 0.5, so newer firmware may well
+    accept the commands we found dead here.  The gimbal's reported firmware version
+    is logged at startup (see gimbal_version_analyse()) to make that checkable
  */
 
 #pragma once
@@ -56,21 +77,6 @@
 
 #define AP_MOUNT_SKYDROID_PACKETLEN_MAX     28      // maximum number of bytes in a packet sent to or received from the gimbal
 #define AP_MOUNT_SKYDROID_CMD_CATEGORIES_NUM 5       // number of gimbal message types we parse
-
-// the model name to assume until the real "MOD" response arrives (or, sooner, until
-// a genuine roll-axis movement is observed in GAC telemetry - see
-// effective_model_name(), which can only mean a C13, since the C11 has no roll
-// motor at all).  Added as a workaround: on real hardware the "MOD" query has been
-// observed to take anywhere from under a second to 8+ minutes to get a reply, for
-// reasons not yet understood (raised with SkyDroid, response pending) - defaulting
-// to a known-working model avoids leaving the mount on the always-broken GAM/GSM
-// path for however long that turns out to take.  A GCS message is sent once at
-// startup announcing this assumption so it's never a silent guess, and switches to
-// another GCS message (from the existing gimbal_model_analyse()) reporting the real
-// model the moment "MOD" actually answers.  Change this (or remove the whole
-// mechanism) once "MOD" is reliable, or if defaulting to a different model than the
-// one usually connected
-#define AP_MOUNT_SKYDROID_DEFAULT_MODEL "C11"
 
 class AP_Mount_SkyDroid : public AP_Mount_Backend_Serial
 {
@@ -90,6 +96,11 @@ public:
 
     // has_pan_control - returns true if this mount can control its pan (required for multicopters)
     bool has_pan_control() const override { return yaw_range_valid(); };
+
+    // has_roll_control - always false: confirmed directly with SkyDroid that roll is
+    // self-stabilized by the gimbal and has no control command on any model in this
+    // family, regardless of what MNT1_ROLL_MIN/MAX is set to
+    bool has_roll_control() const override { return false; };
 
     //
     // camera controls
@@ -217,113 +228,21 @@ private:
     // send our current attitude to the gimbal (FAI)
     bool send_attitude_to_gimbal();
 
-    // send angle target in radians to gimbal
+    // send angle target in radians to gimbal.  Closes the loop ourselves with a
+    // P-controller over the gimbal's own "GAC" attitude feedback, driving GSY/GSP as
+    // the rate actuator - there is no absolute-angle command that works on this
+    // hardware (see this file's header comment)
     void send_target_angles(const MountAngleTarget& angle_rad) override;
 
-    // send rate target in rad/s to gimbal
+    // send rate target in rad/s to gimbal, directly via GSY/GSP
     void send_target_rates(const MountRateTarget& rate_rads) override;
-
-    // the model name to use for uses_individual_axis_speed_commands()/
-    // uses_finetune_nudge_commands(): the real one if "MOD" has answered; failing
-    // that, "C13" if a genuine roll-axis movement has been observed in GAC telemetry
-    // (see gimbal_angle_analyse() - only a model with a real roll motor, e.g. C13,
-    // can ever report nonzero roll, so this is a positive-only signal that doesn't
-    // depend on the unreliable "MOD" query at all); failing that,
-    // AP_MOUNT_SKYDROID_DEFAULT_MODEL
-    const char* effective_model_name() const {
-        if (_got_model_name) {
-            return _model_name;
-        }
-        if (_detected_roll_axis) {
-            return "C13";
-        }
-        return AP_MOUNT_SKYDROID_DEFAULT_MODEL;
-    }
-
-    // true if the connected (or, before "MOD" answers, assumed - see
-    // effective_model_name()) model is known to only respond to the individual-axis
-    // GSY/GSP speed commands (confirmed on the C11; GAM/GSM/GAY/GAP - i.e. every
-    // combined or absolute-angle command - are silently ignored on that model)
-    bool uses_individual_axis_speed_commands() const {
-        return strncmp(effective_model_name(), "C11", 3) == 0;
-    }
-
-    // send angle target by closing the loop ourselves (P-controller) using GAC
-    // attitude feedback and driving GSY/GSP as the rate actuator - there is no
-    // absolute-angle command that works on this model
-    void send_target_angles_individual_axis(const MountAngleTarget& angle_rad);
-
-    // send rate target directly via GSY/GSP, the only commands confirmed to move
-    // this model
-    void send_target_rates_individual_axis(const MountRateTarget& rate_rads);
 
     // send a single-axis rate command (GSY or GSP) for rate_dps, converted to the
     // wire's signed 8bit LSB units using the real-world calibrated scale (see
-    // AP_MOUNT_SKYDROID_INDIVIDUAL_AXIS_DPS_PER_LSB).  Caller is responsible for any
-    // axis-specific sign compensation (GSY's sign is inverted vs AP_Mount's convention
-    // - see send_target_rates_individual_axis())
-    void send_individual_axis_rate(const Identifier id, float rate_dps);
-
-    // PTZ "fine tune" nudge codes (data byte of the "PTZ" command, 0x10-0x13).
-    // Confirmed on real C13 hardware to be the only commands that move yaw/roll on
-    // that model - GAM/GSM/GSY/GSP/GAY/PTZ-left-right are all confirmed silently
-    // ignored.  Normally documented as small trim adjustments rather than primary
-    // jog/speed controls; a single packet did not produce clearly visible movement
-    // in testing, only a rapid burst did (~15 packets at 0.2s intervals) - exact
-    // degrees-per-nudge, and whether there is a saturating trim range needing
-    // periodic "Clear Fine Tune" (0x14), are NOT YET CHARACTERIZED on real hardware
-    enum class FineTuneCode : uint8_t {
-        YAW_LEFT = 0x10,
-        YAW_RIGHT = 0x11,
-        // roll direction convention vs AP_Mount's roll-right-positive is UNCONFIRMED
-        // on real hardware - only that these two codes move roll in opposite
-        // directions to each other, not which one is "positive" - verify and fix the
-        // mapping in send_target_angles_finetune()/send_target_rates_finetune() on
-        // the next real hardware round if it turns out backwards
-        ROLL_A = 0x12,
-        ROLL_B = 0x13,
-    };
-
-    // true if the connected (or, before "MOD" answers, assumed - see
-    // effective_model_name()) model is known to only move yaw/roll via PTZ
-    // fine-tune nudges (confirmed on the C13; GAM/GSM/GSY/GSP/GAY/PTZ-left-right are
-    // all silently ignored on that model).  Pitch uses the ordinary PTZ up/down jog,
-    // same as every other model, so isn't gated by this - see
-    // send_target_angles_finetune()/send_target_rates_finetune()
-    bool uses_finetune_nudge_commands() const {
-        return strncmp(effective_model_name(), "C13", 3) == 0;
-    }
-
-    // send angle target for models needing PTZ fine-tune nudges for yaw/roll (e.g.
-    // C13).  Pitch closes the loop with the ordinary PTZ up/down jog, yaw/roll with
-    // repeated fine-tune nudges - both duty-cycled (PWM-style) as the error shrinks
-    // rather than run at full speed right up to a hard deadzone, to approximate
-    // proportional control from an actuator that has none - see duty_from_error()/
-    // duty_cycle_active() in the .cpp
-    void send_target_angles_finetune(const MountAngleTarget& angle_rad);
-
-    // send rate target for models needing PTZ fine-tune nudges for yaw/roll (e.g.
-    // C13) - duty-cycled the same way, from duty_from_rate()
-    void send_target_rates_finetune(const MountRateTarget& rate_rads);
-
-    // send a single PTZ pitch jog direction (-1=down, 0=stop, +1=up), deduped
-    // against the last direction sent - same "press and hold" mechanism used by
-    // every model's pitch control.  Callers duty-cycle by toggling direction
-    // on/off between calls (see send_target_angles_finetune()/
-    // send_target_rates_finetune()) rather than this function knowing about duty
-    // cycling itself
-    void send_ptz_pitch_direction(int8_t direction);
-
-    // send a fine-tune nudge code at up to AP_MOUNT_SKYDROID_FINETUNE_NUDGE_INTERVAL_MS
-    // (a hard floor - never exceed the empirically-tested rate), further gated by
-    // duty (0-1, see duty_cycle_active()) so the effective average nudge rate tapers
-    // off as duty shrinks.  Unlike PTZ's jog codes, repeated identical fine-tune
-    // sends are NOT deduped - each packet is believed to be a small discrete step,
-    // not a "hold to keep moving" command, so sending the same code repeatedly (at
-    // whatever the duty-gated rate works out to) is the intended way to keep moving.
-    // last_send_ms is the caller's own per-axis timestamp (yaw and roll are
-    // throttled independently)
-    void send_finetune_nudge(FineTuneCode code, uint32_t &last_send_ms, float duty);
+    // AP_MOUNT_SKYDROID_AXIS_DPS_PER_LSB).  Caller is responsible for any
+    // axis-specific sign compensation (GSY's sign is inverted vs AP_Mount's
+    // convention - see send_target_rates())
+    void send_axis_rate(const Identifier id, float rate_dps);
 
     // attitude information analysis of gimbal (response to GAA, arrives as "GAC")
     void gimbal_angle_analyse();
@@ -365,18 +284,12 @@ private:
     bool _last_lock;                                            // last lock mode sent to gimbal
     bool _got_gimbal_version;                                   // true if gimbal's version has been received
     bool _got_model_name;                                       // true if gimbal's model name has been received
-    bool _detected_roll_axis;                                   // true if GAC has ever reported a genuinely nonzero roll angle - see effective_model_name()
-    bool _announced_default_model;                              // true once we've told the user we're defaulting to AP_MOUNT_SKYDROID_DEFAULT_MODEL pending "MOD"
     bool _announced_connected;                                  // true once we've told the user the gimbal is connected
     uint32_t _firmware_ver;                                     // firmware version
     char _model_name[8];                                        // gimbal model name (e.g. "C11", "C13"), always null-terminated
-    Vector3f _current_angle_rad;                                // current angles in radians received from gimbal (x=roll, y=pitch, z=yaw).  roll is always 0 on models with no roll axis
+    Vector3f _current_angle_rad;                                // current angles in radians received from gimbal (x=roll, y=pitch, z=yaw).  roll is reported by the gimbal's own self-stabilization and is not controllable - see has_roll_control()
     uint32_t _last_current_angle_ms;                            // system time (in milliseconds) that angle information received from the gimbal
     uint32_t _last_req_current_info_ms;                         // system time that this driver last requested current gimbal information
-    uint32_t _last_model_request_ms;                            // system time this driver last requested the model name (retried fast, independent of the 1hz loop below, until _got_model_name is true)
-    uint8_t _last_ptz_pitch_code;                               // last PTZ pitch jog code sent (0=stop, 1=up, 2=down), deduped like every other model's PTZ pitch control.  Zero-initialised like the rest of this class's members, which correctly matches the real "not moving" state before anything has been commanded
-    uint32_t _last_yaw_nudge_ms;                                // system time of the last yaw fine-tune nudge sent (models using uses_finetune_nudge_commands() only)
-    uint32_t _last_roll_nudge_ms;                               // system time of the last roll fine-tune nudge sent (models using uses_finetune_nudge_commands() only)
     uint8_t _last_req_step;                                     // 10hz request loop step (different requests are sent at various steps)
     uint8_t _msg_buff[AP_MOUNT_SKYDROID_PACKETLEN_MAX];         // buffer holding bytes from latest packet received.  only used to calculate crc
     uint8_t _msg_buff_len;                                      // number of bytes in the msg buffer

@@ -246,13 +246,13 @@ SITL::SerialDevice *SITL_State_Common::create_serial_sim(const char *name, const
 #endif  // AP_SIM_TOPOTEK_ENABLED
 #if AP_SIM_SKYDROID_ENABLED
     } else if (streq(name, "skydroid")) {
-        // C11: no roll axis
-        const auto skydroid = NEW_NOTHROW SITL::SkyDroid("C11", false);
+        const auto skydroid = NEW_NOTHROW SITL::SkyDroid("C11");
         sitl_model->add_gimbal_sim(*skydroid);
         return skydroid;
     } else if (streq(name, "skydroid_c13")) {
-        // C13: has a roll axis (-45..+45 deg)
-        const auto skydroid_c13 = NEW_NOTHROW SITL::SkyDroid("C13", true);
+        // the model name is the ONLY difference from "skydroid" above - SkyDroid have
+        // confirmed the gimbal-control commands are identical across models
+        const auto skydroid_c13 = NEW_NOTHROW SITL::SkyDroid("C13");
         sitl_model->add_gimbal_sim(*skydroid_c13);
         return skydroid_c13;
 #endif  // AP_SIM_SKYDROID_ENABLED
