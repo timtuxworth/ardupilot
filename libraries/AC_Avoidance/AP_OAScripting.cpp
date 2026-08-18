@@ -41,12 +41,6 @@ AP_OAScripting::AP_OAScripting()
 // singleton instance
 AP_OAScripting *AP_OAScripting::_singleton;
 
-bool AP_OAScripting::distance_obstacle_test(const Location &start_loc, const Location &end_loc, const float &lookahead_m, float &distance_m, Location &location_out) const
-{
-    distance_m = lookahead_m;
-    return true;
-}
-
 bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end_loc, float lookahead_m,
                                             // Return values
                                             float       &distance_m,
@@ -280,109 +274,6 @@ bool AP_OAScripting::fence_distance(const Location &loc, uint8_t fence_type, flo
     (void)distance_m;
     return false;
 #endif
-}
-
-// Lua binding to be used in Object Detection to find the neareast fence, ADS-B object, or proximity obstacle
-//   the use of the word "obstacle" is intended to be generic, unfortunately one of the cases of ArduPilot is "Obstacles" stored in the AP_OAAvoidance library
-// Note that the distance is the distance to any margin around the obstacles. AP_OAAvoidance obstacles have this as do fences. So the distance can be negative if you are too close.
-bool AP_OAScripting::find_closest_obstacle(const Location &start_loc, const Location &end_loc, float lookahead_m,
-                                            float &distance_m,
-                                            uint16_t &type,
-                                            char *&label,
-                                            uint32_t &sysid,
-                                            Location &location,
-                                            Vector3f &pos_NED_m,
-                                            Vector3f &velocity_NED_ms
-                                            ) const
-{
-    float distance_new_m = FLT_MAX;
-    OAObstacle obstacle {};
-
-    distance_m = lookahead_m;
-
-    // convert start and end to offsets from EKF origin (waiting for NEU/NED changes)
-    Vector3f start_NED_m,end_NED_m;
-    if (!start_loc.get_vector_from_origin_NEU_m(start_NED_m) ||
-        !end_loc.get_vector_from_origin_NEU_m(end_NED_m)) {
-        return false;
-    }
-    if (start_NED_m == end_NED_m) {
-        return false;
-    }
-    // until we get the new NED functions
-    start_NED_m.z   = -start_NED_m.z;
-    end_NED_m.z     = -end_NED_m.z;
-
-    // "obstacles" are stored in AP_Avoidance - the are typically populated by MAVLink (ADSB, GLOBAL_POSITION, FOLLOW_TARGET)
-    // These have priority over all other obstacles, especially if they are ADSB messages representing crewed aircraft
-    OAObstacle obstacle_found {};
-    OAObstacle aircraft_found {};
-    distance_new_m = _distance_to_avoidance(start_NED_m, end_NED_m, obstacle_found, aircraft_found);
-    if (distance_new_m < distance_m) {
-        obstacle    = obstacle_found;
-        distance_m  = distance_new_m;
-    }
-
-    // "objects" are stored in the AP_OADatabase - they are typically populated by proximity sensors
-    distance_new_m = _distance_to_object(start_NED_m, end_NED_m, obstacle_found);
-    if (distance_new_m < distance_m) {
-        obstacle    = obstacle_found;
-        distance_m  = distance_new_m;
-    }
-
-#if AP_FENCE_ENABLED
-    const AC_Fence *fence = AC_Fence::get_singleton();
-    if (fence != nullptr) {
-        // fences use cm (for now), so do this once now so we can pass to all the fence methods
-        const Vector2f start_NE_cm(start_NED_m.x * 100.0f, start_NED_m.y * 100.0f);
-        const Vector2f end_NE_cm(end_NED_m.x * 100.0f, end_NED_m.y * 100.0f);
-
-        // We do each type of fence one at a time, because
-        // a. they are stored in separate lists and
-        // b. we want to tell the user which fence type of fence it is
-        distance_new_m = fence->distance_line_to_home_inclusion(start_NE_cm, end_NE_cm);
-        if (distance_new_m < distance_m) {
-            _populate_fence_obstacle(obstacle, ObstacleType::FENCE_HOME);
-            distance_m      = distance_new_m;
-        }
-        distance_new_m = fence->distance_line_to_circle_inclusion(start_NE_cm, end_NE_cm);
-        if (distance_new_m < distance_m) {
-            _populate_fence_obstacle(obstacle, ObstacleType::FENCE_CIRCLE_INCLUSION);
-            distance_m      = distance_new_m;
-        }
-        distance_new_m = fence->distance_line_to_circle_exclusion(start_NE_cm, end_NE_cm);
-        if (distance_new_m < distance_m) {
-            _populate_fence_obstacle(obstacle, ObstacleType::FENCE_CIRCLE_EXCLUSION);
-            distance_m      = distance_new_m;
-        }
-        distance_new_m = fence->distance_line_to_polygon_inclusion(start_NE_cm, end_NE_cm);
-        if (distance_new_m < distance_m) {
-            _populate_fence_obstacle(obstacle, ObstacleType::FENCE_POLYGON_INCLUSION);
-            distance_m      = distance_new_m;
-        }
-        distance_new_m = fence->distance_line_to_polygon_exclusion(start_NE_cm, end_NE_cm);
-        if (distance_new_m < distance_m) {
-            _populate_fence_obstacle(obstacle, ObstacleType::FENCE_POLYGON_EXCLUSION);
-            distance_m      = distance_new_m;
-        }
-    }
-#endif
-    if (distance_m < lookahead_m) {
-        type            = (uint16_t)obstacle.obstacle_type;
-        label           = obstacle.label;
-        sysid           = obstacle.src_id;
-        velocity_NED_ms = obstacle.velocity_NED_ms;
-
-        if (obstacle.location.initialised()) {
-            location        = obstacle.location;
-            location.get_vector_from_origin_NEU_m(pos_NED_m);
-            // until we get the new NED functions
-            pos_NED_m.z = -pos_NED_m.z;
-        }
-        return true;
-    }
-
-    return false;
 }
 
 // Distance to objects in the AP_OADatabase
