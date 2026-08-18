@@ -96,38 +96,29 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
         // We do each type of fence one at a time, because
         // a. they are stored in separate lists and
         // b. we want to tell the user which fence type of fence it is
-        // Polygon fences have no single radius, so radius_m stays at its zeroed value.
         distance_new_m = fence->distance_line_to_home_inclusion(start_NE_cm, end_NE_cm);
         if (distance_new_m < distance_m) {
             _populate_fence_obstacle(obstacle, ObstacleType::FENCE_HOME);
-            obstacle.radius_m   = fence->get_radius_m();
-            obstacle.margin_m   = fence->get_margin_ne_m();
             distance_m          = distance_new_m;
         }
         distance_new_m = fence->distance_line_to_circle_inclusion(start_NE_cm, end_NE_cm);
         if (distance_new_m < distance_m) {
             _populate_fence_obstacle(obstacle, ObstacleType::FENCE_CIRCLE_INCLUSION);
-            obstacle.radius_m   = fence->get_radius_m();
-            obstacle.margin_m   = fence->get_margin_ne_m();
             distance_m          = distance_new_m;
         }
         distance_new_m = fence->distance_line_to_circle_exclusion(start_NE_cm, end_NE_cm);
         if (distance_new_m < distance_m) {
             _populate_fence_obstacle(obstacle, ObstacleType::FENCE_CIRCLE_EXCLUSION);
-            obstacle.radius_m   = fence->get_radius_m();
-            obstacle.margin_m   = fence->get_margin_ne_m();
             distance_m          = distance_new_m;
         }
         distance_new_m = fence->distance_line_to_polygon_inclusion(start_NE_cm, end_NE_cm);
         if (distance_new_m < distance_m) {
             _populate_fence_obstacle(obstacle, ObstacleType::FENCE_POLYGON_INCLUSION);
-            obstacle.margin_m   = fence->get_margin_ne_m();
             distance_m          = distance_new_m;
         }
         distance_new_m = fence->distance_line_to_polygon_exclusion(start_NE_cm, end_NE_cm);
         if (distance_new_m < distance_m) {
             _populate_fence_obstacle(obstacle, ObstacleType::FENCE_POLYGON_EXCLUSION);
-            obstacle.margin_m   = fence->get_margin_ne_m();
             distance_m          = distance_new_m;
         }
     }
@@ -331,8 +322,6 @@ void AP_OAScripting::_populate_fence_obstacle(OAObstacle &fence_obstacle, AP_OAS
     fence_obstacle.location        = Location{};
     fence_obstacle.position_NED_m.zero();
     fence_obstacle.velocity_NED_ms.zero();
-    fence_obstacle.radius_m        = 0.0f;
-    fence_obstacle.margin_m        = 0.0f;
 }
 
 // create a "Scripting Obstacle" to easily pass info about an obstacle to Lua for avoidance obstacles
