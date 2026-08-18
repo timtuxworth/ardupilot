@@ -113,8 +113,7 @@ public:
     float get_obstacle_radius_m(uint8_t emitter_type) const;
     float get_obstacle_height_m(uint8_t emitter_type) const;
     float distance_to_obstacle(const Vector3f &start_NED_cm, const Vector3f &end_NED_cm,
-                                Obstacle &avoid_obstacle,
-                                Obstacle &closest_aircraft
+                                Obstacle &avoid_obstacle
                                 ) const;
     float distance_to_aircraft(const Vector3f &vehicle_NED_m, const float lookahead_m, const float vertical_lookahead_m,
                                 // return values
