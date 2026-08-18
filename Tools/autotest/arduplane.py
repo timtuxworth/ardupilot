@@ -7645,7 +7645,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         avoidance so the plane can reach the waypoint outside the fence.  Without the
         fix the bendy ruler traps the plane inside and the test times out.'''
         self.install_applet_script_context("planedaa.lua")
-        self.install_script_module(
+        self.install_script_module_context(
             self.script_modules_source_path("mavlink_wrappers.lua"),
             "mavlink_wrappers.lua",
         )
@@ -7702,7 +7702,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         the waypoint outside; the plane must approach the boundary but stay
         contained, again without ever breaching.'''
         self.install_applet_script_context("planedaa.lua")
-        self.install_script_module(
+        self.install_script_module_context(
             self.script_modules_source_path("mavlink_wrappers.lua"),
             "mavlink_wrappers.lua",
         )
@@ -7823,7 +7823,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         report the ~120 m polygon under the circle label).'''
         import re
         self.install_applet_script_context("planedaa.lua")
-        self.install_script_module(
+        self.install_script_module_context(
             self.script_modules_source_path("mavlink_wrappers.lua"),
             "mavlink_wrappers.lua",
         )
@@ -7890,7 +7890,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         in hex rather than a decimal SYSID.  The ADSB_VEHICLE is re-sent
         continuously because AP_Avoidance prunes obstacles after 5 s.'''
         self.install_applet_script_context("planedaa.lua")
-        self.install_script_module(
+        self.install_script_module_context(
             self.script_modules_source_path("mavlink_wrappers.lua"),
             "mavlink_wrappers.lua",
         )
@@ -7982,7 +7982,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         with the smoothing off, so that bound is a gross-oscillation guard, not a
         proof of the smoothing.'''
         self.install_applet_script_context("planedaa.lua")
-        self.install_script_module(
+        self.install_script_module_context(
             self.script_modules_source_path("mavlink_wrappers.lua"),
             "mavlink_wrappers.lua",
         )
@@ -8138,7 +8138,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         250 m detection distance.  The ADSB_VEHICLE is re-sent continuously because
         AP_Avoidance prunes obstacles after 5 s.'''
         self.install_applet_script_context("planedaa.lua")
-        self.install_script_module(
+        self.install_script_module_context(
             self.script_modules_source_path("mavlink_wrappers.lua"),
             "mavlink_wrappers.lua",
         )
@@ -8254,7 +8254,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         PlaneDAAAircraftLoiterNoFlip.)  Fails on the pre-CPA-gate code, which loitered for
         any detected aircraft regardless of motion.'''
         self.install_applet_script_context("planedaa.lua")
-        self.install_script_module(
+        self.install_script_module_context(
             self.script_modules_source_path("mavlink_wrappers.lua"),
             "mavlink_wrappers.lua",
         )
@@ -8335,7 +8335,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         ADSB_VEHICLE is re-sent each cycle because AP_Avoidance prunes obstacles after
         5 s.'''
         self.install_applet_script_context("planedaa.lua")
-        self.install_script_module(
+        self.install_script_module_context(
             self.script_modules_source_path("mavlink_wrappers.lua"),
             "mavlink_wrappers.lua",
         )
@@ -8440,7 +8440,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         on the pre-change code, whose conflict test used the (much larger) aircraft well-clear
         radius for every type, so it avoided the diverging drone.'''
         self.install_applet_script_context("planedaa.lua")
-        self.install_script_module(
+        self.install_script_module_context(
             self.script_modules_source_path("mavlink_wrappers.lua"),
             "mavlink_wrappers.lua",
         )
@@ -8506,7 +8506,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         enabled (RTL, which would be obvious if it wrongly fired), the detour must
         complete WITHOUT tripping the failsafe (no "TRAPPED", mission still runs).'''
         self.install_applet_script_context("planedaa.lua")
-        self.install_script_module(
+        self.install_script_module_context(
             self.script_modules_source_path("mavlink_wrappers.lua"),
             "mavlink_wrappers.lua",
         )
@@ -8567,7 +8567,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         off.  With the fix the plane reverts to the home target and returns home;
         without it the plane never reaches home.'''
         self.install_applet_script_context("planedaa.lua")
-        self.install_script_module(
+        self.install_script_module_context(
             self.script_modules_source_path("mavlink_wrappers.lua"),
             "mavlink_wrappers.lua",
         )
@@ -8650,7 +8650,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         fails the test.  (SITL tracks ground course cleanly, so this verifies the
         commanded standoff grows; the breach-prevention benefit is on real hardware.)'''
         self.install_applet_script_context("planedaa.lua")
-        self.install_script_module(
+        self.install_script_module_context(
             self.script_modules_source_path("mavlink_wrappers.lua"),
             "mavlink_wrappers.lua",
         )
@@ -8764,7 +8764,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
 
     def _PlaneDAAFenceAltitude(self, terrain=False):
         self.install_applet_script_context("planedaa.lua")
-        self.install_script_module(
+        self.install_script_module_context(
             self.script_modules_source_path("mavlink_wrappers.lua"),
             "mavlink_wrappers.lua",
         )
