@@ -26,8 +26,8 @@ The applet talks to the `OAScripting` singleton, which the `AP_OAScripting`
 library in AC_Avoidance exposes to Lua. The script aborts at startup if that
 object is not present, so the firmware must contain it.
 
-DAA costs roughly **8.5 kB of flash** (measured on Durandal: 1,599,444 bytes
-without, 1,608,000 with), so it is deliberately **not** in a default build. It is
+DAA costs roughly **7.2 kB of flash** (measured on Durandal: 1,599,176 bytes
+without, 1,606,412 with), so it is deliberately **not** in a default build. It is
 compiled in by default only on targets with more than 2 MB of program space —
 SITL, Linux, and boards carrying external program flash such as CubeRedPrimary.
 On every other board, including ordinary 2 MB boards like Durandal, MatekH743 and
@@ -421,7 +421,7 @@ The `ObjT` field uses the following `OBSTACLE_TYPE` enumeration:
 |-------|------|-------------|
 | 0  | GENERAL | Generic obstacle of unknown type |
 | 1  | MAV_SYSID | Another MAVLink drone with a MAV_SYSID |
-| 2  | AIRCRAFT | Aircraft, usually with an ICAO ADSB identifier |
+| 2  | CREWED_AIRCRAFT | Crewed aircraft, usually with an ICAO ADSB identifier |
 | 3  | WEATHER | Weather |
 | 4  | BIRD_MIGRATORY | Migratory bird(s), e.g. Canada Geese |
 | 5  | BIRD_OF_PREY | A bird that might attack the vehicle |
