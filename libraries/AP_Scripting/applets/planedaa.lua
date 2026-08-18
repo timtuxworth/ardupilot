@@ -2153,7 +2153,16 @@ local DAA = {
             -- detect_altitude_fence(); don't also raise the generic obstacle ALERT
             return
         end
-        if obstacle_avoiding == nil or alert_target_loc == nil  or obstacle_avoiding.distance_xy > lookahead_param_m then
+        if obstacle_avoiding == nil or alert_target_loc == nil then
+            previous_label = ""
+            return
+        end
+        -- Report the real range where we can get one.  A fence carries no single location,
+        -- so distance_xy falls back to the bendy-ruler PROJECTED distance for fences;
+        -- obstacle_report_distance() asks C++ for the true edge distance instead.  This is
+        -- announce-time only, so the per-call fence search stays out of the sweep.
+        local report_m = obstacle_report_distance(obstacle_avoiding) or obstacle_avoiding.distance_xy
+        if report_m > lookahead_param_m then
             previous_label = ""
             return
         end
@@ -2167,8 +2176,8 @@ local DAA = {
             gcs:send_named_string("DAA-OBSTCL", obstacle_avoiding.label)
             gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" ALERT: %s %s %.0fm",
                                 obstacle_avoiding.label, pretty_obstacle_type(obstacle_avoiding.type, obstacle_avoiding.sysid),
-                                obstacle_avoiding.distance_xy))
-            gcs:send_named_float("DAA-DISTXY", obstacle_avoiding.distance_xy)
+                                report_m))
+            gcs:send_named_float("DAA-DISTXY", report_m)
             gcs:send_named_float("DAA-DISTZ", obstacle_avoiding.distance_z)
             previous_label  = obstacle_avoiding.label
             now_obstacle_ms = now_ms
