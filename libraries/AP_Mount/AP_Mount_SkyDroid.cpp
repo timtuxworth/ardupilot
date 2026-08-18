@@ -19,7 +19,7 @@ extern const AP_HAL::HAL& hal;
 #define AP_MOUNT_SKYDROID_ATTITUDE_RATE_HZ   50                  // rate we ask the gimbal to stream its attitude to us (matches the 50hz rate AP_Mount::update() is actually called at; doc allows up to 100hz)
 
 // 3 character identifiers
-#define AP_MOUNT_SKYDROID_ID3CHAR_GIMBAL_MODE       "PTZ"        // discrete gimbal control, data bytes: 00:stop, 01:up, 02:down, 03:left, 04:right, 05:center, 06:follow, 07:lock head.  Only the follow/lock codes (06/07) are used - see set_gimbal_lock()
+#define AP_MOUNT_SKYDROID_ID3CHAR_GIMBAL_MODE       "PTZ"        // discrete gimbal control, data bytes: 00:stop, 01:up, 02:down, 03:left, 04:right, 05:center, 06:follow, 07:lock head.  Only the follow/lock codes (06/07 - see set_gimbal_lock()) and center (05 - see send_center_command()) are used
 #define AP_MOUNT_SKYDROID_ID3CHAR_SPEED_YAW          "GSY"       // individual-axis yaw rate control, data bytes: signed 8bit hex.  The only command confirmed to move yaw on real hardware (GAM/GSM/GAY all silently ignored); its sign is also inverted vs the doc - see send_target_rates()
 #define AP_MOUNT_SKYDROID_ID3CHAR_SPEED_PITCH        "GSP"       // individual-axis pitch rate control, data bytes: signed 8bit hex.  Confirmed functional on real hardware, sign matches the doc
 // real-world calibrated scale for GSY/GSP, measured on a real C11 via precise
@@ -754,6 +754,29 @@ bool AP_Mount_SkyDroid::set_gimbal_lock(bool lock)
         return true;
     }
     return false;
+}
+
+// send the gimbal's own one-shot "center" command.  Deliberately not deduped like
+// set_gimbal_lock() above - unlike lock/follow (a persistent mode we don't want to
+// keep re-sending), center is a one-shot action that should fire every time the
+// mode is (re)selected, same as every other RETRACT/NEUTRAL backend's behaviour
+bool AP_Mount_SkyDroid::send_center_command()
+{
+    return send_fixedlen_packet(AddressByte::GIMBAL, AP_MOUNT_SKYDROID_ID3CHAR_GIMBAL_MODE, true, 0x05);
+}
+
+// move to a "retracted" position - see this file's header declaration for why this
+// uses the gimbal's own "center" command rather than falling through to the
+// angle-based conversion (which needs GAC attitude feedback to converge)
+void AP_Mount_SkyDroid::send_target_retracted()
+{
+    send_center_command();
+}
+
+// move to a neutral (forward-pointing) position - see this file's header declaration
+void AP_Mount_SkyDroid::send_target_neutral()
+{
+    send_center_command();
 }
 
 #endif // HAL_MOUNT_SKYDROID_ENABLED

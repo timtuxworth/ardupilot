@@ -44,8 +44,22 @@ void SkyDroid::update(const Aircraft &aircraft)
     // that same inversion so it cancels out correctly against the driver's
     // compensating negation in send_target_rates(), exactly like the real gimbal does
     const float dps_per_lsb = 0.03125f;
-    const float pitch_rate = radians(_commanded_pitch_speed_lsb * dps_per_lsb);
-    const float yaw_rate = -radians(_commanded_yaw_speed_lsb * dps_per_lsb);
+    Vector3f ja;
+    gimbal.get_joint_angles(ja);
+    float pitch_rate;
+    float yaw_rate;
+    if (_centering) {
+        // simulate the gimbal's own one-shot "center" response to "PTZ" 0x05 - drive
+        // pitch/yaw toward zero using the same simple P-controller approach the real
+        // driver uses for closed-loop control elsewhere, since we have no real
+        // hardware data on how a real gimbal's own centering actually moves
+        constexpr float gain = 10.0f;
+        pitch_rate = -ja.y * gain;
+        yaw_rate = -ja.z * gain;
+    } else {
+        pitch_rate = radians(_commanded_pitch_speed_lsb * dps_per_lsb);
+        yaw_rate = -radians(_commanded_yaw_speed_lsb * dps_per_lsb);
+    }
 
     // roll is left entirely to the simulated gimbal's own stabilization, matching the
     // real hardware: SkyDroid have confirmed roll is self-stabilized with no control
@@ -208,7 +222,9 @@ void SkyDroid::handle_packet(uint8_t data_len)
     } else if (strncmp(id, "GSY", 3) == 0 && data_len >= 2) {
         // individual-axis yaw speed command - confirmed on real hardware to be the
         // only thing that actually moves yaw: signed 8bit hex value, LSB units
-        // calibrated in update() above
+        // calibrated in update() above.  A real speed command supersedes any
+        // in-progress centering - see _centering's comment
+        _centering = false;
         uint32_t tmp;
         if (hex_chars_to_uint32((const char*)&_buf[10], 2, tmp)) {
             _commanded_yaw_speed_lsb = (int8_t)tmp;
@@ -216,16 +232,28 @@ void SkyDroid::handle_packet(uint8_t data_len)
 
     } else if (strncmp(id, "GSP", 3) == 0 && data_len >= 2) {
         // individual-axis pitch speed command, same as GSY above
+        _centering = false;
         uint32_t tmp;
         if (hex_chars_to_uint32((const char*)&_buf[10], 2, tmp)) {
             _commanded_pitch_speed_lsb = (int8_t)tmp;
+        }
+
+    } else if (strncmp(id, "PTZ", 3) == 0 && data_len >= 2) {
+        // discrete gimbal control.  Only 0x05 ("center") is simulated - see
+        // _centering's comment and update()'s use of it.  Follow/lock (0x06/0x07)
+        // and the jog codes (0x00-0x04) are not simulated: this driver only ever
+        // sends follow/lock (see AP_Mount_SkyDroid::set_gimbal_lock()), which has no
+        // observable effect on the simulated gimbal's motion either way
+        uint32_t tmp;
+        if (hex_chars_to_uint32((const char*)&_buf[10], 2, tmp) && tmp == 0x05) {
+            _centering = true;
         }
     }
     // Everything else is absorbed silently, deliberately reproducing the real
     // hardware's behaviour: the combined and absolute-angle commands (GAM, GSM, GAY,
     // GAP) are confirmed silently ignored on real hardware, and roll (GAR, GSR) has
     // no control command at all - SkyDroid have confirmed roll is self-stabilized.
-    // PTZ's follow/lock codes, FAE, FAI, CAP, REC, DZM and TIM are also absorbed here
+    // FAE, FAI, CAP, REC, DZM and TIM are also absorbed here
 }
 
 void SkyDroid::send_packet(char addr2, const char id[3], bool write, const uint8_t *data, uint8_t len)
