@@ -44,10 +44,7 @@ AP_OAScripting *AP_OAScripting::_singleton;
 bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end_loc, float lookahead_m,
                                             // Return values
                                             float       &distance_m,
-                                            OAObstacle  &any_obstacle,
-                                            OAObstacle  &aircraft_obstacle,
-                                            OAObstacle  &proximity_obstacle,
-                                            OAObstacle  &fence_obstacle
+                                            OAObstacle  &any_obstacle
                                             ) const
 {
     float distance_new_m = FLT_MAX;
@@ -75,7 +72,6 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
     distance_new_m = _distance_to_avoidance(start_NED_m, end_NED_m, obstacle_found, aircraft_found);
     if (distance_new_m < distance_m) {
         obstacle            = obstacle_found;
-        aircraft_obstacle   = aircraft_found;
         distance_m          = distance_new_m;
     }
 
@@ -83,7 +79,6 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
     distance_new_m = _distance_to_object(start_NED_m, end_NED_m, obstacle_found);
     if (distance_new_m < distance_m) {
         obstacle            = obstacle_found;
-        proximity_obstacle  = obstacle_found;
         distance_m          = distance_new_m;
     }
 
@@ -102,14 +97,12 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
         // We do each type of fence one at a time, because
         // a. they are stored in separate lists and
         // b. we want to tell the user which fence type of fence it is
-        // radius_m/margin_m must be set BEFORE fence_obstacle is copied out, or the copy
-        // carries the previous branch's values.  Polygon fences have no single radius.
+        // Polygon fences have no single radius, so radius_m stays at its zeroed value.
         distance_new_m = fence->distance_line_to_home_inclusion(start_NE_cm, end_NE_cm);
         if (distance_new_m < distance_m) {
             _populate_fence_obstacle(obstacle, ObstacleType::FENCE_HOME);
             obstacle.radius_m   = fence->get_radius_m();
             obstacle.margin_m   = fence->get_margin_ne_m();
-            fence_obstacle      = obstacle;
             distance_m          = distance_new_m;
         }
         distance_new_m = fence->distance_line_to_circle_inclusion(start_NE_cm, end_NE_cm);
@@ -117,7 +110,6 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
             _populate_fence_obstacle(obstacle, ObstacleType::FENCE_CIRCLE_INCLUSION);
             obstacle.radius_m   = fence->get_radius_m();
             obstacle.margin_m   = fence->get_margin_ne_m();
-            fence_obstacle      = obstacle;
             distance_m          = distance_new_m;
         }
         distance_new_m = fence->distance_line_to_circle_exclusion(start_NE_cm, end_NE_cm);
@@ -125,21 +117,18 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
             _populate_fence_obstacle(obstacle, ObstacleType::FENCE_CIRCLE_EXCLUSION);
             obstacle.radius_m   = fence->get_radius_m();
             obstacle.margin_m   = fence->get_margin_ne_m();
-            fence_obstacle      = obstacle;
             distance_m          = distance_new_m;
         }
         distance_new_m = fence->distance_line_to_polygon_inclusion(start_NE_cm, end_NE_cm);
         if (distance_new_m < distance_m) {
             _populate_fence_obstacle(obstacle, ObstacleType::FENCE_POLYGON_INCLUSION);
             obstacle.margin_m   = fence->get_margin_ne_m();
-            fence_obstacle      = obstacle;
             distance_m          = distance_new_m;
         }
         distance_new_m = fence->distance_line_to_polygon_exclusion(start_NE_cm, end_NE_cm);
         if (distance_new_m < distance_m) {
             _populate_fence_obstacle(obstacle, ObstacleType::FENCE_POLYGON_EXCLUSION);
             obstacle.margin_m   = fence->get_margin_ne_m();
-            fence_obstacle      = obstacle;
             distance_m          = distance_new_m;
         }
     }
@@ -299,11 +288,9 @@ float AP_OAScripting::_distance_to_object(const Vector3f &start_NED_m, const Vec
             }
             switch(item.source) {
             case AP_OADatabase::OA_DbItem::Source::proximity:
-                script_obstacle.label           = (char *)"proximity";
                 script_obstacle.obstacle_type   = static_cast<uint8_t>(ObstacleType::PROXIMITY);
                 break;
             case AP_OADatabase::OA_DbItem::Source::AIS:
-                script_obstacle.label           = (char *)"AIS";
                 script_obstacle.obstacle_type   = static_cast<uint8_t>(ObstacleType::AIS);
                 break;
             }
@@ -312,23 +299,6 @@ float AP_OAScripting::_distance_to_object(const Vector3f &start_NED_m, const Vec
     }
 
     return distance_new_m;
-}
-
-// translate an AP_Avoidance obstacle src_id into a string for display purposes
-char* AP_OAScripting::_get_obstacle_label(uint8_t emitter_type, int32_t obstacle_id)
-{
-    if (AP_Avoidance::is_adsb_uav(emitter_type) || obstacle_id < 0x3FFF) {
-        return (char *)"MAV";
-    } else if (obstacle_id >= 0xB00000 && obstacle_id <= 0xB10000) {
-        return (char *)"Weather";
-    } else if (obstacle_id >= 0xB10000 && obstacle_id <= 0xB20000) {
-        return (char *)"Migratory Bird";
-    } else if (obstacle_id >= 0xB20000 && obstacle_id <= 0xB30000) {
-        return (char *)"Bird of Prey";
-    } else if (obstacle_id > 0xA00000) {
-        return (char *)"ADS-B";
-    }
-    return (char *)"Unknown";
 }
 
 // translate an AP_Avoidance obstacle src_id into an enum for further processing in Lua
@@ -364,36 +334,6 @@ void AP_OAScripting::_populate_fence_obstacle(OAObstacle &fence_obstacle, AP_OAS
     fence_obstacle.velocity_NED_ms.zero();
     fence_obstacle.radius_m        = 0.0f;
     fence_obstacle.margin_m        = 0.0f;
-    switch (obstacle_type)
-    {
-    case AP_OAScripting::ObstacleType::FENCE_HOME:
-        fence_obstacle.label    = (char *)"Tin Can";
-        break;
-    case AP_OAScripting::ObstacleType::FENCE_CIRCLE_INCLUSION:
-        fence_obstacle.label    = (char *)"Incl. Circle";
-        break;
-    case AP_OAScripting::ObstacleType::FENCE_CIRCLE_EXCLUSION:
-        fence_obstacle.label    = (char *)"Excl. Circle";
-        break;
-    case AP_OAScripting::ObstacleType::FENCE_POLYGON_INCLUSION:
-        fence_obstacle.label    = (char *)"Incl. Polygon";
-        break;
-    case AP_OAScripting::ObstacleType::FENCE_POLYGON_EXCLUSION:
-        fence_obstacle.label    = (char *)"Excl. Polygon";
-        break;
-    case AP_OAScripting::ObstacleType::FENCE_LUA:
-        fence_obstacle.label    = (char *)"Lua Fence";
-        break;
-    case AP_OAScripting::ObstacleType::FENCE_ALT_MAX:
-        fence_obstacle.label    = (char *)"Alt Max Fence";
-        break;
-    case AP_OAScripting::ObstacleType::FENCE_ALT_MIN:
-        fence_obstacle.label    = (char *)"Alt Min Fence";
-        break;
-    default:
-        fence_obstacle.label    = (char *)"Geo Fence";
-        break;
-    }
 }
 
 // create a "Scripting Obstacle" to easily pass info about an obstacle to Lua for avoidance obstacles
@@ -404,7 +344,6 @@ void AP_OAScripting::_populate_scripting_obstacle(OAObstacle &script_obstacle, c
     // icao_code must be set before _get_obstacle_type(): that helper classifies on it
     script_obstacle.icao_code       = avoid_obstacle->src_id & 0xFFFFFF;
     script_obstacle.obstacle_type   = static_cast<uint8_t>(_get_obstacle_type(avoid_obstacle->emitter_type, script_obstacle.icao_code));
-    script_obstacle.label           = _get_obstacle_label(avoid_obstacle->emitter_type, avoid_obstacle->src_id);
     script_obstacle.src_id          = avoid_obstacle->src_id;
 
     script_obstacle.emitter_type    = avoid_obstacle->emitter_type;
