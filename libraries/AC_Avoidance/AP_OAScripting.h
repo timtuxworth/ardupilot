@@ -6,25 +6,11 @@
 #include <AP_Vehicle/AP_Vehicle_Type.h>
 #include <AP_Avoidance/AP_Avoidance_config.h>
 
-// AP_OAScripting uses the AP_Avoidance (ADS-B) class, which exists only when
-// AP_ADSB_AVOIDANCE_ENABLED (= HAL_ADSB_ENABLED, false on 1MB boards such as
-// fmuv2). The matching applet (planedaa.lua) is Plane-only, so gate the feature
-// to ArduPlane + scripting + avoidance + ADS-B avoidance. The macro is ALWAYS
-// defined (to 0 or 1) so "#if AP_OA_SCRIPTING_ENABLED" is valid under
-// -Werror=undef wherever this header is included. The build-type macro lives
-// here (so the class is not declared on other vehicles), hence this header is
-// whitelisted in Tools/ardupilotwaf/ap_library.py.
-//
-// DAA costs around 8.6 kB of flash, so it is NOT in a default build: the last
-// term restricts it to targets with more than 2 MB of program space - SITL,
-// Linux, and boards carrying external program flash such as CubeRedPrimary.
-// Everywhere else it is opt-in, either through the Custom Build Server
-// ("Enable Scripted Detect and Avoid (DAA)" under Plane) or with
-// "waf configure --enable-AP_OASCRIPTING", both of which define this macro
-// explicitly and so take the #ifndef branch below.
-#ifndef AP_OA_SCRIPTING_ENABLED
-#define AP_OA_SCRIPTING_ENABLED (AP_SCRIPTING_ENABLED && APM_BUILD_TYPE(APM_BUILD_ArduPlane) && AP_AVOIDANCE_ENABLED && AP_ADSB_AVOIDANCE_ENABLED && (HAL_PROGRAM_SIZE_LIMIT_KB > 2048))
-#endif
+// AP_OA_SCRIPTING_ENABLED is defined in AP_Avoidance_config.h, included above, so
+// that this library and the AP_Avoidance queries and AVD_ parameters it depends on
+// compile in and out as one unit.  It is ALWAYS defined (to 0 or 1), so
+// "#if AP_OA_SCRIPTING_ENABLED" is valid under -Werror=undef wherever this header
+// is included.
 
 #if AP_OA_SCRIPTING_ENABLED
 
