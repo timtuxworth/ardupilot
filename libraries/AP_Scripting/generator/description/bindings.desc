@@ -1209,8 +1209,6 @@ userdata OAObstacle field obstacle_type uint8_t read write 0 UINT8_MAX
 userdata OAObstacle field location Location read
 userdata OAObstacle field position_NED_m Vector3f read
 userdata OAObstacle field velocity_NED_ms Vector3f read
-userdata OAObstacle field radius_m float read
-userdata OAObstacle field margin_m float read
 
 singleton AP_OAScripting rename OAScripting
 singleton AP_OAScripting depends AP_OA_SCRIPTING_ENABLED

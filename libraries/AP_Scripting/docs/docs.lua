@@ -4675,11 +4675,3 @@ function OAObstacle_ud:position_NED_m() end
 ---@return Vector3f_ud
 function OAObstacle_ud:velocity_NED_ms() end
 
--- get radius_m field - radius of this obstacle if it's a fence, in meters
----@return number
-function OAObstacle_ud:radius_m() end
-
--- get margin_m field - margin of this obstacle if it's a fence, in meters
----@return number
-function OAObstacle_ud:margin_m() end
-
