@@ -108,7 +108,7 @@ public:
     // add obstacles into the Avoidance system from MAVLink messages
     void handle_msg(const mavlink_message_t &msg);
 
-#if AP_AVOIDANCE_SCRIPTING_ENABLED
+#if AP_OA_SCRIPTING_ENABLED
     // For AP_AOScripting to check for obstacles
     float get_obstacle_radius_m(uint8_t emitter_type) const;
     float get_obstacle_height_m(uint8_t emitter_type) const;
@@ -233,14 +233,14 @@ private:
     AP_Float    _warn_distance_ne_m;
     AP_Float    _warn_distance_d_m;
 
-#if AP_AVOIDANCE_SCRIPTING_ENABLED
+#if AP_OA_SCRIPTING_ENABLED
     AP_Float    _well_clear_xy;
     AP_Float    _well_clear_z;
     AP_Float    _near_miss_xy;
     AP_Float    _near_miss_z;
     AP_Float    _uav_xy;
     AP_Float    _uav_z;
-#endif  // AP_AVOIDANCE_SCRIPTING_ENABLED
+#endif  // AP_OA_SCRIPTING_ENABLED
     // multi-thread support for avoidance
     mutable HAL_Semaphore _rsem;
 
