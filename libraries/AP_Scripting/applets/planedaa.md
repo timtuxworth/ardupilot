@@ -30,8 +30,8 @@ DAA costs roughly **7.1 kB of flash** (measured on Durandal: 1,599,176 bytes
 without, 1,606,288 with), so it is deliberately **not** in a default build. It is
 compiled in by default only on targets with more than 2 MB of program space —
 SITL, Linux, and boards carrying external program flash such as CubeRedPrimary.
-On every other board, including ordinary 2 MB boards like Durandal, MatekH743 and
-the Pixhawk6X, you must ask for it:
+On every other board, including ordinary 2 MB boards like QiotekZealotH743,
+CubeOrange+, Durandal, MatekH743 and the Pixhawk6X, you must ask for it:
 
 - **Custom Build Server**: tick **Enable Scripted Detect and Avoid (DAA)** under
   the _Plane_ category. Its dependencies — Scripting, Object Avoidance and "ADSB"
