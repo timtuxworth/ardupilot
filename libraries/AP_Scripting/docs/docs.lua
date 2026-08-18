@@ -4602,19 +4602,6 @@ function OAScripting:find_aircraft(vehicle_loc, lookahead_m, vertical_lookahead_
 ---@return number|nil distance_m -- distance in m to the nearest matching fence boundary edge, or nil if none is loaded
 function OAScripting:fence_distance(loc, fence_type) end
 
--- find the single obstacle closest to a line (start_loc, end_loc), returning its details
----@param start_loc Location_ud -- Location of the start of the line
----@param end_loc Location_ud -- Location of the end of the line to check
----@param lookahead_m number -- the furthest distance out from the line to check
----@return number|nil distance_min_m -- distance to the closest obstacle found, or nil if none
----@return integer|nil type -- the AP_OAAvoidance::ObstacleType of the type of object found
----@return string|nil label -- label of the obstacle for display to the user. for crewed aircraft will be an ICAO code
----@return uint32_t_ud|nil src_id -- the MAV_SYSID of the obstacle if relevant. For MAVLink this will be the MAV_SYSID of the vehicle
----@return Location_ud|nil location -- Location of the obstacle found
----@return Vector3f_ud|nil pos_NED_m -- position of the obstacle found in m NED from the origin
----@return Vector3f_ud|nil velocity_ms -- velocity of the obstacle in ms NED from the origin
-function OAScripting:find_closest_obstacle(start_loc, end_loc, lookahead_m) end
-
 -- OAObstacle is a userdata object that holds obstacle information managed by OAScripting
 -- it is returned by calls to OAScripting methods, it can't be created or manipulated in Lua
 -- fields are accessed as getter/setter methods, eg obstacle:obstacle_type() to read

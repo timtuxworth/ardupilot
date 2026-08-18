@@ -81,17 +81,6 @@ public:
                                                 OAObstacle  &fence_obstacle
                                                 ) const;
 
-    // This function is for Lua, so each Obstacle field gets returned as multiple parameters
-    bool find_closest_obstacle(const Location &start_loc, const Location &end_loc, float lookahead_m,
-                                    // Return values
-                                    float    &distance_m,
-                                    uint16_t &type,
-                                    char    *&label,
-                                    uint32_t &sys_id,
-                                    Location &location,
-                                    Vector3f &pos_NED_m,
-                                    Vector3f &velocity_NED_ms
-                                ) const;
 
     bool find_aircraft(const Location &vehicle_loc, const float lookahead_m, const float vertical_lookahead_m,
                                     float       &distance_m,
@@ -107,8 +96,6 @@ public:
     // matching polygon/circle fence is found, false otherwise.
     bool fence_distance(const Location &loc, uint8_t fence_type, float &distance_m) const;
 
-    // This function is for Lua, so each Obstacle field gets returned as multiple parameters
-    bool distance_obstacle_test(const Location &start_loc, const Location &end_loc, const float &lookahead_m, float &distance_min_m, Location &location_out) const;
 
 private:
 
