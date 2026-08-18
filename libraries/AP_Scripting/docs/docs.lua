@@ -4583,9 +4583,6 @@ OAScripting = {}
 ---@param lookahead_m number -- the furthest distance out from the line to check
 ---@return number|nil distance_min_m -- distance to the closest threat found, or nil if none
 ---@return OAObstacle_ud|nil obstacle -- the closest threat found
----@return OAObstacle_ud|nil obstacle2 -- additional threat found
----@return OAObstacle_ud|nil obstacle3 -- additional threat found
----@return OAObstacle_ud|nil obstacle4 -- additional threat found
 function OAScripting:find_threats(start_loc, end_loc, lookahead_m) end
 
 -- find the aircraft closest to a Location
@@ -4665,10 +4662,6 @@ function OAObstacle_ud:obstacle_type() end
 -- set obstacle_type field
 ---@param value integer
 function OAObstacle_ud:obstacle_type(value) end
-
--- get label field - label for display to the user. for crewed aircraft this is an ICAO code
----@return string
-function OAObstacle_ud:label() end
 
 -- get location field - the Location of this obstacle
 ---@return Location_ud
