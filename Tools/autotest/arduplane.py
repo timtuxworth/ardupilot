@@ -7700,7 +7700,9 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         waypoint without ever breaching.  Inclusion fences (polyfence circle,
         polyfence polygon and the FENCE_TYPE=2 home circle) surround home with
         the waypoint outside; the plane must approach the boundary but stay
-        contained, again without ever breaching.'''
+        contained, again without ever breaching.  Each scenario also asserts that the
+        obstacle ALERT reaches the GCS, which catches the whole message path being
+        suppressed.'''
         self.install_applet_script_context("planedaa.lua")
         self.install_script_module_context(
             self.script_modules_source_path("mavlink_wrappers.lua"),
@@ -7804,6 +7806,16 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             if self.statustext_in_collections("fence breached") is not None:
                 raise NotAchievedException(
                     "Fence breached during %s scenario" % name)
+
+            # the pilot must actually be told.  alert_obstacle() suppresses the
+            # ALERT when the reported range exceeds DAA_LKAHD, and a fence carries
+            # no single location, so this regressed silently once before: the range
+            # was measured to an unset Location (lat/lng 0,0) and every fence ALERT
+            # was dropped.  Nothing else in the suite reads a DAA message body.
+            if self.statustext_in_collections("ALERT:") is None:
+                raise NotAchievedException(
+                    "no obstacle ALERT sent for %s scenario" % name)
+
             self.do_fence_disable()
             self.disarm_vehicle(force=True)
             self.context_pop()
