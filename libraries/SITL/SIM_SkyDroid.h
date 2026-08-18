@@ -78,6 +78,14 @@ private:
     int8_t _commanded_yaw_speed_lsb;
     int8_t _commanded_pitch_speed_lsb;
 
+    // true from the moment a "PTZ" 0x05 ("center") command is received until the
+    // next GSY/GSP speed command arrives - see update()'s use of this to simulate
+    // the gimbal's own one-shot centering behaviour (AP_Mount_SkyDroid::
+    // send_target_neutral()/send_target_retracted() send this instead of driving
+    // GSY/GSP themselves, so without this the simulated gimbal would never move
+    // for RETRACT/NEUTRAL and the autotest's neutral-position check would fail)
+    bool _centering;
+
     // read and dispatch incoming packets from autopilot
     void update_input();
 
