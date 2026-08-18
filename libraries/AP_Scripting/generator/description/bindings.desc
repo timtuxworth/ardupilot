@@ -1206,7 +1206,6 @@ userdata OAObstacle field src_id int32_t read write -1 2147483647
 userdata OAObstacle field icao_code int32_t read write 0 0xFFFFFF
 userdata OAObstacle field emitter_type uint8_t read write 0 UINT8_MAX
 userdata OAObstacle field obstacle_type uint8_t read write 0 UINT8_MAX
-userdata OAObstacle field label string read
 userdata OAObstacle field location Location read
 userdata OAObstacle field position_NED_m Vector3f read
 userdata OAObstacle field velocity_NED_ms Vector3f read
@@ -1215,7 +1214,7 @@ userdata OAObstacle field margin_m float read
 
 singleton AP_OAScripting rename OAScripting
 singleton AP_OAScripting depends AP_OA_SCRIPTING_ENABLED
-singleton AP_OAScripting method find_threats boolean Location Location float'skip_check float'Null OAObstacle'Null OAObstacle'Null OAObstacle'Null OAObstacle'Null
+singleton AP_OAScripting method find_threats boolean Location Location float'skip_check float'Null OAObstacle'Null
 singleton AP_OAScripting method find_aircraft boolean Location float'skip_check float'skip_check float'Null OAObstacle'Null
 singleton AP_OAScripting method fence_distance boolean Location uint8_t 0 255 float'Null
 -- singleton AP_OAScripting method find_closest_aircraft boolean Location float'skip_check float'Null uint16_t'Null string'Null uint32_t'Null Location'Null Vector3f'Null Vector3f'Null
