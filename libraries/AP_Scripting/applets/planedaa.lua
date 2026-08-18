@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-052"
+SCRIPT_VERSION      = "4.8.0-053"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -497,7 +497,7 @@ local margin_alt_m          = DAA_MARGIN_ALT:get()
 local alt_hyst_m            = DAA_ALT_HYST_M:get()
 local alt_cool_ms           = DAA_ALT_COOL_S:get() * 1000
 local loiter_cool_ms        = DAA_LTR_COOL_S:get() * 1000
-local margin_crewed_m     = DAA_MARGIN_CA:get()
+local margin_crewed_m       = DAA_MARGIN_CA:get()
 local margin_vertical_m     = DAA_MARGIN_CA_Z:get()
 local margin_bird_m         = DAA_MARGIN_BIRD:get()
 local margin_prey_m         = DAA_MARGIN_PREY:get()
@@ -510,8 +510,8 @@ local refresh_period_ms     = 1000.0 / math.max(DAA_UPDATE_RATE:get(), 1.0)
 local bendy_ratio           = DAA_BR_RATIO:get()
 local bendy_angle           = DAA_BR_ANGLE:get()
 local wp_loiter_rad_m       = WP_LOITER_RAD:get()
-local crewed_avoid_alt_m        = DAA_AVD_ALT:get()
-local crewed_avoid_alt_frame    = DAA_AVD_ALT_TP:get()
+local crewed_avoid_alt_m    = DAA_AVD_ALT:get()
+local crewed_avoid_alt_frame = DAA_AVD_ALT_TP:get()
 local daa_alert             = DAA_AVD_ALERT:get()
 local daa_action            = DAA_AVD_ACTION:get()
 local wind_min_ms           = DAA_WIND_MIN:get()
@@ -663,7 +663,7 @@ local function get_vehicle_state()
         alt_hyst_m            = DAA_ALT_HYST_M:get()
         alt_cool_ms           = DAA_ALT_COOL_S:get() * 1000
         loiter_cool_ms        = DAA_LTR_COOL_S:get() * 1000
-        margin_crewed_m     = DAA_MARGIN_CA:get()
+        margin_crewed_m       = DAA_MARGIN_CA:get()
         margin_vertical_m     = DAA_MARGIN_CA_Z:get()
         margin_bird_m         = DAA_MARGIN_BIRD:get()
         margin_prey_m         = DAA_MARGIN_PREY:get()
@@ -675,8 +675,8 @@ local function get_vehicle_state()
         bendy_ratio           = DAA_BR_RATIO:get()
         bendy_angle           = DAA_BR_ANGLE:get()
         wp_loiter_rad_m       = WP_LOITER_RAD:get()
-        crewed_avoid_alt_m        = DAA_AVD_ALT:get()
-        crewed_avoid_alt_frame    = DAA_AVD_ALT_TP:get()
+        crewed_avoid_alt_m    = DAA_AVD_ALT:get()
+        crewed_avoid_alt_frame  = DAA_AVD_ALT_TP:get()
         daa_alert             = DAA_AVD_ALERT:get()
         daa_action            = DAA_AVD_ACTION:get()
         wind_min_ms           = DAA_WIND_MIN:get()
@@ -1245,9 +1245,9 @@ local DAA = {
 
         local status, err = pcall(logger.write, logger, "DAAG",
             'DstF,TLat,TLng,TAlt,TFra,DstH,DstZ,ICAO',
-            'fLLfBffI',                          -- Formats (L for Lat/Lng, f for Alt)
-            'mDUm-mmh',                          -- Units (D=lat deg, U=lng deg, m=meter)
-            '-GG-----',                          -- Multipliers (G=1e-7 for L types)
+            'fLLfBffI',                         -- Formats (L for Lat/Lng, f for Alt)
+            'mDUm-mmh',                         -- Units (D=lat deg, U=lng deg, m=meter)
+            '-GG-----',                         -- Multipliers (G=1e-7 for L types)
             aircraft.distance_m,                -- DstF - Distance to found aircraft in meters
             aircraft.location:lat(),            -- TLat - Latitude of proposed new target in degrees
             aircraft.location:lng(),            -- TLng - Longitude of proposed new target in degrees
@@ -1272,17 +1272,17 @@ local DAA = {
         end
         local status, err = pcall(logger.write, logger, "DAAV",
             'DstO,TLat,TLng,TAlt,TFra,DstH,DstZ,ObjT,Age',
-            'fLLfBffBf',                            -- Formats (L for Lat/Lng, f for Alt)
-            'mDUm-mm-s',                            -- Units (D=lat deg, U=lng deg, m=meter, s=second)
-            '-GG------',                            -- Multipliers (G=1e-7 for L types)
-            obstacle.distance_m,                    -- DstO - Distance to found obstacle in meters
-            target_loc:lat(),                       -- TLat - Latitude of DAA target in degrees
-            target_loc:lng(),                       -- TLng - Longitude of DAA target in degrees
-            target_loc:alt() * 0.01,       -- TAlt - Alitude of proposed new target in meters
-            target_loc:get_alt_frame(),    -- TFrm - Frame of the ALtitlde: 0: AMSL, 1: Home Relative, 3: Terrain Relative
-            obstacle.distance_xy,                   -- DstH - Horizontal distance to the obstacle
-            obstacle.distance_z,                    -- DstZ - Vertical distance to the aircraft (+ve is up),
-            obstacle.type,                          -- ObjT - the type of the obstacle as an OBSTACLE_TYPE
+            'fLLfBffBf',                        -- Formats (L for Lat/Lng, f for Alt)
+            'mDUm-mm-s',                        -- Units (D=lat deg, U=lng deg, m=meter, s=second)
+            '-GG------',                        -- Multipliers (G=1e-7 for L types)
+            obstacle.distance_m,                -- DstO - Distance to found obstacle in meters
+            target_loc:lat(),                   -- TLat - Latitude of DAA target in degrees
+            target_loc:lng(),                   -- TLng - Longitude of DAA target in degrees
+            target_loc:alt() * 0.01,            -- TAlt - Alitude of proposed new target in meters
+            target_loc:get_alt_frame(),         -- TFrm - Frame of the ALtitlde: 0: AMSL, 1: Home Relative, 3: Terrain Relative
+            obstacle.distance_xy,               -- DstH - Horizontal distance to the obstacle
+            obstacle.distance_z,                -- DstZ - Vertical distance to the aircraft (+ve is up),
+            obstacle.type,                      -- ObjT - the type of the obstacle as an OBSTACLE_TYPE
             obstacle.timestamp_ms and ((now_ms:tofloat() - obstacle.timestamp_ms) * 0.001) or 0  -- Age - obstacle position age in s (0 = fresh/on-board)
         )
         if not status then
@@ -1304,22 +1304,22 @@ local DAA = {
     local function log_smoothing(direct_deg, raw_deg, resisted_deg, final_deg, side, flip, urgent, motion, obstacle)
         local status, err = pcall(logger.write, logger, "DAAS",
             'HdD,HdR,HdS,HdC,Sid,Flp,Urg,Cls,CPA,TTC,PsB,Dst,Typ',
-            'ffffbBBfffbfB',                        -- Formats
-            'dddd---nms-m-',                        -- Units (d=deg, n=m/s, m=metre, s=second)
-            '-------------',                        -- Multipliers
-            wrap_360(direct_deg),                   -- HdD - direct bearing to target
-            wrap_360(raw_deg),                      -- HdR - raw bendy-ruler bearing
-            wrap_360(resisted_deg),                 -- HdS - after clearance hysteresis (pre-smoothing)
-            wrap_360(final_deg),                    -- HdC - final commanded bearing (flown)
-            side,                                   -- Sid - committed side (-1 left / 0 / +1 right)
-            (flip and 1 or 0),                      -- Flp - side-flip debounce pending
-            (urgent and 1 or 0),                    -- Urg - slew limit bypassed (urgent)
-            motion.closing_speed,                   -- Cls - closing speed
-            motion.cpa_miss,                        -- CPA - predicted horizontal miss distance
-            math.min(motion.ttc, 999.0),            -- TTC - time to closest approach (capped)
-            motion.pass_behind,                     -- PsB - side that passes behind the obstacle
-            obstacle.distance_m,                    -- Dst - range to the obstacle
-            obstacle.type)                          -- Typ - OBSTACLE_TYPE
+            'ffffbBBfffbfB',                    -- Formats
+            'dddd---nms-m-',                    -- Units (d=deg, n=m/s, m=metre, s=second)
+            '-------------',                    -- Multipliers
+            wrap_360(direct_deg),               -- HdD - direct bearing to target
+            wrap_360(raw_deg),                  -- HdR - raw bendy-ruler bearing
+            wrap_360(resisted_deg),             -- HdS - after clearance hysteresis (pre-smoothing)
+            wrap_360(final_deg),                -- HdC - final commanded bearing (flown)
+            side,                               -- Sid - committed side (-1 left / 0 / +1 right)
+            (flip and 1 or 0),                  -- Flp - side-flip debounce pending
+            (urgent and 1 or 0),                -- Urg - slew limit bypassed (urgent)
+            motion.closing_speed,               -- Cls - closing speed
+            motion.cpa_miss,                    -- CPA - predicted horizontal miss distance
+            math.min(motion.ttc, 999.0),        -- TTC - time to closest approach (capped)
+            motion.pass_behind,                 -- PsB - side that passes behind the obstacle
+            obstacle.distance_m,                -- Dst - range to the obstacle
+            obstacle.type)                      -- Typ - OBSTACLE_TYPE
         if not status then
             gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " log smoothing:" .. tostring(err))
         end
@@ -1785,19 +1785,19 @@ local DAA = {
         end
         local enabled = fence:get_enabled_fences()
         if (enabled & FENCE_TYPE_ALT_MAX) ~= 0 then
-            local safe_max, frame_max = fence:get_safe_alt_max()
-            local ceiling = safe_max - margin_alt_m
-            local cur = loc:get_alt_m(frame_max)
-            if cur ~= nil and cur > ceiling then
-                loc:set_alt_m(ceiling, frame_max)
+            local safe_max_alt_m, max_alt_frame = fence:get_safe_alt_max()
+            local ceiling_m = safe_max_alt_m - margin_alt_m
+            local current_alt_m = loc:get_alt_m(max_alt_frame)
+            if current_alt_m ~= nil and current_alt_m > ceiling_m then
+                loc:set_alt_m(ceiling_m, max_alt_frame)
             end
         end
         if (enabled & FENCE_TYPE_ALT_MIN) ~= 0 then
-            local safe_min, frame_min = fence:get_safe_alt_min()
-            local floor_alt = safe_min + margin_alt_m
-            local cur = loc:get_alt_m(frame_min)
-            if cur ~= nil and cur < floor_alt then
-                loc:set_alt_m(floor_alt, frame_min)
+            local safe_min_alt_m, min_alt_frame = fence:get_safe_alt_min()
+            local floor_alt_m = safe_min_alt_m + margin_alt_m
+            local current_alt_m = loc:get_alt_m(min_alt_frame)
+            if current_alt_m ~= nil and current_alt_m < floor_alt_m then
+                loc:set_alt_m(floor_alt_m, min_alt_frame)
             end
         end
     end
@@ -1823,8 +1823,8 @@ local DAA = {
     -- intermittently as the plane climbs toward then levels off at the clamp altitude; without a latch
     -- the trigger toggles and re-alerts every few seconds. Once engaged we stay engaged (so the alert
     -- de-dupes to one message and the clamp holds steady) until the plane is clearly back in safe air.
-    local alt_fence_active = false
-    local alt_fence_near = false
+    local alt_fence_active  = false
+    local alt_fence_near    = false
     local last_alt_alert_ms = uint32_t(0)
 
     -- Proactively detect that we are approaching (or projected to cross) an altitude fence.
@@ -1834,15 +1834,15 @@ local DAA = {
     -- Returns a synthetic obstacle while corrective action is needed (latched), otherwise nil.
     local function detect_altitude_fence()
         if fence == nil or current_loc == nil then
-            alt_fence_active = false
-            alt_fence_near = false
+            alt_fence_active    = false
+            alt_fence_near      = false
             return nil
         end
         local enabled = fence:get_enabled_fences()
         local alt_max_on = (enabled & FENCE_TYPE_ALT_MAX) ~= 0
         local alt_min_on = (enabled & FENCE_TYPE_ALT_MIN) ~= 0
         if not alt_max_on and not alt_min_on then
-            alt_fence_active = false
+            alt_fence_active    = false
             alt_fence_near = false
             return nil
         end
@@ -1862,30 +1862,30 @@ local DAA = {
         -- once we are DAA_ALT_HYST_M clear of the limit on both current and projected altitude.
         local otype, label_str, headroom_m
         if alt_max_on then
-            local safe_max, frame_max = fence:get_safe_alt_max()
-            local cur = current_loc:get_alt_m(frame_max)
-            if cur ~= nil then
-                local ceiling = safe_max - margin_alt_m
-                local projected = cur + climb_rate_ms * horizon_s
-                local enter = cur > ceiling or projected > ceiling
-                local clear = cur < ceiling - alt_hyst_m and projected < ceiling - alt_hyst_m
+            local safe_max_alt_m, max_alt_frame = fence:get_safe_alt_max()
+            local current_alt_m = current_loc:get_alt_m(max_alt_frame)
+            if current_alt_m ~= nil then
+                local ceiling_m = safe_max_alt_m - margin_alt_m
+                local projected_alt_m = current_alt_m + climb_rate_ms * horizon_s
+                local enter = current_alt_m > ceiling_m or projected_alt_m > ceiling_m
+                local clear = current_alt_m < ceiling_m - alt_hyst_m and projected_alt_m < ceiling_m - alt_hyst_m
                 if enter or (alt_fence_active and not clear) then
                     otype, label_str = OBSTACLE_TYPE.FENCE_ALT_MAX, "Alt Max Fence"
-                    headroom_m = safe_max - cur     -- metres below the safe ceiling
+                    headroom_m = safe_max_alt_m - current_alt_m     -- metres below the safe ceiling
                 end
             end
         end
         if label_str == nil and alt_min_on then
-            local safe_min, frame_min = fence:get_safe_alt_min()
-            local cur = current_loc:get_alt_m(frame_min)
-            if cur ~= nil then
-                local floor_alt = safe_min + margin_alt_m
-                local projected = cur + climb_rate_ms * horizon_s
-                local enter = cur < floor_alt or projected < floor_alt
-                local clear = cur > floor_alt + alt_hyst_m and projected > floor_alt + alt_hyst_m
+            local safe_min_alt_m, min_alt_frame = fence:get_safe_alt_min()
+            local current_alt_m = current_loc:get_alt_m(min_alt_frame)
+            if current_alt_m ~= nil then
+                local floor_alt_m = safe_min_alt_m + margin_alt_m
+                local projected_alt_m = current_alt_m + climb_rate_ms * horizon_s
+                local enter = current_alt_m < floor_alt_m or projected_alt_m < floor_alt_m
+                local clear = current_alt_m > floor_alt_m + alt_hyst_m and projected_alt_m > floor_alt_m + alt_hyst_m
                 if enter or (alt_fence_active and not clear) then
                     otype, label_str = OBSTACLE_TYPE.FENCE_ALT_MIN, "Alt Min Fence"
-                    headroom_m = cur - safe_min     -- metres above the safe floor
+                    headroom_m = current_alt_m - safe_min_alt_m     -- metres above the safe floor
                 end
             end
         end
@@ -1907,8 +1907,8 @@ local DAA = {
             last_alt_alert_ms = now_ms
         end
 
-        alt_fence_near = near
-        alt_fence_active = now_active
+        alt_fence_near      = near
+        alt_fence_active    = now_active
         if not now_active then
             return nil
         end
@@ -1933,9 +1933,9 @@ local DAA = {
         local distance_m, aircraft_obstacle = OAScripting:find_aircraft(current_loc, well_clear_xy + margin_crewed_m, well_clear_z + margin_vertical_m)
 
         if distance_m == nil or aircraft_obstacle == nil then
-            aircraft_avoiding = nil
-            last_aircraft_obstacle = nil
-            last_aircraft_ts_ms = nil
+            aircraft_avoiding       = nil
+            last_aircraft_obstacle  = nil
+            last_aircraft_ts_ms     = nil
             return
         end
 
@@ -1952,9 +1952,9 @@ local DAA = {
 
         local obstacle = populate_obstacle(distance_m, aircraft_obstacle)
 
-        aircraft_avoiding = obstacle
-        last_aircraft_obstacle = obstacle
-        last_aircraft_ts_ms = ts_ms
+        aircraft_avoiding       = obstacle
+        last_aircraft_obstacle  = obstacle
+        last_aircraft_ts_ms     = ts_ms
 
         log_detect_aircraft(aircraft_avoiding)
     end
@@ -2002,15 +2002,15 @@ local DAA = {
         for i = 0, math.floor(360 / coarse_inc_deg) do
             local distance_found_m, bearing_found_deg, obstacle_found = test_step1(distance_to_target_m, bearing_deg, i, target_loc, coarse_inc_deg)
             if distance_found_m > best_distance_m then
-                best_distance_m = distance_found_m
-                best_bearing_deg = bearing_found_deg
+                best_distance_m     = distance_found_m
+                best_bearing_deg    = bearing_found_deg
             end
             if obstacle_found == nil then -- found a path with no obstacles - done!
                 clear_delta_deg = wrap_180(bearing_found_deg - bearing_deg)
                 goto continue
             end
             if distance_found_m < obstacle_distance_m then
-                obstacle_avoiding = obstacle_found
+                obstacle_avoiding   = obstacle_found
                 obstacle_distance_m = distance_found_m
             end
         end
@@ -2041,7 +2041,7 @@ local DAA = {
                     break
                 end
                 if distance_found_m < obstacle_distance_m then
-                    obstacle_avoiding = obstacle_found
+                    obstacle_avoiding   = obstacle_found
                     obstacle_distance_m = distance_found_m
                 end
             end
@@ -2067,7 +2067,7 @@ local DAA = {
                     break
                 end
                 if distance_found_m < obstacle_distance_m then
-                    obstacle_avoiding = obstacle_found
+                    obstacle_avoiding   = obstacle_found
                     obstacle_distance_m = distance_found_m
                 end
             end
@@ -2109,10 +2109,10 @@ local DAA = {
             -- Fences are fixed and containment is safety-critical: a heading slew limit or a
             -- committed side could delay/deflect the turn at a hard boundary and breach it.
             -- Keep the responsive bendy-ruler behaviour (clearance hysteresis only).
-            best_bearing_deg = resist_bearing_change(last_avoid_bearing_deg, current_lookahead, best_bearing_deg, best_distance_m)
-            last_avoid_bearing_deg = best_bearing_deg
-            committed_side_sign = 0
-            side_flip_pending = false
+            best_bearing_deg        = resist_bearing_change(last_avoid_bearing_deg, current_lookahead, best_bearing_deg, best_distance_m)
+            last_avoid_bearing_deg  = best_bearing_deg
+            committed_side_sign     = 0
+            side_flip_pending       = false
         else
             -- Non-fixed obstacles (aircraft, drones, birds, AIS, ...): velocity-aware smoothing.
             -- First decide whether the obstacle is actually a conflict: one that is opening range
@@ -2125,17 +2125,17 @@ local DAA = {
                 -- re-decided every cycle from current geometry (no hold) so a manoeuvring obstacle
                 -- is always tracked on fresh data; near a marginal crossing that can cost a few
                 -- extra (slew-limited) heading reversals, which is the safe trade.
-                obstacle_avoiding = nil
-                last_avoid_bearing_deg = nil
-                committed_side_sign = 0
-                side_flip_pending = false
+                obstacle_avoiding       = nil
+                last_avoid_bearing_deg  = nil
+                committed_side_sign     = 0
+                side_flip_pending       = false
                 return nil
             end
             -- Otherwise commit a side and slew-limit the heading so we track a smooth path
             -- instead of wiggling as the obstacle (and the instantaneous geometry) moves.
             -- refine_avoidance_bearing() also logs the DAAS smoothing trace each cycle.
-            best_bearing_deg = refine_avoidance_bearing(bearing_deg, best_bearing_deg, best_distance_m, motion, obstacle_avoiding)
-            last_avoid_bearing_deg = best_bearing_deg
+            best_bearing_deg        = refine_avoidance_bearing(bearing_deg, best_bearing_deg, best_distance_m, motion, obstacle_avoiding)
+            last_avoid_bearing_deg  = best_bearing_deg
         end
 
         local proj_distance = math.max(distance_to_target_m, current_lookahead)   -- fix bug 2
