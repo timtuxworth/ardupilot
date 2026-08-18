@@ -9,7 +9,8 @@ the required data to Lua and then allows the Lua to implement most of the Alert 
 in order to allow for the maximum implementation flexibility in the face of varying regulatory
 environments across the globe.
 
-This script requires the AC_AVOID library to be available. This requires a custom build.
+This script needs the `AP_OAScripting` bindings, which are **not in a default
+firmware build** on most boards. See _Firmware build_ below.
 
 ## Setup
 
@@ -21,10 +22,25 @@ parameters appear.
 
 ### 1. Firmware build
 
-The flight controller firmware must be a **custom build** that includes the
-`AP_OAScripting` bindings from the AC_Avoidance library, which expose the
-`OAScripting` singleton to Lua. The script aborts at startup if this object is
-not present.
+The applet talks to the `OAScripting` singleton, which the `AP_OAScripting`
+library in AC_Avoidance exposes to Lua. The script aborts at startup if that
+object is not present, so the firmware must contain it.
+
+DAA costs roughly **8.5 kB of flash** (measured on Durandal: 1,599,444 bytes
+without, 1,608,000 with), so it is deliberately **not** in a default build. It is
+compiled in by default only on targets with more than 2 MB of program space —
+SITL, Linux, and boards carrying external program flash such as CubeRedPrimary.
+On every other board, including ordinary 2 MB boards like Durandal, MatekH743 and
+the Pixhawk6X, you must ask for it:
+
+- **Custom Build Server**: tick **Enable Scripted Detect and Avoid (DAA)** under
+  the _Plane_ category. Its dependencies — Scripting, Object Avoidance and "ADSB"
+  Avoidance — are selected for you.
+- **Building yourself**: `./waf configure --board <board> --enable-AP_OASCRIPTING`
+  then `./waf plane`.
+
+To confirm a binary has it, `Tools/scripts/extract_features.py <binary>` lists
+`AP_OA_SCRIPTING_ENABLED` when the feature is present.
 
 ### 2. Scripting engine
 
