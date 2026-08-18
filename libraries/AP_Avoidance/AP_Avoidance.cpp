@@ -267,6 +267,12 @@ void AP_Avoidance::add_obstacle(const uint32_t obstacle_timestamp_ms,
     if (! check_startup()) {
         return;
     }
+    // take the lock before the scan below, not after it: the loop reads _obstacle_count
+    // and _obstacles[] to pick the slot, and check_for_threats() can be shrinking the
+    // list at the same time.  check_startup() deliberately stays outside - it can call
+    // deinit(), which takes this same semaphore.
+    WITH_SEMAPHORE(_rsem);
+
     uint32_t oldest_timestamp = std::numeric_limits<uint32_t>::max();
     uint8_t oldest_index = 255; // avoid compiler warning with initialisation
     int16_t index = -1;
@@ -283,8 +289,7 @@ void AP_Avoidance::add_obstacle(const uint32_t obstacle_timestamp_ms,
             oldest_index = i;
         }
     }
-    WITH_SEMAPHORE(_rsem);
-    
+
     if (index == -1) {
         // existing obstacle not found.  See if we can store it anyway:
         if (i <_obstacles_allocated) {
@@ -832,20 +837,18 @@ bool AP_Avoidance::is_adsb_aircraft(uint8_t emitter_type)
     return false;
 }
 
-// For AP_AOScripting to check for obstacles and return the closest one
-// as it is looping through all obstacles, also finds the closest aircraft it finds as well
-// we do this because crewed aircraft need special treatment when avoiding obstacles
+// For AP_AOScripting to check for obstacles and return the closest one.
+// Crewed aircraft are found separately, by distance_to_aircraft(): that applies the
+// caller's vertical gate, whereas this uses the per-emitter table.
 float AP_Avoidance::distance_to_obstacle(const Vector3f &start_NED_m, const Vector3f &end_NED_m,
                                             // return values
-                                            Obstacle &avoid_obstacle,
-                                            Obstacle &closest_aircraft
+                                            Obstacle &avoid_obstacle
                                         ) const
 {
     // guard the obstacle database against concurrent updates from the MAVLink thread
     WITH_SEMAPHORE(_rsem);
 
     float distance_new_m = FLT_MAX;
-    float aircraft_distance_m = FLT_MAX;
 
     const uint32_t now_ms = AP_HAL::millis();
     for(uint8_t i = 0; i < _obstacle_count; i++) {
@@ -896,14 +899,6 @@ float AP_Avoidance::distance_to_obstacle(const Vector3f &start_NED_m, const Vect
                 // we are within the horizontal distance - next check the vertical distance
                 distance_new_m  = distance_m;
                 avoid_obstacle  = obstacle;
-            }
-
-            const uint8_t emitter_type = obstacle.emitter_type;
-            if (is_adsb_aircraft(emitter_type)
-                    && distance_m < aircraft_distance_m
-                    && height_difference_m < get_obstacle_height_m(obstacle.emitter_type)) {
-                aircraft_distance_m = distance_m;
-                closest_aircraft    = obstacle;
             }
         }
     }
