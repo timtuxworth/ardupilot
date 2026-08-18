@@ -67,11 +67,12 @@ public:
 
 
 
-    // For efficiency don't want to loop through the obstacles multiple times. so this
-    // returns both the closes aircraft (from ADS-B) and the closest obstacle in general which might be
-    // ADS-B Objects from AP_Avoidance
+    // Returns the single closest obstacle to the line, whichever source it came from:
+    // ADS-B objects from AP_Avoidance
     // Proximity objects from AP_OADatabase
     // Fences from AC_Fence
+    // Crewed aircraft are found separately by find_aircraft(), which applies the
+    // caller's vertical gate rather than the per-emitter table.
     bool find_threats(const Location &start_loc, const Location &end_loc, float lookahead_m,
                                                 // Return values
                                                 float       &distance_m,
@@ -98,7 +99,7 @@ private:
 
     static AP_OAScripting *_singleton;
 
-    float _distance_to_avoidance(const Vector3f &start_NED_cm, const Vector3f &end_NED_cm, OAObstacle &script_obstacle, OAObstacle &aircraft_obstacle) const;
+    float _distance_to_avoidance(const Vector3f &start_NED_cm, const Vector3f &end_NED_cm, OAObstacle &script_obstacle) const;
     float _distance_to_object(const Vector3f &start_NED_m, const Vector3f end_NED_m, OAObstacle &script_obstacle) const;
     float _distance_to_aircraft(const Vector3f &vehicle_NED_cm, const float lookahead_m, const float vertical_lookahead_m, OAObstacle &script_obstacle) const;
 
