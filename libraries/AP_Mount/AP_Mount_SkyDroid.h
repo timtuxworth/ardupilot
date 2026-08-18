@@ -146,10 +146,29 @@ protected:
     // get attitude as a quaternion.  returns true on success
     bool get_attitude_quaternion(Quaternion& att_quat) override;
 
-    // SkyDroid can send either rates or angles
+    // SkyDroid can send either rates or angles, and also has a dedicated one-shot
+    // "center" command for retract/neutral (see send_target_retracted()/
+    // send_target_neutral()) rather than falling through to the angle-based
+    // conversion every other target type uses
     uint8_t natively_supported_mount_target_types() const override {
-        return NATIVE_ANGLES_AND_RATES_ONLY;
+        return NATIVE_ANGLES_AND_RATES_ONLY |
+               (1U << uint8_t(MountTargetType::RETRACTED)) |
+               (1U << uint8_t(MountTargetType::NEUTRAL));
     };
+
+    // move to a "retracted" position: SkyDroid has no separate stow position, so
+    // this uses the same one-shot "center" command as send_target_neutral()
+    void send_target_retracted() override;
+
+    // move to a neutral (forward-pointing) position using the gimbal's own one-shot
+    // "center" command (PTZ data byte 0x05), rather than the angle-based conversion
+    // every other target type falls through to (which would drive our own P-controller
+    // toward _params.neutral_angles, requiring GAC attitude feedback to converge - see
+    // send_target_angles()).  This is deliberately independent of that feedback loop:
+    // a switch mapped to RC_TARGETING->NEUTRAL should reliably point the gimbal
+    // forward using the gimbal's own logic, not depend on our closed loop ever
+    // having received a GAC packet
+    void send_target_neutral() override;
 
 private:
 
@@ -277,6 +296,10 @@ private:
     // lock should be true if gimbal should maintain an earth-frame target
     // lock is false to follow / maintain a body-frame target
     bool set_gimbal_lock(bool lock);
+
+    // send the gimbal's own one-shot "center" command (PTZ data byte 0x05).  Used by
+    // both send_target_retracted() and send_target_neutral() - see their comments
+    bool send_center_command();
 
     // members
     bool _recording;                                            // recording status, tracked locally from commands we've sent
