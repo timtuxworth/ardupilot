@@ -75,10 +75,7 @@ public:
     bool find_threats(const Location &start_loc, const Location &end_loc, float lookahead_m,
                                                 // Return values
                                                 float       &distance_m,
-                                                OAObstacle  &any_obstacle,
-                                                OAObstacle  &aircraft_obstacle,
-                                                OAObstacle  &proximity_obstacle,
-                                                OAObstacle  &fence_obstacle
+                                                OAObstacle  &any_obstacle
                                                 ) const;
 
 
@@ -110,7 +107,6 @@ private:
     static void _populate_fence_obstacle(OAObstacle &fence_obstacle, AP_OAScripting::ObstacleType obstacle_type);
 
     static ObstacleType _get_obstacle_type(uint8_t emitter_type, int32_t obstacle_id);
-    static char* _get_obstacle_label(uint8_t emitter_type, int32_t obstacle_id);
 
     // Properties to work around Lua binding problem of the binding generator not being able
     // to pass in Locations and return a number of other values
@@ -127,7 +123,6 @@ struct OAObstacle {
     uint32_t                    icao_code;      // The ICAO code (if relevant) from ADSB
     uint32_t                    emitter_type;   // The ADSB_EMITTER of the obstacle (if relevant)
     uint8_t                     obstacle_type;
-    char                        *label;
 
     Vector3f                    velocity_NED_ms;
     Location                    location;
