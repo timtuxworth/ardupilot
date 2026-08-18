@@ -9523,7 +9523,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             self.ScriptedArmingChecksAppletEStop,
             self.ScriptedArmingChecksAppletRally,
             self.PlaneFollowAppletSanity,
-            Test(self.PlaneFollowApplet, speedup=15),
+            Test(self.PlaneFollowApplet, speedup=40),
             self.PreflightRebootComponent,
             self.UTMGlobalPosition,
             self.UTMGlobalPositionWaypoint,
