@@ -126,9 +126,10 @@ const AP_Param::GroupInfo AP_Avoidance::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("F_ALT_MIN",    12, AP_Avoidance, _fail_altitude_min_m, 0),
 
-// equivalent to AP_AVOIDANCE_SCRIPTING_ENABLED, spelled out because waf decides whether
-// to compile this source per-vehicle by searching the .cpp text for APM_BUILD_TYPE
-#if AP_SCRIPTING_ENABLED && APM_BUILD_TYPE(APM_BUILD_ArduPlane)   // DAA standoff params are Plane-only (consumed only by AP_OAScripting); keep them off Copter/Rover/etc.
+// The APM_BUILD_TYPE term is redundant - AP_OA_SCRIPTING_ENABLED already includes it -
+// but it must appear in this .cpp's text, because that is how waf decides to compile
+// this source per-vehicle; it does not follow macros through headers.
+#if AP_OA_SCRIPTING_ENABLED && APM_BUILD_TYPE(APM_BUILD_ArduPlane)   // DAA standoff params, consumed only by AP_OAScripting
     // @Param: WCLR_XY
     // @DisplayName: Well Clear horizontal
     // @Description: Horizontal "Well Clear" separation kept from crewed aircraft during ADS-B avoidance (metres). The ASTM F3442M-23 standard specifies 2000 ft (= 609.6 m).
@@ -687,7 +688,7 @@ void AP_Avoidance::handle_msg(const mavlink_message_t &msg)
                  static_cast<uint8_t>(ADSB_EMITTER_TYPE_UAV));
 }
 
-#if AP_SCRIPTING_ENABLED && APM_BUILD_TYPE(APM_BUILD_ArduPlane)   // DAA methods are consumed only by the Plane-gated AP_OAScripting; keep them off other vehicles
+#if AP_OA_SCRIPTING_ENABLED && APM_BUILD_TYPE(APM_BUILD_ArduPlane)   // see above: APM_BUILD_TYPE repeated for waf's per-vehicle detection
 // get the avoidance radius in meters of a given obstacle type
 // the definition of "Well Clear" (2000ft = 609.6m) is from ASTM F3442M-23
 float AP_Avoidance::get_obstacle_radius_m(uint8_t emitter_type) const
