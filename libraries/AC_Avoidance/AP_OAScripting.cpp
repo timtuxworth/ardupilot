@@ -68,8 +68,7 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
     // "obstacles" are stored in AP_Avoidance - the are typically populated by MAVLink (ADSB, GLOBAL_POSITION, FOLLOW_TARGET)
     // These have priority over all other obstacles, especially if they are ADSB messages representing crewed aircraft
     OAObstacle obstacle_found {};
-    OAObstacle aircraft_found {};
-    distance_new_m = _distance_to_avoidance(start_NED_m, end_NED_m, obstacle_found, aircraft_found);
+    distance_new_m = _distance_to_avoidance(start_NED_m, end_NED_m, obstacle_found);
     if (distance_new_m < distance_m) {
         obstacle            = obstacle_found;
         distance_m          = distance_new_m;
@@ -367,18 +366,15 @@ void AP_OAScripting::_populate_scripting_obstacle(OAObstacle &script_obstacle, c
 // Distance to objects in the AP_Avoidance database from a line from START_NED_cm to  end_NED_cm
 float AP_OAScripting::_distance_to_avoidance(const Vector3f &start_NED_cm, const Vector3f &end_NED_cm,
                                                 // return values
-                                                OAObstacle &script_any_obstacle,
-                                                OAObstacle &script_aircraft_obstacle
+                                                OAObstacle &script_any_obstacle
                                                 ) const
 {
     AP_Avoidance *avoid = AP_Avoidance::get_singleton();
-    AP_Avoidance::Obstacle any_avoidance;
-    AP_Avoidance::Obstacle aircraft_avoidance;
+    AP_Avoidance::Obstacle any_avoidance {};
 
-    float distance_m = avoid->distance_to_obstacle(start_NED_cm, end_NED_cm, any_avoidance, aircraft_avoidance);
+    float distance_m = avoid->distance_to_obstacle(start_NED_cm, end_NED_cm, any_avoidance);
     if (distance_m < FLT_MAX) {
         _populate_scripting_obstacle(script_any_obstacle, &any_avoidance);
-        _populate_scripting_obstacle(script_aircraft_obstacle, &aircraft_avoidance);
     }
     return distance_m;
 }
