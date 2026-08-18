@@ -963,7 +963,7 @@ local function find_closest_obstacle(loc1, loc2, lookahead_m, wind_ms)
     local loc1_shifted  = location_project(loc1, bearing_deg, 1, loc2)
     local obstacle
 
-    local distance_m, any_obstacle, _, _, _  =
+    local distance_m, any_obstacle =
             OAScripting:find_threats(loc1_shifted, loc2, lookahead_m)
 
     if distance_m == nil then
