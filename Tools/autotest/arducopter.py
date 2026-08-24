@@ -8560,26 +8560,35 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         # expected it to move - that command turned out not to be implemented in the
         # firmware at all despite being in the protocol document
         self.progress("Testing mount roll stays uncommanded (roll is not controllable)")
+        # mount_test_body() above ends with its own RTL+landing sequence, so the
+        # vehicle's resting attitude here is whatever it happens to land at - NOT
+        # guaranteed level.  So this deliberately checks for CHANGE in response to the
+        # RC command, not an absolute near-zero value - the claim under test is "roll
+        # doesn't respond to input", which holds regardless of the vehicle's own
+        # attitude, unlike a fixed absolute-value check
         self.context_push()
         self.set_parameters({
             'RC11_OPTION': 212,    # MOUNT1_ROLL
         })
         self.set_mount_mode(mavutil.mavlink.MAV_MOUNT_MODE_RC_TARGETING)
+        start_roll_deg, _, _, _ = self.get_mount_roll_pitch_yaw_deg()
         self.set_rc(11, 1100)   # would demand roll to the MNT1_ROLL_MIN extreme
         tstart = self.get_sim_time()
-        max_roll_deg = 0
+        max_roll_change_deg = 0
         while self.get_sim_time_cached() - tstart < 10:
             mount_roll_deg, _, _, _ = self.get_mount_roll_pitch_yaw_deg()
-            self.progress("roll=%f" % mount_roll_deg)
-            max_roll_deg = max(max_roll_deg, abs(mount_roll_deg))
+            self.progress("roll=%f (start was %f)" % (mount_roll_deg, start_roll_deg))
+            max_roll_change_deg = max(max_roll_change_deg, abs(mount_roll_deg - start_roll_deg))
         self.set_rc(11, 1500)
         self.context_pop()
         # 15deg is well clear of the 45deg the RC input demands, while leaving room for
-        # whatever incidental roll the gimbal's own stabilization shows as the vehicle
-        # moves - we are checking nothing *drives* roll, not that it is pinned at zero
-        if max_roll_deg > 15:
+        # whatever incidental roll change the gimbal's own stabilization shows as the
+        # vehicle moves - we are checking nothing *drives* roll, not that it is pinned
+        # at any particular value
+        if max_roll_change_deg > 15:
             raise NotAchievedException(
-                "Mount roll moved %.1fdeg - roll should not be commandable" % max_roll_deg)
+                "Mount roll changed %.1fdeg in response to RC input - roll should not be commandable" %
+                max_roll_change_deg)
 
     def MountSkyDroidNetwork(self):
         '''test SkyDroid gimbal connected via a UDP network port rather than a serial port
