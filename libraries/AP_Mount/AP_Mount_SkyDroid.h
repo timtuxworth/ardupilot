@@ -76,7 +76,6 @@
 #include <AP_Common/AP_Common.h>
 
 #define AP_MOUNT_SKYDROID_PACKETLEN_MAX     28      // maximum number of bytes in a packet sent to or received from the gimbal
-#define AP_MOUNT_SKYDROID_CMD_CATEGORIES_NUM 5       // number of gimbal message types we parse
 
 class AP_Mount_SkyDroid : public AP_Mount_Backend_Serial
 {
@@ -212,6 +211,20 @@ private:
         WAITING_FOR_CRC_HIGH,
     };
 
+    // steps of the 1hz round-robin housekeeping loop in update() - not every value is
+    // used every cycle (some requests only fire until answered once), and a few
+    // numbers are deliberately left spare for anything added later without needing
+    // to renumber the rest
+    enum class ReqStep : uint8_t {
+        VERSION = 0,            // request_gimbal_version(), until _got_gimbal_version
+        TIME_SYNC = 1,          // send_time_sync()
+        ATTITUDE_ENABLE = 2,    // request_gimbal_attitude()
+        MODEL = 3,              // request_gimbal_model(), until _got_model_name
+        SDCARD = 4,             // request_gimbal_sdcard_info()
+        ATTITUDE_ACCEPT = 6,    // send_attitude_enable() - note the gap at 5, spare
+        NUM_STEPS = 10,         // wraps back to VERSION after this - note the gap at 7-9, spare
+    };
+
     // identifier bytes
     typedef char Identifier[3];
 
@@ -303,7 +316,7 @@ private:
 
     // members
     bool _recording;                                            // recording status, tracked locally from commands we've sent
-    bool _sdcard_status;                                        // memory card status (received from gimbal)
+    bool _sdcard_healthy;                                        // true if a memory card is present and OK (received from gimbal)
     bool _last_lock;                                            // last lock mode sent to gimbal
     bool _got_gimbal_version;                                   // true if gimbal's version has been received
     bool _got_model_name;                                       // true if gimbal's model name has been received
@@ -320,21 +333,6 @@ private:
         ParseState state;                                       // parser state
         uint8_t data_len;                                       // expected number of data bytes
     } _parser;
-
-    // mapping from received message key to member function pointer to consume the message
-    typedef struct {
-        uint8_t uart_cmd_key[4];                                // gimbal message key
-        void (AP_Mount_SkyDroid::*func)(void);                  // member function to consume message
-    } UartCmdFunctionHandler;
-
-    // stores command ID and corresponding member functions that are compared with the command received by the gimbal
-    UartCmdFunctionHandler uart_recv_cmd_compare_list[AP_MOUNT_SKYDROID_CMD_CATEGORIES_NUM] = {
-        {{"GAC"}, &AP_Mount_SkyDroid::gimbal_angle_analyse},
-        {{"REC"}, &AP_Mount_SkyDroid::gimbal_record_analyse},
-        {{"SDC"}, &AP_Mount_SkyDroid::gimbal_sdcard_analyse},
-        {{"VER"}, &AP_Mount_SkyDroid::gimbal_version_analyse},
-        {{"MOD"}, &AP_Mount_SkyDroid::gimbal_model_analyse},
-    };
 };
 
 #endif // HAL_MOUNT_SKYDROID_ENABLED
