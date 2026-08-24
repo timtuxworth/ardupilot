@@ -8610,7 +8610,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         })
         # the simulated gimbal listens on a UDP socket rather than
         # being attached to one of the autopilot's serial ports:
-        self.customise_SITL_commandline(["--net-device=skydroid:15006:udp"])
+        self.customise_SITL_commandline(["--net-device=skydroid:15006,udp"])
         self.mount_check_camera_information(
             "SkyDroid", "C11",
             expected_fw_version=1,
