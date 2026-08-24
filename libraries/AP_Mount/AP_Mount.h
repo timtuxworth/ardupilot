@@ -132,7 +132,7 @@ public:
 #endif
 #if HAL_MOUNT_SKYDROID_ENABLED
         SkyDroid = 15,       /// SkyDroid gimbal using a custom serial protocol
-#endif
+#endif  // HAL_MOUNT_SKYDROID_ENABLED
     };
 
     // init - detect and initialise all mounts

@@ -18,6 +18,14 @@ extern const AP_HAL::HAL& hal;
 #define AP_MOUNT_SKYDROID_DATALEN_MAX        (AP_MOUNT_SKYDROID_PACKETLEN_MAX - AP_MOUNT_SKYDROID_PACKETLEN_MIN) // data segment len can be no more than this
 #define AP_MOUNT_SKYDROID_ATTITUDE_RATE_HZ   50                  // rate we ask the gimbal to stream its attitude to us (matches the 50hz rate AP_Mount::update() is actually called at; doc allows up to 100hz)
 
+// byte offsets within a received packet - see the packet-format table in this file's
+// header comment.  Every packet shares this same preamble layout regardless of command;
+// only the data segment's own internal layout (if any) differs per command, and is
+// documented at each parse function that reads one
+#define AP_MOUNT_SKYDROID_MSGOFS_DATALEN 5    // data length, 1 ASCII hex nibble
+#define AP_MOUNT_SKYDROID_MSGOFS_ID      7    // 3-character command identifier
+#define AP_MOUNT_SKYDROID_MSGOFS_DATA    10   // start of the command-specific data segment
+
 // 3 character identifiers
 #define AP_MOUNT_SKYDROID_ID3CHAR_GIMBAL_MODE       "PTZ"        // discrete gimbal control, data bytes: 00:stop, 01:up, 02:down, 03:left, 04:right, 05:center, 06:follow, 07:lock head.  Only the follow/lock codes (06/07 - see set_gimbal_lock()) and center (05 - see send_center_command()) are used
 #define AP_MOUNT_SKYDROID_ID3CHAR_SPEED_YAW          "GSY"       // individual-axis yaw rate control, data bytes: signed 8bit hex.  The only command confirmed to move yaw on real hardware (GAM/GSM/GAY all silently ignored); its sign is also inverted vs the doc - see send_target_rates()
@@ -32,17 +40,8 @@ extern const AP_HAL::HAL& hal;
 // - matching 0.5deg/s/LSB almost exactly, not 0.03125
 #define AP_MOUNT_SKYDROID_AXIS_DPS_PER_LSB 0.5f
 #define AP_MOUNT_SKYDROID_AXIS_MAX_DPS    (127 * AP_MOUNT_SKYDROID_AXIS_DPS_PER_LSB)
-#define AP_MOUNT_SKYDROID_ID3CHAR_ATTITUDE_ENABLE   "GAA"        // enable/disable gimbal->us attitude streaming, data bytes: 00:off, 01-64:rate in Hz
-#define AP_MOUNT_SKYDROID_ID3CHAR_ATTITUDE_DATA     "GAC"        // unsolicited attitude data from gimbal, data bytes: yaw+pitch+roll, each 4hex 0.01deg
-#define AP_MOUNT_SKYDROID_ID3CHAR_FC_ATTITUDE_ENABLE "FAE"       // enable/disable us->gimbal attitude streaming, data bytes: 00:off, 01:on
-#define AP_MOUNT_SKYDROID_ID3CHAR_FC_ATTITUDE_DATA   "FAI"       // our attitude sent to gimbal, data bytes: yaw+pitch+roll (4hex each, 0.01deg) + mode (1:fixed-wing, 0:hover)
-#define AP_MOUNT_SKYDROID_ID3CHAR_RECORD_VIDEO      "REC"        // record video, data bytes: 00:stop, 01:start
-#define AP_MOUNT_SKYDROID_ID3CHAR_CAPTURE           "CAP"        // take picture, data bytes: 01
-#define AP_MOUNT_SKYDROID_ID3CHAR_SD_CARD           "SDC"        // get SD card state, data bytes: 00 to query
-#define AP_MOUNT_SKYDROID_ID3CHAR_GET_VERSION       "VER"        // get firmware version, data bytes always 00
-#define AP_MOUNT_SKYDROID_ID3CHAR_GET_MODEL         "MOD"        // get model name (e.g. "C11"), data bytes always 00
-#define AP_MOUNT_SKYDROID_ID3CHAR_DIGITAL_ZOOM      "DZM"        // digital zoom, data bytes: 0A:zoom+ (single step), 0B:zoom- (single step)
-#define AP_MOUNT_SKYDROID_ID3CHAR_TIME              "TIM"        // set current time, data bytes: hhmmss.ccDDMMYY (15 ASCII chars, cc=hundredths of a second).  Confirmed on real hardware that the camera has no RTC of its own and defaults to 1970-01-01 without this
+// every other 3-character command ID is used in exactly one place, so is a plain
+// string literal at its own call site instead of a macro defined here
 
 #define AP_MOUNT_SKYDROID_DEBUG 0
 #define debug(fmt, args ...) do { if (AP_MOUNT_SKYDROID_DEBUG) { GCS_SEND_TEXT(MAV_SEVERITY_INFO, "SkyDroid: " fmt, ## args); } } while (0)
@@ -82,11 +81,11 @@ void AP_Mount_SkyDroid::update()
 
     // calls below here called at 1hz
     _last_req_step++;
-    if (_last_req_step >= 10) {
+    if (_last_req_step >= (uint8_t)ReqStep::NUM_STEPS) {
         _last_req_step = 0;
     }
-    switch (_last_req_step) {
-    case 0:
+    switch ((ReqStep)_last_req_step) {
+    case ReqStep::VERSION:
         // get gimbal firmware version.  Worth retrying until answered rather than
         // asking once: the version determines which command sets the gimbal actually
         // implements (SkyDroid's RCSDK gates its combined yaw+pitch call on firmware
@@ -97,17 +96,17 @@ void AP_Mount_SkyDroid::update()
             request_gimbal_version();
         }
         break;
-    case 1:
+    case ReqStep::TIME_SYNC:
         // (re)send current UTC time so photos/videos are timestamped correctly - see
         // send_time_sync() for why this is needed and why it's resent periodically
         send_time_sync();
         break;
-    case 2:
+    case ReqStep::ATTITUDE_ENABLE:
         // (re)request gimbal attitude streaming.  harmless to resend if already enabled,
         // and guards against the enable packet being lost over UDP
         request_gimbal_attitude();
         break;
-    case 3:
+    case ReqStep::MODEL:
         // get the model name.  Purely informational (reported to the GCS via
         // CAMERA_INFORMATION) - no control decision depends on it, since SkyDroid have
         // confirmed the gimbal-control commands are identical across models.  That's
@@ -117,13 +116,16 @@ void AP_Mount_SkyDroid::update()
             request_gimbal_model();
         }
         break;
-    case 4:
+    case ReqStep::SDCARD:
         // request memory card information
         request_gimbal_sdcard_info();
         break;
-    case 6:
+    case ReqStep::ATTITUDE_ACCEPT:
         // (re)enable gimbal to accept our attitude pushes
         send_attitude_enable();
+        break;
+    default:
+        // spare steps (5, 7, 8, 9) - nothing to do
         break;
     }
 }
@@ -150,13 +152,13 @@ bool AP_Mount_SkyDroid::take_picture()
     }
 
     // exit immediately if the memory card is abnormal
-    if (!_sdcard_status) {
+    if (!_sdcard_healthy) {
         GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "%s SD card error", send_message_prefix);
         return false;
     }
 
-    // sample command: #TPUD2wCAP01
-    return send_fixedlen_packet(AddressByte::SYSTEM_AND_IMAGE, AP_MOUNT_SKYDROID_ID3CHAR_CAPTURE, true, 1);
+    // "CAP": take picture, data bytes: 01.  sample command: #TPUD2wCAP01
+    return send_fixedlen_packet(AddressByte::SYSTEM_AND_IMAGE, "CAP", true, 1);
 }
 
 // start or stop video recording.  returns true on success
@@ -169,13 +171,13 @@ bool AP_Mount_SkyDroid::record_video(bool start_recording)
     }
 
     // exit immediately if the memory card is abnormal
-    if (!_sdcard_status) {
+    if (!_sdcard_healthy) {
         GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "%s SD card error", send_message_prefix);
         return false;
     }
 
-    // sample command: #TPUD2wREC01
-    if (send_fixedlen_packet(AddressByte::SYSTEM_AND_IMAGE, AP_MOUNT_SKYDROID_ID3CHAR_RECORD_VIDEO, true, start_recording ? 1 : 0)) {
+    // "REC": record video, data bytes: 00:stop, 01:start.  sample command: #TPUD2wREC01
+    if (send_fixedlen_packet(AddressByte::SYSTEM_AND_IMAGE, "REC", true, start_recording ? 1 : 0)) {
         // SkyDroid does not push unsolicited recording-state changes to us so track our own request locally
         _recording = start_recording;
         return true;
@@ -202,9 +204,10 @@ bool AP_Mount_SkyDroid::set_zoom(ZoomType zoom_type, float zoom_value)
         return true;
     }
 
+    // "DZM": digital zoom, data bytes: 0A:zoom+ (single step), 0B:zoom- (single step).
     // sample command: #TPUM2wDZM0A65
     const uint8_t zoom_cmd = (zoom_value < 0) ? 0x0B : 0x0A;  // 0x0B: zoom-, 0x0A: zoom+
-    return send_fixedlen_packet(AddressByte::LENS, AP_MOUNT_SKYDROID_ID3CHAR_DIGITAL_ZOOM, true, zoom_cmd);
+    return send_fixedlen_packet(AddressByte::LENS, "DZM", true, zoom_cmd);
 }
 
 // send camera settings message to GCS
@@ -227,6 +230,15 @@ void AP_Mount_SkyDroid::send_camera_settings(mavlink_channel_t chan) const
 // get attitude as a quaternion.  returns true on success
 bool AP_Mount_SkyDroid::get_attitude_quaternion(Quaternion& att_quat)
 {
+    // fail while we've never actually received a "GAC" attitude report - otherwise
+    // callers (e.g. GIMBAL_DEVICE_ATTITUDE_STATUS reporting) would be given a
+    // fabricated (0,0,0) attitude as if it were real data.  _last_current_angle_ms
+    // is zero-initialised and only ever set by gimbal_angle_analyse() on receipt of
+    // a real "GAC" packet, so this is the same "have we ever heard from the gimbal"
+    // signal healthy() uses for its own timeout check
+    if (_last_current_angle_ms == 0) {
+        return false;
+    }
     // x=roll (always zero on models with no roll axis, e.g. C11), y=pitch, z=yaw
     att_quat.from_euler(_current_angle_rad.x, _current_angle_rad.y, _current_angle_rad.z);
     return true;
@@ -236,8 +248,8 @@ bool AP_Mount_SkyDroid::get_attitude_quaternion(Quaternion& att_quat)
 void AP_Mount_SkyDroid::read_incoming_packets()
 {
     // check for bytes on the serial port
-    int16_t nbytes = MIN(_uart->available(), 1024U);
-    if (nbytes <= 0) {
+    const uint16_t nbytes = MIN(_uart->available(), 1024U);
+    if (nbytes == 0) {
         return;
     }
 
@@ -245,7 +257,7 @@ void AP_Mount_SkyDroid::read_incoming_packets()
     bool reset_parser = false;
 
     // process bytes received
-    for (int16_t i = 0; i < nbytes; i++) {
+    for (uint16_t i = 0; i < nbytes; i++) {
         uint8_t b;
         if (!_uart->read(b)) {
             continue;
@@ -271,6 +283,11 @@ void AP_Mount_SkyDroid::read_incoming_packets()
             break;
 
         case ParseState::WAITING_FOR_HEADER2:
+            // 't'/'T' (and 'p'/'P' below) distinguish HeaderType::VARIABLE_LEN from
+            // FIXED_LEN - meaningful on transmit (see send_variablelen_packet()), but
+            // deliberately not tracked here on receive: the packet's own Data_Len
+            // nibble is authoritative regardless of which header case was used to
+            // send it, so the parser has no need to remember which one it saw
             if (b == 't' || b == 'T') {
                 _parser.state = ParseState::WAITING_FOR_HEADER3;
                 break;
@@ -370,12 +387,19 @@ void AP_Mount_SkyDroid::read_incoming_packets()
                 break;
             }
 
-            // CRC is OK, call function to process the message
-            for (uint8_t count = 0; count < AP_MOUNT_SKYDROID_CMD_CATEGORIES_NUM; count++) {
-                if (strncmp((const char*)_msg_buff + 7, (const char*)(uart_recv_cmd_compare_list[count].uart_cmd_key), 3) == 0) {
-                    (this->*(uart_recv_cmd_compare_list[count].func))();
-                    break;
-                }
+            // CRC is OK, dispatch on the 3-character command ID to the function that
+            // consumes that message
+            const char *msg_id = (const char*)&_msg_buff[AP_MOUNT_SKYDROID_MSGOFS_ID];
+            if (strncmp(msg_id, "GAC", 3) == 0) {
+                gimbal_angle_analyse();
+            } else if (strncmp(msg_id, "REC", 3) == 0) {
+                gimbal_record_analyse();
+            } else if (strncmp(msg_id, "SDC", 3) == 0) {
+                gimbal_sdcard_analyse();
+            } else if (strncmp(msg_id, "VER", 3) == 0) {
+                gimbal_version_analyse();
+            } else if (strncmp(msg_id, "MOD", 3) == 0) {
+                gimbal_model_analyse();
             }
         }
 
@@ -391,29 +415,30 @@ void AP_Mount_SkyDroid::read_incoming_packets()
 // request gimbal to (re)start sending us attitude at 10hz
 void AP_Mount_SkyDroid::request_gimbal_attitude()
 {
-    // sample command: #TPUG2wGAA0A
-    send_fixedlen_packet(AddressByte::GIMBAL, AP_MOUNT_SKYDROID_ID3CHAR_ATTITUDE_ENABLE, true, AP_MOUNT_SKYDROID_ATTITUDE_RATE_HZ);
+    // "GAA": enable/disable gimbal->us attitude streaming, data bytes: 00:off,
+    // 01-64:rate in Hz.  sample command: #TPUG2wGAA0A
+    send_fixedlen_packet(AddressByte::GIMBAL, "GAA", true, AP_MOUNT_SKYDROID_ATTITUDE_RATE_HZ);
 }
 
 // request gimbal memory card information
 void AP_Mount_SkyDroid::request_gimbal_sdcard_info()
 {
-    // sample command: #TPUD2rSDC00
-    send_fixedlen_packet(AddressByte::SYSTEM_AND_IMAGE, AP_MOUNT_SKYDROID_ID3CHAR_SD_CARD, false, 0);
+    // "SDC": get SD card state, data bytes: 00 to query.  sample command: #TPUD2rSDC00
+    send_fixedlen_packet(AddressByte::SYSTEM_AND_IMAGE, "SDC", false, 0);
 }
 
 // request gimbal version
 void AP_Mount_SkyDroid::request_gimbal_version()
 {
-    // sample command: #TPUD2rVER00
-    send_fixedlen_packet(AddressByte::SYSTEM_AND_IMAGE, AP_MOUNT_SKYDROID_ID3CHAR_GET_VERSION, false, 0);
+    // "VER": get firmware version, data bytes always 00.  sample command: #TPUD2rVER00
+    send_fixedlen_packet(AddressByte::SYSTEM_AND_IMAGE, "VER", false, 0);
 }
 
 // request gimbal model name (e.g. "C11", "C13")
 void AP_Mount_SkyDroid::request_gimbal_model()
 {
-    // sample command: #TPUD2rMOD00
-    send_fixedlen_packet(AddressByte::SYSTEM_AND_IMAGE, AP_MOUNT_SKYDROID_ID3CHAR_GET_MODEL, false, 0);
+    // "MOD": get model name (e.g. "C11"), data bytes always 00.  sample command: #TPUD2rMOD00
+    send_fixedlen_packet(AddressByte::SYSTEM_AND_IMAGE, "MOD", false, 0);
 }
 
 // send current UTC date/time to the gimbal so photos/videos are timestamped correctly.
@@ -431,20 +456,24 @@ bool AP_Mount_SkyDroid::send_time_sync()
         return false;
     }
 
+    // "TIM": set current time, data bytes: hhmmss.ccDDMMYY (15 ASCII chars,
+    // cc=hundredths of a second).  Confirmed on real hardware that the camera has no
+    // RTC of its own and defaults to 1970-01-01 without this.
     // sample command: #tpUDFwTIM142832.00031218 (2018-12-03 14:28:32.00) - data is 15
     // ASCII chars: hhmmss.ccDDMMYY, cc=hundredths of a second, YY=2-digit year
     uint8_t databuff[16];
     hal.util->snprintf((char*)databuff, ARRAY_SIZE(databuff), "%02u%02u%02u.%02u%02u%02u%02u",
                         hour, min, sec, (unsigned)((ms / 10) % 100),
                         day, month, (unsigned)(year % 100));
-    return send_variablelen_packet(HeaderType::VARIABLE_LEN, AddressByte::SYSTEM_AND_IMAGE, AP_MOUNT_SKYDROID_ID3CHAR_TIME, true, databuff, ARRAY_SIZE(databuff)-1);
+    return send_variablelen_packet(HeaderType::VARIABLE_LEN, AddressByte::SYSTEM_AND_IMAGE, "TIM", true, databuff, ARRAY_SIZE(databuff)-1);
 }
 
 // (re)enable the gimbal to accept our attitude pushes
 bool AP_Mount_SkyDroid::send_attitude_enable()
 {
+    // "FAE": enable/disable us->gimbal attitude streaming, data bytes: 00:off, 01:on.
     // sample command: #TPUG2wFAE01
-    return send_fixedlen_packet(AddressByte::GIMBAL, AP_MOUNT_SKYDROID_ID3CHAR_FC_ATTITUDE_ENABLE, true, 1);
+    return send_fixedlen_packet(AddressByte::GIMBAL, "FAE", true, 1);
 }
 
 // send our current attitude to the gimbal
@@ -454,15 +483,21 @@ bool AP_Mount_SkyDroid::send_attitude_to_gimbal()
     const int16_t pitch_cd = (int16_t)(AP::ahrs().get_pitch_deg() * 100);
     const int16_t roll_cd = (int16_t)(AP::ahrs().get_roll_deg() * 100);
 
-    // 1: fixed-wing, 0: copter/hover.  fixed at compile time because a single firmware
-    // build only ever targets one vehicle type
+    // 1: fixed-wing, 0: copter/hover - this is SkyDroid's own documented field for
+    // this command, and APM_BUILD_TYPE(APM_BUILD_ArduPlane) is the obvious compile-time
+    // proxy for it, but we don't actually know what it changes in the gimbal's own
+    // firmware, or whether that proxy is the right one (e.g. a Plane holding/loitering
+    // isn't continuously moving forward either).  Raised with SkyDroid to find out what
+    // this bit actually affects before assuming a "more correct" runtime check would
+    // really be better rather than just differently wrong
     const bool fixed_wing = APM_BUILD_TYPE(APM_BUILD_ArduPlane);
 
-    // sample command: #tpUG0EwFAI
+    // "FAI": our attitude sent to gimbal, data bytes: yaw+pitch+roll (4hex each,
+    // 0.01deg) + mode (1:fixed-wing, 0:hover).  sample command: #tpUG0EwFAI
     uint8_t databuff[15];
     hal.util->snprintf((char*)databuff, ARRAY_SIZE(databuff), "%04X%04X%04X%02X",
                         (uint16_t)yaw_cd, (uint16_t)pitch_cd, (uint16_t)roll_cd, fixed_wing ? 1 : 0);
-    return send_variablelen_packet(HeaderType::VARIABLE_LEN, AddressByte::GIMBAL, AP_MOUNT_SKYDROID_ID3CHAR_FC_ATTITUDE_DATA, true, databuff, ARRAY_SIZE(databuff)-1);
+    return send_variablelen_packet(HeaderType::VARIABLE_LEN, AddressByte::GIMBAL, "FAI", true, databuff, ARRAY_SIZE(databuff)-1);
 }
 
 // send angle target in radians to gimbal, by closing the loop ourselves using the
@@ -573,9 +608,9 @@ void AP_Mount_SkyDroid::gimbal_angle_analyse()
 {
     // consume current angles.  data is yaw, pitch, roll in that order, each 4 hex chars, 0.01deg units
     uint32_t yaw_raw, pitch_raw, roll_raw;
-    if (!hex_chars_to_uint32((const char*)&_msg_buff[10], 4, yaw_raw) ||
-        !hex_chars_to_uint32((const char*)&_msg_buff[14], 4, pitch_raw) ||
-        !hex_chars_to_uint32((const char*)&_msg_buff[18], 4, roll_raw)) {
+    if (!hex_chars_to_uint32((const char*)&_msg_buff[AP_MOUNT_SKYDROID_MSGOFS_DATA], 4, yaw_raw) ||
+        !hex_chars_to_uint32((const char*)&_msg_buff[AP_MOUNT_SKYDROID_MSGOFS_DATA + 4], 4, pitch_raw) ||
+        !hex_chars_to_uint32((const char*)&_msg_buff[AP_MOUNT_SKYDROID_MSGOFS_DATA + 8], 4, roll_raw)) {
         return;
     }
     const int16_t yaw_angle_cd = wrap_180_cd((int16_t)yaw_raw);
@@ -602,29 +637,31 @@ void AP_Mount_SkyDroid::gimbal_angle_analyse()
 // gimbal video information analysis
 void AP_Mount_SkyDroid::gimbal_record_analyse()
 {
-    _recording = (_msg_buff[11] == '1');
+    // data is 2 ASCII chars ("00" or "01") - only the low digit is ever non-zero, so
+    // that's the only one we need to check
+    _recording = (_msg_buff[AP_MOUNT_SKYDROID_MSGOFS_DATA + 1] == '1');
 }
 
 // information analysis of gimbal storage card
 void AP_Mount_SkyDroid::gimbal_sdcard_analyse()
 {
     // data is 10 hex chars: 5 for remaining capacity, 5 for total capacity (units MB)
-    // all zeros means no card inserted
+    // all zeros means no card inserted.  A too-short buffer is treated the same as
+    // all-zero (no card), matching this function's previous behaviour
+    static const uint8_t all_zero_chars[10] = {'0','0','0','0','0','0','0','0','0','0'};
     bool all_zero = true;
-    for (uint8_t i = 0; i < 10 && (10U + i) < _msg_buff_len; i++) {
-        if (_msg_buff[10 + i] != '0') {
-            all_zero = false;
-            break;
-        }
+    if (_msg_buff_len >= AP_MOUNT_SKYDROID_MSGOFS_DATA + ARRAY_SIZE(all_zero_chars)) {
+        all_zero = (memcmp(&_msg_buff[AP_MOUNT_SKYDROID_MSGOFS_DATA], all_zero_chars, ARRAY_SIZE(all_zero_chars)) == 0);
     }
-    _sdcard_status = !all_zero;
+    _sdcard_healthy = !all_zero;
 }
 
 // gimbal basic information analysis.  response data is of the form "VX.X.X" (e.g. "V1.0.78")
 void AP_Mount_SkyDroid::gimbal_version_analyse()
 {
     uint8_t data_buf_len;
-    if (!hex_char_to_nibble(_msg_buff[5], data_buf_len) || data_buf_len == 0 || _msg_buff[10] != 'V') {
+    if (!hex_char_to_nibble(_msg_buff[AP_MOUNT_SKYDROID_MSGOFS_DATALEN], data_buf_len) || data_buf_len == 0 ||
+        _msg_buff[AP_MOUNT_SKYDROID_MSGOFS_DATA] != 'V') {
         return;
     }
 
@@ -633,7 +670,7 @@ void AP_Mount_SkyDroid::gimbal_version_analyse()
     uint8_t ver_count = 0;
     uint32_t ver_num = 0;
     for (uint8_t i = 1; i < data_buf_len && ver_count < ARRAY_SIZE(version); i++) {
-        const uint8_t c = _msg_buff[10 + i];
+        const uint8_t c = _msg_buff[AP_MOUNT_SKYDROID_MSGOFS_DATA + i];
         if (c == '.') {
             version[ver_count++] = ver_num;
             ver_num = 0;
@@ -668,11 +705,11 @@ void AP_Mount_SkyDroid::gimbal_version_analyse()
 void AP_Mount_SkyDroid::gimbal_model_analyse()
 {
     uint8_t data_buf_len;
-    if (!hex_char_to_nibble(_msg_buff[5], data_buf_len) || data_buf_len == 0) {
+    if (!hex_char_to_nibble(_msg_buff[AP_MOUNT_SKYDROID_MSGOFS_DATALEN], data_buf_len) || data_buf_len == 0) {
         return;
     }
     memset(_model_name, 0, sizeof(_model_name));
-    memcpy(_model_name, _msg_buff + 10, MIN((uint8_t)(sizeof(_model_name)-1), data_buf_len));
+    memcpy(_model_name, _msg_buff + AP_MOUNT_SKYDROID_MSGOFS_DATA, MIN((uint8_t)(sizeof(_model_name)-1), data_buf_len));
 
     // display gimbal model name to user.  Informational only - no control decision
     // depends on it (see this driver's header comment)
