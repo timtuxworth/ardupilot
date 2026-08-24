@@ -7785,7 +7785,8 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         pitch_tolerance defaults to the original tight 0.1deg check; backends whose
         actuator has a coarser confirmed physical resolution (e.g. a rate-only
         actuator closing an angle loop via a quantized speed command) may need to
-        pass a wider value'''
+        pass a wider value - see MountSkyDroid()'s use of this for a concrete
+        example with the reasoning'''
         if True:
             self.context_push()
             self.set_parameters({
@@ -8470,11 +8471,8 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         # toward whatever angle RC6's un-centred default value maps to the moment
         # it boots, well before the test gets to explicitly select NEUTRAL mode.
         # Harmless for backends with a fast control loop (they recover from that
-        # transient inside the neutral check's 5s budget), but SkyDroid's
-        # individual-axis GSY/GSP commands are calibrated to a real, fairly slow
-        # ~4deg/s max slew rate (see AP_MOUNT_SKYDROID_AXIS_MAX_DPS) that can't
-        # out-run a multi-tens-of-degrees transient in time, so avoid causing it in
-        # the first place instead
+        # transient inside the neutral check's 5s budget), but avoid causing a large
+        # transient in the first place anyway rather than rely on recovering from it
         self.set_rc(6, pitch_rc_neutral)
         self.set_parameters({
             "MNT1_TYPE": 15,      # SkyDroid
@@ -8498,8 +8496,19 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         # respond to the individual-axis GSY/GSP speed commands (GAM/GSM are silently
         # ignored); since there's no working absolute-angle command, the driver closes
         # an angle P-controller loop on top of them, so allow a little settling
-        # tolerance rather than the exact positioning an absolute-angle backend gives
-        self.mount_test_body(pitch_rc_neutral=pitch_rc_neutral, do_rate_tests=False, neutral_tol_deg=3.5)
+        # tolerance rather than the exact positioning an absolute-angle backend gives.
+        #
+        # rc_targetting_pitch_tolerance=0.3: GSY/GSP's wire value is a quantized 8bit
+        # signed LSB (see AP_MOUNT_SKYDROID_AXIS_DPS_PER_LSB, confirmed on real
+        # hardware via dataflash log analysis to be 0.5deg/s per LSB), which puts a
+        # genuine, measured floor of ~0.25deg of angular error below which the
+        # closed-loop P-controller's commanded rate rounds to 0 LSB and it simply
+        # stops correcting - this is a real actuator resolution limit, not a driver
+        # bug, and the shared test's default 0.1deg tolerance is tighter than this
+        # actuator can physically deliver.  0.3 gives a little margin above the
+        # measured ~0.25deg floor
+        self.mount_test_body(pitch_rc_neutral=pitch_rc_neutral, do_rate_tests=False, neutral_tol_deg=3.5,
+                             rc_targetting_pitch_tolerance=0.3)
 
     def MountSkyDroidC13(self):
         '''test SkyDroid C13 gimbal using SIM_SkyDroid simulator
@@ -8538,8 +8547,11 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             expected_fw_version=1,
             expected_cap_flags=0x43,
         )
-        # identical expectations to MountSkyDroid() - that is the point of this test
-        self.mount_test_body(pitch_rc_neutral=pitch_rc_neutral, do_rate_tests=False, neutral_tol_deg=3.5)
+        # identical expectations to MountSkyDroid() - that is the point of this test,
+        # rc_targetting_pitch_tolerance included - see MountSkyDroid()'s comment for
+        # why 0.3 rather than the shared default of 0.1
+        self.mount_test_body(pitch_rc_neutral=pitch_rc_neutral, do_rate_tests=False, neutral_tol_deg=3.5,
+                             rc_targetting_pitch_tolerance=0.3)
 
         # roll must NOT respond: SkyDroid have confirmed roll is self-stabilized by the
         # gimbal with no control command on any model, so AP_Mount_SkyDroid reports

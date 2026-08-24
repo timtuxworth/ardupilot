@@ -22,14 +22,15 @@ extern const AP_HAL::HAL& hal;
 #define AP_MOUNT_SKYDROID_ID3CHAR_GIMBAL_MODE       "PTZ"        // discrete gimbal control, data bytes: 00:stop, 01:up, 02:down, 03:left, 04:right, 05:center, 06:follow, 07:lock head.  Only the follow/lock codes (06/07 - see set_gimbal_lock()) and center (05 - see send_center_command()) are used
 #define AP_MOUNT_SKYDROID_ID3CHAR_SPEED_YAW          "GSY"       // individual-axis yaw rate control, data bytes: signed 8bit hex.  The only command confirmed to move yaw on real hardware (GAM/GSM/GAY all silently ignored); its sign is also inverted vs the doc - see send_target_rates()
 #define AP_MOUNT_SKYDROID_ID3CHAR_SPEED_PITCH        "GSP"       // individual-axis pitch rate control, data bytes: signed 8bit hex.  Confirmed functional on real hardware, sign matches the doc
-// real-world calibrated scale for GSY/GSP, measured on a real C11 via precise
-// before/after MAVLink telemetry: ~1/16th of the doc's stated 0.5deg/s per LSB, and
-// confirmed linear (not saturated) up to the max wire value of 127.  Note that
-// SkyDroid's own RCSDK independently documents the same 0.5deg/s-per-LSB figure as
-// the protocol doc (its speed range is +/-63.5 deg/s == 127 * 0.5), so two of their
-// sources agree with each other and disagree with the hardware by exactly 16x.
-// Raised with SkyDroid; until that's resolved the measured value is what works
-#define AP_MOUNT_SKYDROID_AXIS_DPS_PER_LSB 0.03125f
+// matches the protocol doc's and SkyDroid's own RCSDK's documented 0.5deg/s per LSB
+// (max speed +/-63.5 deg/s == 127 * 0.5).  An earlier real-hardware measurement of
+// this driver had it at 1/16th of this (0.03125) - that measurement was wrong, not
+// the documentation: a real-C11 dataflash log of a sustained full-deflection GSY
+// rate-mode command (MNT1_RC_RATE=90, so comfortably saturating to the max LSB
+// value of 127) measured yaw moving at a clean, consistent ~64deg/s across three
+// independent full-speed sweeps (e.g. a 179deg sweep in exactly 2.80s = 63.97deg/s)
+// - matching 0.5deg/s/LSB almost exactly, not 0.03125
+#define AP_MOUNT_SKYDROID_AXIS_DPS_PER_LSB 0.5f
 #define AP_MOUNT_SKYDROID_AXIS_MAX_DPS    (127 * AP_MOUNT_SKYDROID_AXIS_DPS_PER_LSB)
 #define AP_MOUNT_SKYDROID_ID3CHAR_ATTITUDE_ENABLE   "GAA"        // enable/disable gimbal->us attitude streaming, data bytes: 00:off, 01-64:rate in Hz
 #define AP_MOUNT_SKYDROID_ID3CHAR_ATTITUDE_DATA     "GAC"        // unsolicited attitude data from gimbal, data bytes: yaw+pitch+roll, each 4hex 0.01deg
@@ -483,18 +484,48 @@ void AP_Mount_SkyDroid::send_target_angles(const MountAngleTarget& angle_rad)
                                                              _params.pitch_angle_min, _params.pitch_angle_max));
 
     // simple P-controller driving GSY/GSP as the rate actuator, using the GAC
-    // attitude feedback already parsed by gimbal_angle_analyse().  Confirmed on real
-    // C11 hardware that a more aggressive gain (previously 2.0, reaching full-scale
-    // rate by ~2deg of error) sustains a continuous limit-cycle oscillation on both
-    // axes - the real feedback (GAC round-trip plus the gimbal's own mechanical
-    // response) has enough lag that a fast-reacting P-controller overshoots and
-    // re-corrects indefinitely instead of settling.  A much gentler gain plus a
-    // deadzone (stop correcting entirely once close, rather than tapering to an
-    // ever-smaller command that can still re-trigger hunting) fixes this at the cost
-    // of a slower final approach - acceptable since there's no absolute-angle
-    // command to fall back on anyway
-    constexpr float kP = 0.3;  // (deg/s of rate command) per (deg of angle error)
-    constexpr float deadzone_deg = 2.0;  // stop correcting once within this many degrees
+    // attitude feedback already parsed by gimbal_angle_analyse().
+    //
+    // Confirmed on real C11 hardware that kP=2.0 sustains a continuous limit-cycle
+    // oscillation on both axes: at that gain, full-scale rate is reached by just
+    // ~2deg of error, so the actuator was being driven at max speed for almost any
+    // real excursion - combined with the real feedback's lag (GAC round-trip plus
+    // the gimbal's own mechanical response), a fast-reacting/early-saturating
+    // P-controller overshoots and re-corrects indefinitely instead of settling.
+    //
+    // kP=1.0 was chosen (before AP_MOUNT_SKYDROID_AXIS_DPS_PER_LSB's real value was
+    // known - see that constant's comment) to saturate at ~4deg of error
+    // (AP_MOUNT_SKYDROID_AXIS_MAX_DPS/kP), staying clear of the ~2deg real-hardware
+    // oscillation zone confirmed below while converging fast enough to meet
+    // mount_test_body's tightest check (test_mount_rc_targetting()'s hardcoded
+    // 0.1deg tolerance).  Now that AXIS_MAX_DPS is 16x larger (0.5, not 0.03125
+    // deg/s per LSB), this saturates at ~63.5deg instead - even further from the
+    // 2deg danger zone, so no less safe, but the "~4deg" figure below is no longer
+    // accurate to the number, just the reasoning.  NOT YET RE-VALIDATED ON REAL
+    // HARDWARE - the original oscillation was only ever found via real-hardware
+    // testing, not SITL, so confirm this still settles cleanly (no hunting/dither)
+    // on the real C11 before relying on this
+    constexpr float kP = 1.0;  // (deg/s of rate command) per (deg of angle error)
+    //
+    // The deadzone below (stop correcting entirely once close, rather than tapering
+    // to an ever-smaller command) guarantees a clean stop rather than dither once
+    // within range - its WIDTH is a separate knob from kP, and was originally set to
+    // 2.0deg for margin without much thought, wider than mount_test_body's autotest
+    // tolerances and hence a real bug, not a hardware ceiling.  0.05deg keeps margin
+    // under the 0.1deg check while staying a "stop dead" cutoff (not tapering).
+    //
+    // IMPORTANT: this deadzone is no longer the binding constraint it was designed
+    // to be.  GSY/GSP's wire value is a quantized 8-bit signed LSB - see
+    // AP_MOUNT_SKYDROID_AXIS_DPS_PER_LSB, now known to be 0.5deg/s per LSB (not the
+    // 0.03125 this was tuned against) - so kP*error now rounds to 0 LSB at
+    // send_axis_rate() for any error below ~0.25deg (half an LSB step at this kP),
+    // which is COARSER than the 0.05deg deadzone below and than the 0.1deg test
+    // tolerance this was tuned to meet.  In other words: the actuator's real,
+    // confirmed resolution floor may no longer be fine enough to pass
+    // test_mount_rc_targetting() at all via this fixed-gain approach, regardless of
+    // deadzone or kP tuning - re-run the autotest and see before assuming this still
+    // passes
+    constexpr float deadzone_deg = 0.05;  // stop correcting once within this many degrees
     const float yaw_error_deg = degrees(wrap_PI(yaw_target_rad - _current_angle_rad.z));
     const float pitch_error_deg = degrees(pitch_target_rad - _current_angle_rad.y);
     const float yaw_rate_dps = (fabsf(yaw_error_deg) <= deadzone_deg) ? 0.0f :
