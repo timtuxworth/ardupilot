@@ -376,8 +376,12 @@ SITL::SerialDevice *SITL_State_Common::create_serial_sim(const char *name, const
   network (TCP by default, or UDP) rather than over one of its
   simulated serial ports.  This is used to simulate devices attached
   to the autopilot's network ports (NET_Pn).
-  spec is of the form NAME:PORT or NAME:PORT:PROTOCOL, e.g.
-  "topotek:15005" (TCP, the default) or "skydroid:15005:udp"
+  spec is of the form NAME:PORT or NAME:PORT,OPTION,OPTION,..., e.g.
+  "topotek:15005" (TCP, the default) or "skydroid:15005,udp" - any
+  options beyond the port number are comma-separated from each other
+  (and from the port number), rather than each being tacked on with
+  another colon, since they're logically grouped with the port rather
+  than being another NAME-like top-level field
  */
 void SITL_State_Common::create_net_serial_sim(const char *spec)
 {
@@ -391,10 +395,15 @@ void SITL_State_Common::create_net_serial_sim(const char *spec)
     }
     char *saveptr = nullptr;
     const char *name = strtok_r(s, ":", &saveptr);
-    const char *port_str = strtok_r(nullptr, ":", &saveptr);
-    const char *protocol_str = strtok_r(nullptr, ":", &saveptr);  // optional, defaults to "tcp"
-    if (name == nullptr || port_str == nullptr) {
-        AP_HAL::panic("Bad network device (%s); expected NAME:PORT[:PROTOCOL]", spec);
+    char *port_and_options = strtok_r(nullptr, ":", &saveptr);
+    if (name == nullptr || port_and_options == nullptr) {
+        AP_HAL::panic("Bad network device (%s); expected NAME:PORT[,PROTOCOL]", spec);
+    }
+    char *saveptr2 = nullptr;
+    const char *port_str = strtok_r(port_and_options, ",", &saveptr2);
+    const char *protocol_str = strtok_r(nullptr, ",", &saveptr2);  // optional, defaults to "tcp"
+    if (port_str == nullptr) {
+        AP_HAL::panic("Bad network device (%s); expected NAME:PORT[,PROTOCOL]", spec);
     }
     const bool use_udp = (protocol_str != nullptr) && (strcasecmp(protocol_str, "udp") == 0);
     if (protocol_str != nullptr && !use_udp && strcasecmp(protocol_str, "tcp") != 0) {
