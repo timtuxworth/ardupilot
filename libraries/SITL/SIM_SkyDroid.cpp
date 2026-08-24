@@ -37,13 +37,14 @@ void SkyDroid::update(const Aircraft &aircraft)
     // Confirmed on real hardware: GAM/GSM/GAY/GAP are silently ignored, only the
     // individual-axis GSY/GSP speed commands actually move the gimbal, and they are
     // genuinely proportional (unlike PTZ's fixed-speed jog, which was tried first and
-    // found not to move yaw at all).  Real-world calibration (measured via precise
-    // before/after MAVLink telemetry): see AP_MOUNT_SKYDROID_AXIS_DPS_PER_LSB in
-    // AP_Mount_SkyDroid.cpp for the ~0.03125deg/s-per-LSB scale this mirrors.  GSY's
-    // sign is also inverted vs the doc on real hardware; this simulation reproduces
-    // that same inversion so it cancels out correctly against the driver's
-    // compensating negation in send_target_rates(), exactly like the real gimbal does
-    const float dps_per_lsb = 0.03125f;
+    // found not to move yaw at all).  Real-world calibration: see
+    // AP_MOUNT_SKYDROID_AXIS_DPS_PER_LSB in AP_Mount_SkyDroid.cpp for the
+    // 0.5deg/s-per-LSB scale this mirrors, matching the protocol doc and SkyDroid's
+    // own RCSDK.  GSY's sign is also inverted vs the doc on real hardware; this
+    // simulation reproduces that same inversion so it cancels out correctly against
+    // the driver's compensating negation in send_target_rates(), exactly like the
+    // real gimbal does
+    const float dps_per_lsb = 0.5f;
     Vector3f ja;
     gimbal.get_joint_angles(ja);
     float pitch_rate;
