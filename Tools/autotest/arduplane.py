@@ -8975,9 +8975,13 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
 
             self.context_collect('STATUSTEXT')
 
-            # restart the primary vehicle with serial5 on multicast;
-            # this restarts SITL, so the script loads on this boot
-            self.customise_SITL_commandline(['--serial5=mcast:'])
+            # restart the primary vehicle with serial5 on multicast, and
+            # join the SITL cluster shared by the target below (see
+            # https://github.com/ArduPilot/ardupilot/pull/34019) so both
+            # vehicles' simulated clocks stay barrier-synced instead of
+            # drifting apart under host/CPU contention; this restarts
+            # SITL, so the script loads on this boot
+            self.customise_SITL_commandline(['--serial5=mcast:', '--cluster=1'])
             self.progress("SIM_SPEEDUP after restart = %f" % self.get_parameter("SIM_SPEEDUP"))
             self.set_parameter("MAV4_OPTIONS", 2)   # now the param exists
 
@@ -9017,7 +9021,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
                 rundir='target-plane',
                 defaults_filepath=os.path.join(
                     util.reltopdir('Tools/autotest/models'), 'plane.parm'),
-                customisations=['--serial5=mcast:'],
+                customisations=['--serial5=mcast:', '--cluster=1'],
                 param_defaults={
                     "SERIAL5_PROTOCOL": 2,
                     # Same airspeed envelope as the follower, but cruising
@@ -9780,7 +9784,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             self.ScriptedArmingChecksAppletEStop,
             self.ScriptedArmingChecksAppletRally,
             self.PlaneFollowAppletSanity,
-            Test(self.PlaneFollowApplet, speedup=15),
+            Test(self.PlaneFollowApplet, speedup=100),
             self.PreflightRebootComponent,
             self.UTMGlobalPosition,
             self.UTMGlobalPositionWaypoint,
