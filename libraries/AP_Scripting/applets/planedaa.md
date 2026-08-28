@@ -171,7 +171,7 @@ Collision volumes, and the `FENCE_*` parameters for the altitude/geo fences.
 | `DAA_MARGIN_AIS` | 50 | m | Avoidance radius for AIS ship contacts (MAVLink sourced). |
 | `DAA_MARGIN_PRX` | 50 | m | Avoidance radius for obstacles detected by proximity sensors. |
 | `DAA_BR_RATIO` | 1.5 | | BendyRuler will avoid changing bearing unless the ratio of the previous margin to the newly calculated margin is at least this much. |
-| `DAA_BR_ANGLE` | 45 | deg | BendyRuler resists changing the current bearing if the change exceeds this angle. |
+| `DAA_BR_ANGLE` | 45 | deg | BendyRuler resists changing the current bearing if the change exceeds this angle. A change above it is also the point at which the smoothing asks whether there is time to damp it — see `DAA_SLEW_DPS`. |
 | `DAA_AVD_ALT` | 50 | m | Altitude to loiter/descend to when avoiding a crewed aircraft contact. Ignored if zero. |
 | `DAA_AVD_ALT_TP` | 3 | | Frame of `DAA_AVD_ALT` (0: absolute, 1: above home, 2: above origin, 3: above terrain). |
 | `DAA_LTR_COOL_S` | 10 | s | Time the aircraft loiter-to-altitude is held after the aircraft was last detected before releasing back to the mission. Hysteresis against a briefly-dropped or laggy ADS-B feed thrashing the vehicle between GUIDED (loiter) and AUTO (mission). Set to 0 to release as soon as the aircraft is no longer detected. |
@@ -183,7 +183,7 @@ Collision volumes, and the `FENCE_*` parameters for the altitude/geo fences.
 | `DAA_HEADING_INC` | 1.5 | deg | Angular step used when searching candidate headings around the target bearing for a collision-free path. The search sweeps a full circle in increments of this size, alternating left and right. Smaller values search more finely but cost more CPU per update. |
 | `DAA_WIND_MIN` | 2 | m/s | Minimum wind speed before the wind-aware avoidance behaviour engages. Below this, the still-air path is used so calm-air behaviour is unchanged. Gates both the wind-aware look-ahead projection and the wind-scaled fence margin. |
 | `DAA_WIND_MARG` | 5 | m per m/s | Extra fence avoidance margin added per m/s of wind above `DAA_WIND_MIN`. The standoff from fences is widened by `DAA_WIND_MARG * max(0, wind_speed - DAA_WIND_MIN)`, giving the controller buffer to absorb cross-track drift so the aircraft is less likely to be blown across the boundary in wind. Set to 0 to disable wind scaling. |
-| `DAA_SLEW_DPS` | 20 | deg/s | Maximum rate the commanded avoidance heading is allowed to change. Rate-limiting the heading smooths the oscillation a per-cycle bendy ruler produces against moving obstacles and near fences. Bypassed when the estimated time-to-conflict is below `DAA_SLEW_URG`, so an urgent manoeuvre keeps full authority. Set to 0 to disable the slew limit. Must be below the turn rate the airframe can actually fly or it has no effect — see _Tuning for your vehicle_. |
+| `DAA_SLEW_DPS` | 20 | deg/s | Maximum rate the commanded avoidance heading is allowed to change. Rate-limiting the heading smooths the oscillation a per-cycle bendy ruler produces against moving obstacles and near fences. Bypassed when the estimated time-to-conflict is below `DAA_SLEW_URG`, and also when a change larger than `DAA_BR_ANGLE` could not be slewed through before the conflict, so an urgent manoeuvre keeps full authority. Set to 0 to disable the slew limit. Must be below the turn rate the airframe can actually fly or it has no effect — see _Tuning for your vehicle_. |
 | `DAA_SLEW_URG` | 4 | s | If the estimated time-to-conflict with a moving obstacle is below this, the `DAA_SLEW_DPS` slew limit is bypassed so the aircraft can turn at full authority. Set to 0 to always apply the slew limit. |
 | `DAA_SIDE_HOLD` | 3 | s | Once a left/right avoidance side is committed for an obstacle, the opposite side must be preferred by the bendy ruler for at least this long before the aircraft is allowed to switch sides. Stops the left/right flip-flop when avoiding a moving obstacle. Set to 0 to disable side commitment. |
 | `DAA_CPA_MIN` | 2 | m/s | Minimum closing speed for a moving obstacle to be treated as a conflict. CPA (Closest Point of Approach) is the predicted minimum separation between the vehicle and a moving obstacle on their current tracks. An obstacle whose CPA stays beyond the well-clear distance and which is opening range faster than this is not avoided (it is leaving). Set to 0 to avoid regardless of closing speed. |
@@ -286,17 +286,27 @@ turn and still misses by less than the standoff. The startup check warns when
 `AVD_UAV_XY` is below `WP_LOITER_RAD`, which is a deliberately conservative proxy —
 see the turn-radius note above, and prefer sizing from `R ≈ v²/(g·tan φ)`.
 
+A worked case: flight `log_87` (2026-08-27) ran `AVD_UAV_XY 75` against
+`WP_LOITER_RAD 90` and duly raised `tight drone avoid` at startup. Against the one
+real drone that was enough — the protected volume was never entered — but the
+warning is worth heeding rather than dismissing.
+
 Add reaction distance on top of the turn radius: closing speed times the time it
 takes to acquire, decide and roll in. For a head-on encounter that closing speed is
 the sum of both groundspeeds, so a standoff sized only for the turn radius is
 already too small.
 
 `DAA_SLEW_DPS` must be **below the turn rate the airframe can actually fly**,
-`deg(AIRSPEED_CRUISE / R)`, or the limiter never binds and the smoothing does
-nothing. The startup check only warns above `1.5 ×` that rate, so a value between
+`ω = deg(g · tan φ / v)` for roll limit `φ` (`ROLL_LIMIT_DEG`) at speed `v` — about
+31 °/s at 45° and 18 m/s — or the limiter never binds and the smoothing does
+nothing. Note this is the **max-bank** rate, not the gentler loiter rate
+`deg(AIRSPEED_CRUISE / WP_LOITER_RAD)`; using the loiter rate under-reads the real
+figure roughly threefold and makes a perfectly effective slew limit look inert.
+The startup check only warns above `1.5 ×` the max-bank rate, so a value between
 the achievable rate and 1.5× is silently inert — check it by hand. A limit that
 does bind is still safe for urgent manoeuvres: it is bypassed when the estimated
-time-to-conflict falls below `DAA_SLEW_URG`.
+time-to-conflict falls below `DAA_SLEW_URG`, and also whenever slewing at
+`DAA_SLEW_DPS` could not complete the required change before the conflict.
 
 ### Network-fed traffic and data-link quality
 
