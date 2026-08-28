@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-053"
+SCRIPT_VERSION      = "4.8.0-054"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -532,6 +532,17 @@ local trap_esc_act          = DAA_TRAP_ESC_ACT:get()
 local stale_s               = DAA_STALE_S:get()
 
 GRAVITY_MSS = 9.80665
+
+-- Maximum achievable rate of turn (deg/s) in a level banked turn at the configured
+-- roll limit: omega = g * tan(phi) / V.  Both the startup sanity checks and the
+-- course-change projection call this, so the two can never disagree.  Returns 0 when
+-- there is no usable speed, and the caller decides what that means.
+local function max_turn_rate_dps(speed_ms)
+    if speed_ms == nil or speed_ms < 1.0 or roll_limit_deg <= 0 then
+        return 0.0
+    end
+    return math.deg(GRAVITY_MSS * math.tan(math.rad(roll_limit_deg)) / speed_ms)
+end
 
 local bearing_inc_deg = DAA_HEADING_INC:get() or DEFAULT_HEADING_INC_DEG
 if bearing_inc_deg <= 0 then
@@ -1370,9 +1381,9 @@ local DAA = {
         if trap_act ~= 0 and trap_esc_act == trap_act then
             warn(I, "TRAP_ESC_ACT = TRAP_ACT: no escalation") end
         -- slew limit that can never bind (exceeds the achievable turn rate)
-        if turn_r > 0 and cruise_ms > 1 and slew_dps > 0 then
-            local turn_rate = math.deg(cruise_ms / turn_r)
-            if slew_dps > turn_rate * 1.5 then
+        if cruise_ms > 1 and slew_dps > 0 then
+            local turn_rate = max_turn_rate_dps(cruise_ms)
+            if turn_rate > 0 and slew_dps > turn_rate * 1.5 then
                 warn(I, string.format("SLEW_DPS %.0f > turn rate %.0f: no effect", slew_dps, turn_rate)) end
         end
         -- disabled features
@@ -1575,11 +1586,21 @@ local DAA = {
     resist_bearing_change() already produces a bearing that clears ALL obstacles
     (fences included) and only makes a large change when the new side is clearly
     clearer. So:
-      * A large change from the last command (> DAA_BR_ANGLE), or an urgent
-        encounter, is a genuine avoidance turn -> obey it exactly, no smoothing.
-        (This is the safety fix: previously the side-commit could mirror such a
-        turn onto the committed side and the slew limit could throttle it, flying
-        the aircraft into the very fence the sweep was turning away from.)
+      * An urgent encounter, or a large change there is no time to damp, is a
+        genuine avoidance turn -> obey it exactly, no smoothing.  (This is the
+        safety fix: previously the side-commit could mirror such a turn onto the
+        committed side and the slew limit could throttle it, flying the aircraft
+        into the very fence the sweep was turning away from.)
+      * "No time to damp" is a question about TIME, not about size.  It used to be
+        size alone - any change over DAA_BR_ANGLE bypassed the smoothing - which
+        meant the one case the smoothing was built for was the one case that
+        reached the servos completely unfiltered: a ~180 degree side flip is always
+        over DAA_BR_ANGLE.  With two obstacles in range the single-obstacle sweep
+        alternates between them, and every alternation looked like a "necessary"
+        reversal.  Flight log_87 (2026-08-27) commanded 34 changes over 45 degrees
+        in one sortie, the worst 180 degrees in 0.26 s, none of them urgent.
+        Asking instead whether the slew limit can deliver the change before the
+        conflict leaves only the 3 that really were out of time.
       * Only SMALL residual changes (the left/right jitter) are damped, via a side
         commitment and a heading slew-rate limit. When holding a committed side we
         keep the LAST FLOWN bearing (known clear) rather than a mirrored one that
@@ -1596,17 +1617,28 @@ local DAA = {
         local urgent = (ttc_s ~= nil) and (ttc_s < slew_urg_s)
         local change = (last_avoid_bearing_deg ~= nil) and math.abs(wrap_180(resisted - last_avoid_bearing_deg)) or 999.0
 
-        if last_avoid_bearing_deg == nil or urgent or change > bendy_angle then
-            -- necessary avoidance turn (or first cycle): obey the sweep exactly and
-            -- (re)commit the side to it; never smooth this away
-            committed_side_sign = 0
+        -- which side of the direct bearing the sweep wants this cycle
+        local off = wrap_180(resisted - direct_bearing_deg)
+        local side = 0
+        if off > 1.0 then side = 1 elseif off < -1.0 then side = -1 end
+
+        -- Obey a large change exactly ONLY when damping it would make us late: if
+        -- slewing at DAA_SLEW_DPS cannot cover the change before the conflict, there
+        -- is no time left to be smooth.  ttc_s is FLT_MAX when nothing is closing, so
+        -- a manoeuvre with time in hand always damps.
+        local no_time_to_damp = change > bendy_angle and slew_dps > 0
+                                and (ttc_s * slew_dps) < change
+
+        if last_avoid_bearing_deg == nil or urgent or no_time_to_damp then
+            -- first cycle, or a turn there is no time to damp: obey the sweep exactly.
+            -- Record the side we are going round, so that a later reversal is seen as
+            -- a flip to be debounced rather than as another "necessary" turn; leave it
+            -- uncommitted on the very first cycle so pass_behind can choose below.
+            committed_side_sign = (last_avoid_bearing_deg == nil) and 0 or side
             side_flip_pending = false
         else
             -- small adjustment only: damp the jitter
-            -- (2) side commitment
-            local off = wrap_180(bearing - direct_bearing_deg)
-            local side = 0
-            if off > 1.0 then side = 1 elseif off < -1.0 then side = -1 end
+            -- (2) side commitment ('side' was computed above from this same bearing)
             if side_hold_s > 0 then
                 if committed_side_sign == 0 then
                     -- fresh episode: commit; prefer passing behind a moving obstacle
@@ -1684,10 +1716,11 @@ local DAA = {
     local function location_after_course_change(from_loc, course_deg, to_loc)
         local course_change_deg = wrap_180(course_deg - ground_course_deg)
         local ground_speed_ms = effective_groundspeed(airspeed_ms, course_deg, wind_dir_rad, wind_speed) -- ground speed based on the new bearing (accounting for wind)
-        local rate_of_turn_dps = math.deg(GRAVITY_MSS * math.tan(math.rad(roll_limit_deg * 0.6)) / (airspeed_ms + 0.1))
+        local rate_of_turn_dps = max_turn_rate_dps(airspeed_ms)
 
-        if math.abs(course_change_deg) > 170 then
-            -- Skip 180-degree turns as we can't predict the turn direction
+        if math.abs(course_change_deg) > 170 or rate_of_turn_dps <= 0 then
+            -- Skip 180-degree turns as we can't predict the turn direction, and skip
+            -- the projection entirely when there is no usable airspeed to turn at.
             return from_loc
         end
         -- Calculate how long it will take to change course
