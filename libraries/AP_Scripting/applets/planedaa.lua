@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-057"
+SCRIPT_VERSION      = "4.8.0-058"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -2364,6 +2364,26 @@ local DAA = {
     -- Without this, disabling DAA mid-avoidance leaves the hijacked target in place and
     -- the vehicle flies to it instead of home (e.g. RTL flying straight past home).
     function DAA.clear_avoidance()
+        -- An aircraft loiter hijacks the flight MODE (it commands GUIDED directly rather
+        -- than going through set_avoid_location), so it leaves daa_target_loc nil and the
+        -- check below would return without touching it.  Nothing else can stop it either:
+        -- do_loitering(), and with it loiteralt.update(), only runs while DAA.isactive().
+        -- Switching DAA off mid-loiter therefore used to leave the vehicle circling in
+        -- GUIDED indefinitely.
+        if loiteralt.active then
+            -- if the pilot has already left GUIDED, update() drops the loiter without
+            -- commanding a mode; only force the restore while we still hold GUIDED.
+            loiteralt.update()
+            if loiteralt.active then
+                -- force past the DAA_LTR_COOL_S hold: it exists so a flapping traffic
+                -- feed cannot thrash the mode, and means nothing once DAA is off.
+                -- stop() restores the mode saved when the loiter began (and correctly
+                -- leaves us in GUIDED if that is what we were in beforehand).
+                loiteralt.stop(true)
+            end
+            current_state = STATE.monitoring
+        end
+
         if daa_target_loc == nil then
             return
         end
