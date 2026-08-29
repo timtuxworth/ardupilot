@@ -8148,11 +8148,19 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 80),
             (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 600, 0, 80),     # 2 north run-in
             (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, -150, 0, 80),    # 3 south, past the circle
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 600, 0, 80),     # 4 north again
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, -150, 0, 80),    # 5 south again
             (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
         ])
         self.wait_current_waypoint(2, timeout=120)
         self.do_fence_enable()
-        self.wait_current_waypoint(4, timeout=400)   # reached WP-B (past the circle) -> RTL
+        # Two passes at the circle, not one.  The AVOIDING message is rate limited to one
+        # per 5 s, and the inclusion polygon and the exclusion circle are closely ranked
+        # through the approach, so a single pass can easily yield no circle-labelled
+        # message at all and the test then fails on an empty list rather than on a wrong
+        # distance.  Observed failing in-suite while passing standalone, on unmodified
+        # code.  A second pass roughly doubles the samples for ~3 s of extra run time.
+        self.wait_current_waypoint(6, timeout=600)   # both passes done -> RTL
         circ_dists = []
         for st in self.context_collection('STATUSTEXT'):
             mm = re.search(r'AVOIDING: Excl. Circle dist: (\d+)m', st.text)
