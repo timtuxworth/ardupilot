@@ -272,6 +272,16 @@ float AP_OAScripting::_distance_to_object(const Vector3f &start_NED_m, const Vec
         const float distance_m = Vector3f::closest_distance_between_line_and_point(start_NED_m, end_NED_m, item.pos) - item.radius;
         if (distance_m < distance_new_m) {
             distance_new_m = distance_m;
+            // find_threats() hands this same struct to the AP_Avoidance query before this
+            // one, so start from a clean slate.  Otherwise a proximity or AIS object that
+            // is closer than an ADS-B contact keeps that aircraft's timestamp, ICAO code,
+            // emitter type and velocity, and Lua then labels the object a drone, runs it
+            // through the traffic CPA logic as if it were moving, or warns about the
+            // traffic feed for it - and if get_origin() fails, even the aircraft's
+            // location survives.  _populate_fence_obstacle() clears for the same reason.
+            script_obstacle = OAObstacle{};
+            script_obstacle.timestamp_ms       = item.timestamp_ms;
+            script_obstacle.position_NED_m     = item.pos;
             Vector3p item_pos_3p(item.pos.x, item.pos.y, item.pos.z);
             if (AP::ahrs().get_origin(script_obstacle.location)) {
                 script_obstacle.location.offset(item_pos_3p);
