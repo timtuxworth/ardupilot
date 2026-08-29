@@ -208,9 +208,12 @@ public:
     }
 
     // methods to support scripted fence checking and avoidance
-    float distance_line_to_circle_inclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const;
+    // inclusion circles and polygons are queried together because FENCE_OPTIONS
+    // INCLUSION_UNION applies across both kinds at once; fence_type reports which kind
+    // the returned distance belongs to
+    float distance_line_to_inclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm,
+                                     AC_PolyFenceType &fence_type) const;
     float distance_line_to_circle_exclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const;
-    float distance_line_to_polygon_inclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const;
     float distance_line_to_polygon_exclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const;
 
 #if AP_SDCARD_STORAGE_ENABLED
