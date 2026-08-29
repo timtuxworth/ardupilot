@@ -101,19 +101,20 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
             _populate_fence_obstacle(obstacle, ObstacleType::FENCE_HOME);
             distance_m          = distance_new_m;
         }
-        distance_new_m = fence->distance_line_to_circle_inclusion(start_NE_cm, end_NE_cm);
-        if (distance_new_m < distance_m) {
-            _populate_fence_obstacle(obstacle, ObstacleType::FENCE_CIRCLE_INCLUSION);
-            distance_m          = distance_new_m;
-        }
         distance_new_m = fence->distance_line_to_circle_exclusion(start_NE_cm, end_NE_cm);
         if (distance_new_m < distance_m) {
             _populate_fence_obstacle(obstacle, ObstacleType::FENCE_CIRCLE_EXCLUSION);
             distance_m          = distance_new_m;
         }
-        distance_new_m = fence->distance_line_to_polygon_inclusion(start_NE_cm, end_NE_cm);
+        // inclusion circles and polygons are one query: FENCE_OPTIONS INCLUSION_UNION makes
+        // "inside any one of them" legal, which cannot be evaluated per category
+        AC_PolyFenceType inclusion_type = AC_PolyFenceType::POLYGON_INCLUSION;
+        distance_new_m = fence->distance_line_to_inclusion(start_NE_cm, end_NE_cm, inclusion_type);
         if (distance_new_m < distance_m) {
-            _populate_fence_obstacle(obstacle, ObstacleType::FENCE_POLYGON_INCLUSION);
+            _populate_fence_obstacle(obstacle,
+                                     (inclusion_type == AC_PolyFenceType::CIRCLE_INCLUSION)
+                                        ? ObstacleType::FENCE_CIRCLE_INCLUSION
+                                        : ObstacleType::FENCE_POLYGON_INCLUSION);
             distance_m          = distance_new_m;
         }
         distance_new_m = fence->distance_line_to_polygon_exclusion(start_NE_cm, end_NE_cm);
