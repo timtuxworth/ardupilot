@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-056"
+SCRIPT_VERSION      = "4.8.0-057"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -1211,6 +1211,9 @@ local DAA = {
 
     -- the distance we look ahead is adjusted dynamically based on avoidance results
     local current_lookahead = lookahead_param_m
+    -- last DAA_LKAHD we seeded current_lookahead from, so an operator changing the
+    -- parameter in flight takes effect on the next cycle instead of at the next reboot
+    local lookahead_set_m   = lookahead_param_m
 
     local function calculate_windspeed()
                 -- Get wind estimate and convert to 2D
@@ -1431,6 +1434,17 @@ local DAA = {
 
         active      = true;
         current_loc = ahrs:get_position()
+
+        -- get_vehicle_state() re-reads DAA_LKAHD into lookahead_param_m every 5 s, but
+        -- current_lookahead is the working value the sweep actually uses.  Re-seed it when
+        -- the operator changes the parameter; testing for a change rather than assigning
+        -- every cycle leaves room for the dynamic adjustment the comment above promises.
+        if lookahead_param_m ~= lookahead_set_m then
+            lookahead_set_m     = lookahead_param_m
+            current_lookahead   = lookahead_param_m
+            gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(
+                ": lookahead now %.0f m", current_lookahead))
+        end
 
         if OAScripting == nil then
             gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " OAScripting object is nil!")
