@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-054"
+SCRIPT_VERSION      = "4.8.0-056"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -532,6 +532,9 @@ local trap_esc_act          = DAA_TRAP_ESC_ACT:get()
 local stale_s               = DAA_STALE_S:get()
 
 GRAVITY_MSS = 9.80665
+-- minimum length of the bendy-ruler second-leg probe, so a plane sitting almost on top
+-- of its waypoint still tests a sane segment (mirrors OA_BENDYRULER_LOOKAHEAD_STEP2_MIN)
+MIN_STEP2_M = 2.0
 
 -- Maximum achievable rate of turn (deg/s) in a level banked turn at the configured
 -- roll limit: omega = g * tan(phi) / V.  Both the startup sanity checks and the
@@ -1680,36 +1683,45 @@ local DAA = {
         return bearing
     end
 
-    -- calculates the second step of the bendy ruler test - look foward a 2nd "full_distance" to see if we can still avoid obstacles
-    local function test_step2(loc_test, target_bearing, avoid_step2_m, _full_distance)
-        local test_bearings = { 0, 45, -45 }
-        local target_loc = loc_test:copy()
-        target_loc:offset_bearing(target_bearing, avoid_step2_m)
+    -- Second step of the bendy ruler test: having flown one step out to loc_test, look a
+    -- further avoid_step2_m ahead to check this heading does not lead into a dead end.
+    -- Mirrors AP_OABendyRuler::search_xy_path(): the three probes fan +/-45 degrees around
+    -- the bearing from loc_test to the real destination (not around the step-1 heading),
+    -- the leg is capped by the distance still to run, and the segment tested starts AT
+    -- loc_test so it is contiguous with step 1, which covered current_loc -> loc_test.
+    -- Returns the clearance found and whether the probe that produced it was the straight
+    -- one (delta == 0); the caller needs that to decide "no avoidance required" without
+    -- comparing recomputed bearings for equality.
+    local function test_step2(loc_test, avoid_step2_m, destination_loc)
+        local test_bearings         = { 0, 45, -45 }
+        local bearing_to_dest_deg   = math.deg(loc_test:get_bearing(destination_loc))
+        local distance2_m           = math.max(math.min(avoid_step2_m,
+                                                       loc_test:get_distance(destination_loc)), MIN_STEP2_M)
 
-        local bearing_found = target_bearing
-        local closest_distance_m  = FLT_MAX
+        local closest_distance_m    = FLT_MAX
+        local closest_obstacle      = nil
+        local straight              = false
 
         for _, delta in ipairs(test_bearings) do
-            local bearing_test = target_bearing + delta
+            local bearing_test  = wrap_180(bearing_to_dest_deg + delta)
+            local loc_test2     = location_project(loc_test, bearing_test, distance2_m, destination_loc)
 
-            local target_distance   = loc_test:get_distance(target_loc)
-            local distance          = calc_avoidance_distance(avoid_step2_m, target_distance)
-            local loc_test2         = location_project(loc_test, bearing_test, distance, target_loc)
-
-            local distance_m, _     = find_closest_obstacle(loc_test2, target_loc, current_lookahead, wind_speed)
+            local distance_m, obstacle = find_closest_obstacle(loc_test, loc_test2, current_lookahead, wind_speed)
 
             if distance_m > current_lookahead then
                 -- return immediately - no obstacles in this direction
-                return bearing_test, distance_m
+                return distance_m, (delta == 0), nil
             end
             if distance_m < closest_distance_m then
-                -- return the bearing to the nearest obstacle
-                bearing_found       = bearing_test
+                -- remember the worst blocker we saw, and whether the probe that hit it
+                -- was the straight-at-the-destination one
                 closest_distance_m  = distance_m
+                closest_obstacle    = obstacle
+                straight            = (delta == 0)
             end
         end
 
-        return bearing_found, closest_distance_m
+        return closest_distance_m, straight, closest_obstacle
     end
 
     -- This method calculates the projected location in the desired direction taking account of airspeed, windspeed and the time it takes to turn
@@ -1765,14 +1777,20 @@ local DAA = {
         end
         if distance_found_m > current_lookahead then
             -- This direction avoids all obstacles for one step. Check if it leads to a clear path for a longer distance.
-            local bearing2_deg, distance2_m = test_step2(test_loc, bearing_test_deg, avoid_step2_m, current_lookahead)
+            local distance2_m, straight2, obstacle2 = test_step2(test_loc, avoid_step2_m, target_loc)
             if distance2_m >= current_lookahead then
-                if allow_straight and bearing2_deg == bearing_deg then
+                if allow_straight and straight2 then
                     -- means we have a direct unobstructed path for step1 and step2
                     return FLT_MAX, bearing_deg, nil -- no avoidance required
                 end
                 -- we've found at least one direction where there is no obstacle at least for 2 steps out
                 distance_found_m = distance_found_m + distance2_m
+            elseif obstacle2 ~= nil then
+                -- All three second-leg probes are blocked: this heading is clear for one
+                -- step but leads into a dead end.  Report the blocker so DAA.detect() keeps
+                -- sweeping (it ends the sweep on a nil obstacle, so without this the step-2
+                -- result was discarded and the heading was accepted as clear).
+                return distance2_m, bearing_test_deg, obstacle2
             end
         end
 
