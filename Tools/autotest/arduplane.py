@@ -8266,6 +8266,111 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         self.wait_current_waypoint(3, timeout=400)
         self.disarm_vehicle(force=True)
 
+    def PlaneDAAStandoffNotDoubleCounted(self):
+        '''The traffic standoff must be AVD_UAV_XY + DAA_MARGIN_UAV, as documented, not
+        twice the radius plus the margin.
+
+        AP_Avoidance::distance_to_obstacle() already subtracts the protected radius for the
+        emitter type, so the distance handed to Lua is clearance to the edge of the
+        protected volume.  find_closest_obstacle() then compared that against
+        AVD_UAV_XY + DAA_MARGIN_UAV, adding the radius back, so the real trigger was
+        2 x AVD_UAV_XY + DAA_MARGIN_UAV - and it disagreed with find_aircraft(), which
+        passes the full standoff against a raw centre distance.
+
+        A stationary drone sits far ahead on the northbound leg.  Step 1 reaches DAA_LKAHD,
+        so avoidance engages once the drone is within DAA_LKAHD + AVD_UAV_XY + margin of the
+        aircraft; with the radius counted twice that happens a whole AVD_UAV_XY earlier.
+        The two are 300 m apart here, so the range at first AVOIDING tells them apart.'''
+        self.install_applet_script_context("planedaa.lua")
+        self.install_script_module_context(
+            self.script_modules_source_path("mavlink_wrappers.lua"),
+            "mavlink_wrappers.lua",
+        )
+
+        lookahead_m = 1000       # DAA_LKAHD default, read once at script load
+        uav_xy_m = 300
+        margin_uav_m = 100
+
+        # step 1 reaches DAA_LKAHD, and distance_to_obstacle() has already removed AVD_UAV_XY
+        correct_trigger_m = lookahead_m + uav_xy_m + margin_uav_m           # 1400
+        double_counted_m = lookahead_m + 2 * uav_xy_m + margin_uav_m        # 1700
+        max_expected_m = 0.5 * (correct_trigger_m + double_counted_m)       # 1550
+
+        self.set_parameters({
+            "SCR_ENABLE": 1,
+            "SCR_VM_I_COUNT": 1000000,
+            "ADSB_TYPE": 1,      # MAVLink: ingest ADSB_VEHICLE with no ADS-B hardware
+            "AVD_ENABLE": 1,
+            "AVD_UAV_XY": uav_xy_m,
+            "AVD_UAV_Z": 25,
+        })
+
+        self.context_collect('STATUSTEXT')
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+        self.set_parameter("DAA_MARGIN_UAV", margin_uav_m)
+
+        home = self.home_position_as_location()
+        # far enough north that neither trigger has been reached when the takeoff climb
+        # hands over to mission navigation a few hundred metres out
+        drone_loc = self.offset_location_ne(home, 3000, 0)
+        icao = 0xF00099
+
+        self.start_flying_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 50),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 4000, 0, 80),
+            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+        ])
+        self.wait_current_waypoint(2, timeout=120)
+        self.wait_text("Plane DAA", check_context=True, timeout=60)
+
+        def range_to_drone():
+            return self.get_distance(self.get_location(), drone_loc)
+
+        # if the takeoff already carried us inside the double-counted trigger the test
+        # cannot tell the two apart, so fail loudly rather than passing for free
+        if range_to_drone() <= double_counted_m:
+            raise NotAchievedException(
+                "takeoff ended only %.0f m from the drone, already inside the "
+                "double-counted trigger (%.0f m)" % (range_to_drone(), double_counted_m))
+
+        tstart = self.get_sim_time()
+        range_at_first_avoid_m = None
+        while self.get_sim_time() - tstart < 300:
+            # ADS-B contacts are pruned after 5 s, so keep the drone alive
+            here = self.get_location()
+            self.mav.mav.adsb_vehicle_send(
+                icao,
+                int(drone_loc.lat * 1e7),
+                int(drone_loc.lng * 1e7),
+                mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
+                int(here.get_alt_m(AltFrame.ABSOLUTE) * 1000 + 10000),  # 10 m up, inside AVD_UAV_Z
+                0, 0, 0,
+                "SIMTL99".encode("ascii"),
+                mavutil.mavlink.ADSB_EMITTER_TYPE_UAV,
+                1, 65535, 1200,
+            )
+            self.wait_heartbeat()
+            for st in self.context_collection('STATUSTEXT'):
+                if "AVOIDING" in st.text:
+                    range_at_first_avoid_m = range_to_drone()
+                    break
+            if range_at_first_avoid_m is not None:
+                break
+        if range_at_first_avoid_m is None:
+            raise NotAchievedException("planedaa never avoided the drone")
+
+        self.progress(
+            "first AVOIDING %.0f m from the drone (documented standoff gives about %.0f m, "
+            "counting the radius twice gives about %.0f m)" %
+            (range_at_first_avoid_m, correct_trigger_m, double_counted_m))
+        if range_at_first_avoid_m > max_expected_m:
+            raise NotAchievedException(
+                "avoidance engaged %.0f m out, beyond %.0f m: the AVD_UAV_XY radius is "
+                "being counted twice (documented standoff is AVD_UAV_XY + DAA_MARGIN_UAV)"
+                % (range_at_first_avoid_m, max_expected_m))
+        self.disarm_vehicle(force=True)
+
     def PlaneDAADroneCrossing(self):
         '''planedaa must avoid a *moving* ADS-B drone and reach its waypoint, then
         land cleanly.  A drone slow-overtake-crosses the northbound corridor (it
@@ -10959,6 +11064,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             Test(self.PlaneDAAFenceLabelScoped),
             Test(self.PlaneDAAFenceInclusionUnion),
             Test(self.PlaneDAADroneAvoidance),
+            Test(self.PlaneDAAStandoffNotDoubleCounted),
             Test(self.PlaneDAADroneCrossing),
             Test(self.PlaneDAAAircraftLoiterNoFlip),
             Test(self.PlaneDAAAircraftCpaGate),
