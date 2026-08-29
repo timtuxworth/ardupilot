@@ -1243,14 +1243,18 @@ float AC_Fence::distance_line_to_home_inclusion(const Vector2f& start_NE_cm, con
     return distance_new_m - get_margin_ne_m();
 }
 
-// returns the closest distance in meters from (start_NE_cm, end_NE_cm) and any circle inclusion fence.
-// the distance will be positive if we are outside the inclusion circle, or -ve if outside the circle
-float AC_Fence::distance_line_to_circle_inclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const
+// returns the closest distance in meters from (start_NE_cm, end_NE_cm) to any inclusion fence,
+// circle or polygon.  Positive while inside the inclusion, -ve once breached.  Both kinds are
+// queried together because FENCE_OPTIONS INCLUSION_UNION applies across both at once; fence_type
+// reports which kind the distance belongs to.  The margin is a constant offset applied to every
+// area, so subtracting it here cannot change which area won.
+float AC_Fence::distance_line_to_inclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm,
+                                            AC_PolyFenceType &fence_type) const
 {
     if ( !(get_enabled_fences() & AC_FENCE_TYPE_POLYGON) ) {    // Yes POLYGON - a circle (in AC_Fence) is a type of polygon
         return FLT_MAX;
     }
-    return _poly_loader.distance_line_to_circle_inclusion(start_NE_cm, end_NE_cm) - get_margin_ne_m();
+    return _poly_loader.distance_line_to_inclusion(start_NE_cm, end_NE_cm, fence_type) - get_margin_ne_m();
 }
 
 // returns the closest distance in meters from (start_NE_cm, end_NE_cm) and any circle exclusion fence.
@@ -1262,17 +1266,6 @@ float AC_Fence::distance_line_to_circle_exclusion(const Vector2f& start_NE_cm, c
     }
 
     return _poly_loader.distance_line_to_circle_exclusion(start_NE_cm, end_NE_cm) - get_margin_ne_m();
-}
-
-// returns the closest distance in meters from (start_NE_cm, end_NE_cm) and any polygon inclusion fence.
-// the distance will be positive if the vehicles is inside the inclusion, or -ve if it is outside
-float AC_Fence::distance_line_to_polygon_inclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const
-{
-    if ( !(get_enabled_fences() & AC_FENCE_TYPE_POLYGON) ) {
-        return FLT_MAX;
-    }
-
-    return _poly_loader.distance_line_to_polygon_inclusion(start_NE_cm, end_NE_cm) - get_margin_ne_m();
 }
 
 // returns the closest distance in meters from (start_NE_cm, end_NE_cm) and any polygon exclusion fence.
@@ -1327,9 +1320,8 @@ float AC_Fence::get_margin_ne_m() const { return 0.0f; }
 // there is none.  FLT_MAX, not 0: callers keep the smallest value they see, so returning
 // zero here would read as "a fence right on top of us" on a fence-less build.
 float AC_Fence::distance_line_to_home_inclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const { return FLT_MAX; }
-float AC_Fence::distance_line_to_circle_inclusion(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm) const { return FLT_MAX; }
+float AC_Fence::distance_line_to_inclusion(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm, AC_PolyFenceType &fence_type) const { return FLT_MAX; }
 float AC_Fence::distance_line_to_circle_exclusion(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm) const { return FLT_MAX; }
-float AC_Fence::distance_line_to_polygon_inclusion(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm) const { return FLT_MAX; }
 float AC_Fence::distance_line_to_polygon_exclusion(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm) const { return FLT_MAX; }
 
 AC_PolyFence_loader &AC_Fence::polyfence()
