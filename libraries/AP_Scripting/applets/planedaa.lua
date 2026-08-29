@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-059"
+SCRIPT_VERSION      = "4.8.0-060"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -991,15 +991,23 @@ local function find_closest_obstacle(loc1, loc2, lookahead_m, wind_ms)
     local obstacle_type_val = any_obstacle:obstacle_type()
 
     local obstacle_margin = 0;
-    -- NOTE: the per-type margins below duplicate limits find_threats() already
-    -- applies internally; parameterising them there would remove the duplication.
+    -- What distance_m already accounts for differs by where the obstacle came from, so the
+    -- margin added here does too:
+    --  * AP_Avoidance contacts (crewed aircraft, drones) - distance_to_obstacle() has ALREADY
+    --    subtracted the protected radius for that emitter type (AVD_WCLR_XY / AVD_UAV_XY), so
+    --    distance_m is clearance to the edge of the protected volume and only the extra margin
+    --    belongs here.  Adding the radius back made the real trigger 2 x radius + margin: 1269 m
+    --    for a crewed aircraft on defaults against the 660 m this file and planedaa.md document,
+    --    and it disagreed with find_aircraft() below, which passes the full standoff against a
+    --    raw centre distance.
+    --  * AP_OADatabase objects (AIS, proximity) - _distance_to_object() subtracts the object's
+    --    own PHYSICAL radius, so a standoff still has to be added on top here.
     if obstacle_type_val == OBSTACLE_TYPE.CREWED_AIRCRAFT then
-        obstacle_margin = well_clear_xy + margin_crewed_m
+        obstacle_margin = margin_crewed_m
     elseif obstacle_type_val == OBSTACLE_TYPE.MAV_SYSID then
-        -- drone/UAV (ADSB emitter 14): mirrors the crewed-aircraft line but with the UAV horizontal
-        -- reference (AVD_UAV_XY) instead of the aircraft "well clear" (AVD_WCLR_XY), and
-        -- no aircraft loiter-to-alt; bendy ruler handles it via obstacle_avoiding
-        obstacle_margin = uav_clear_xy + margin_uav_m
+        -- drone/UAV (ADSB emitter 14, and MAVLink vehicles, which AP_Avoidance tags UAV):
+        -- AVD_UAV_XY is the radius already removed, so only DAA_MARGIN_UAV is added
+        obstacle_margin = margin_uav_m
     elseif obstacle_type_val == OBSTACLE_TYPE.AIS then
         obstacle_margin = well_clear_xy + margin_ais_m
     elseif obstacle_type_val == OBSTACLE_TYPE.PROXIMITY then
