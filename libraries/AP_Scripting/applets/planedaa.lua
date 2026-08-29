@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-058"
+SCRIPT_VERSION      = "4.8.0-059"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -2635,6 +2635,14 @@ local DAA = {
     --                 proximity, AIS and birds are avoided but do not trip the trap here.
     -- Sustained (DAA_TRAP_S) this is a genuine trap. Altitude fences are vertical
     -- (clamp-and-continue) and are covered by get_breaches, not the aircraft near-miss check.
+    -- Returns (compromised, dynamic).  "dynamic" describes the CAUSE: a real aircraft inside
+    -- NMAC can move out of the way, a fence breach cannot, and that is what decides whether
+    -- the trap auto-clears after DAA_TRAP_CLR_S or is held until the pilot intervenes.  The
+    -- cause must be reported from here because it cannot be recovered afterwards: the trap
+    -- used to classify itself from obstacle_avoiding, the bendy ruler's current closest
+    -- threat, which need not be what caused the compromise.  With simultaneous threats that
+    -- filed an aircraft near-miss as a sticky fence trap, or let a fence breach inherit a
+    -- moving obstacle's auto-resume.
     local function daa_compromised_now()
         -- A fence breach is a compromise UNLESS the core fence library is already handling it
         -- in a way that will refuse the trap's mode change: FENCE_ACTION ~= 0 (core takes a mode
@@ -2648,13 +2656,16 @@ local DAA = {
             local fence_act  = param:get('FENCE_ACTION') or 0
             local fence_opts = param:get('FENCE_OPTIONS') or 0
             if not (fence_act ~= 0 and (math.floor(fence_opts) % 2) == 1) then
-                return true
+                return true, false      -- a fence will not move out of the way: static trap
             end
         end
-        return aircraft_avoiding ~= nil
+        if aircraft_avoiding ~= nil
             and aircraft_avoiding.distance_xy ~= nil
             and aircraft_avoiding.distance_xy < near_miss_xy
-            and aircraft_avoiding.distance_z < near_miss_z
+            and aircraft_avoiding.distance_z < near_miss_z then
+            return true, true           -- a real aircraft can move away: recoverable trap
+        end
+        return false, false
     end
 
     -- Trapped-failsafe state machine. Returns true while the failsafe is controlling the
@@ -2668,12 +2679,13 @@ local DAA = {
         local mode_now = vehicle:get_mode()
 
         if not trap_active then
-            if daa_compromised_now() then
+            local compromised, cause_is_dynamic = daa_compromised_now()
+            if compromised then
                 if trap_since_ms == uint32_t(0) then trap_since_ms = now_ms end
                 if (now_ms - trap_since_ms) >= (trap_s * 1000) then
-                    -- a fence breach can nil obstacle_avoiding (breach-escape) yet still be a
-                    -- compromise; treat "no current obstacle" as a static (fence) trap
-                    trap_dynamic    = (obstacle_avoiding ~= nil) and obstacle_is_dynamic(obstacle_avoiding.type) or false
+                    -- classify from the cause the compromise check reported, not from
+                    -- whatever the bendy ruler happens to be closest to right now
+                    trap_dynamic    = cause_is_dynamic
                     trap_prev_mode  = mode_now
                     trap_fs_mode    = resolve_trap_mode(mode_now)
                     trap_trigger_ms = now_ms
