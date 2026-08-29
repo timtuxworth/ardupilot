@@ -9,6 +9,7 @@
 #include <AP_Logger/AP_Logger.h>
 #include <AP_Terrain/AP_Terrain.h>
 #include <AP_Vehicle/AP_Vehicle.h>
+#include <AP_Follow/AP_Follow.h>
 
 extern const AP_HAL::HAL& hal;
 
@@ -1226,11 +1227,30 @@ bool AP_Mount_Backend::get_angle_target_to_wpnext_offset(MountAngleTarget& angle
 // returns true on success, false on failure
 bool AP_Mount_Backend::get_angle_target_to_sysid(MountAngleTarget& angle_rad) const
 {
-    // exit immediately if sysid is not set or no location available
-    if (!_target_sysid_location.initialised()) {
+    // exit immediately if sysid is not set
+    if (!_target_sysid) {
         return false;
     }
-    if (!_target_sysid) {
+
+#if AP_FOLLOW_ENABLED
+    // if AP_Follow is tracking the same vehicle we are, prefer its
+    // kinematically-extrapolated estimate: it copes with a target that is
+    // genuinely slow-moving (rather than just lagging) far better than the
+    // bare timeout below
+    AP_Follow *follow = AP_Follow::get_singleton();
+    if (follow != nullptr &&
+        follow->enabled() &&
+        follow->get_target_sysid() == (uint32_t)_target_sysid) {
+        Location follow_loc;
+        Vector3f follow_vel_ned;
+        if (follow->get_target_location_and_velocity(follow_loc, follow_vel_ned)) {
+            return get_angle_target_to_location(follow_loc, angle_rad);
+        }
+    }
+#endif
+
+    // exit immediately if no location available
+    if (!_target_sysid_location.initialised()) {
         return false;
     }
     // exit if we haven't heard from the target recently, to avoid snapping to a stale location

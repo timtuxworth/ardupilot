@@ -8154,6 +8154,62 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
                 constrained=constrain_sysid_target,
             )
 
+            self.progress("Testing mount uses AP_Follow's kinematic estimate when sysids match")
+            self.context_push()
+            self.set_parameters({
+                "FOLL_ENABLE": 1,
+                "FOLL_SYSID": self.mav.source_system,
+            })
+            # use a target with a modest elevation angle, comfortably inside
+            # the mount's pitch limits (MNT1_PITCH_MAX=45 in this test): the
+            # earlier sysid-target tests deliberately use a target so steep
+            # it saturates the pitch limit, which would make tracking-vs-
+            # frozen behaviour unobservable here regardless of which is true
+            follow_target_relalt_m = 40 # 10m above the vehicle's 30m hover alt
+            follow_target_vel_east_ms = 10
+            tstart = self.get_sim_time()
+            while self.get_sim_time_cached() - tstart < 2:
+                dt = self.get_sim_time_cached() - tstart
+                (cur_lat, cur_lon) = mavextra.gps_offset(start.lat, start.lng, 0, 20 + follow_target_vel_east_ms * dt)
+                # AP_Follow runs incoming GLOBAL_POSITION_INT timestamps
+                # through JitterCorrection, so (unlike the rest of this
+                # test) we need a real, monotonically increasing
+                # time_boot_ms here or its link offset locks onto the
+                # first message and never advances again
+                self.mav.mav.global_position_int_send(
+                    int(self.get_sim_time_cached() * 1000), # time boot ms
+                    int(cur_lat * 1e7),
+                    int(cur_lon * 1e7),
+                    int((start.alt + 10) * 1000), # mm alt amsl (approx; unused by AP_Follow)
+                    follow_target_relalt_m * 1000, # mm above home
+                    0, # vx
+                    int(follow_target_vel_east_ms * 100), # vy (cm/s)
+                    0, # vz
+                    0 # heading
+                )
+                self.delay_sim_time(0.1, reason="feed AP_Follow a moving target")
+
+            # stop sending updates; AP_Follow's own estimate (FOLL_TIMEOUT
+            # defaults to 3s) should keep extrapolating the target's motion,
+            # so the mount should keep tracking rather than freeze like it
+            # did above when sysids didn't match
+            # poll for a fresh GIMBAL_DEVICE_ATTITUDE_STATUS rather than
+            # reading the mavlink stream, which may return a stale queued
+            # message instead of the mount's current state
+            def poll_mount_pitch_deg():
+                m = self.poll_message('GIMBAL_DEVICE_ATTITUDE_STATUS')
+                return self.eulers_in_degrees_from_GIMBAL_DEVICE_ATTITUDE_STATUS(m)[1]
+
+            pre_gap_pitch = poll_mount_pitch_deg()
+            self.delay_sim_time(1.5, reason="telemetry gap within AP_Follow's own timeout")
+            post_gap_pitch = poll_mount_pitch_deg()
+            if abs(post_gap_pitch - pre_gap_pitch) < 1.5:
+                raise NotAchievedException(
+                    "Mount should continue tracking via AP_Follow's kinematic estimate "
+                    "while the target is moving and telemetry is temporarily stale "
+                    "(pitch was %f before gap, %f after)" % (pre_gap_pitch, post_gap_pitch))
+            self.context_pop()
+
             self.set_mount_mode(mavutil.mavlink.MAV_MOUNT_MODE_NEUTRAL)
             self.test_mount_pitch(0, 0.1, mavutil.mavlink.MAV_MOUNT_MODE_NEUTRAL)
 
