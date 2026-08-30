@@ -32,3 +32,13 @@
 #ifndef AP_OA_SCRIPTING_ENABLED
 #define AP_OA_SCRIPTING_ENABLED (AP_SCRIPTING_ENABLED && APM_BUILD_TYPE(APM_BUILD_ArduPlane) && AP_AVOIDANCE_ENABLED && AP_ADSB_AVOIDANCE_ENABLED && (HAL_PROGRAM_SIZE_LIMIT_KB > 2048))
 #endif  // AP_OA_SCRIPTING_ENABLED
+
+// Proximity and AIS obstacles reach the scripting layer through AP_OADatabase, which is a
+// member of AP_OAPathPlanner.  Plane does not instantiate AP_OAPathPlanner, so on Plane
+// AP::oadatabase() is null and the query returns immediately: the code is inert and the
+// PROXIMITY and AIS obstacle types can never be produced.  Default off so that dead query
+// costs no flash, and turn it on once something on this vehicle owns and pumps a database.
+// AP_AIS is a second prerequisite: it compiles to dummy methods on anything but Rover.
+#ifndef AP_OA_SCRIPTING_OADB_ENABLED
+#define AP_OA_SCRIPTING_OADB_ENABLED 0
+#endif  // AP_OA_SCRIPTING_OADB_ENABLED
