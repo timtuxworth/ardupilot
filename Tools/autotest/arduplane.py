@@ -8294,7 +8294,14 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         # step 1 reaches DAA_LKAHD, and distance_to_obstacle() has already removed AVD_UAV_XY
         correct_trigger_m = lookahead_m + uav_xy_m + margin_uav_m           # 1400
         double_counted_m = lookahead_m + 2 * uav_xy_m + margin_uav_m        # 1700
-        max_expected_m = 0.5 * (correct_trigger_m + double_counted_m)       # 1550
+        # Assert against the double-counted prediction rather than the midpoint.  The
+        # arithmetic above is approximate: at this AVD_UAV_XY the +/-45 degree second-leg
+        # probes also clip the drone's protected volume, so all three continuations block
+        # and the step-2 dead-end rejection fires before step 1 would.  Both cases shift
+        # out by a similar amount (measured 1543 fixed, 1964 double-counted), so the
+        # midpoint sits only metres above the passing value while this threshold leaves
+        # a few hundred metres of margin on each side.
+        max_expected_m = double_counted_m                                   # 1700
 
         self.set_parameters({
             "SCR_ENABLE": 1,
