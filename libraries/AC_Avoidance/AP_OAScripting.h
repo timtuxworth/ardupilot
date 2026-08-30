@@ -100,7 +100,9 @@ private:
     static AP_OAScripting *_singleton;
 
     float _distance_to_avoidance(const Vector3f &start_NED_cm, const Vector3f &end_NED_cm, OAObstacle &script_obstacle) const;
+#if AP_OA_SCRIPTING_OADB_ENABLED
     float _distance_to_object(const Vector3f &start_NED_m, const Vector3f end_NED_m, OAObstacle &script_obstacle) const;
+#endif
     float _distance_to_aircraft(const Vector3f &vehicle_NED_cm, const float lookahead_m, const float vertical_lookahead_m, OAObstacle &script_obstacle) const;
 
     // create a "Scripting Obstacle" to easily pass info about an obstacle to Lua
