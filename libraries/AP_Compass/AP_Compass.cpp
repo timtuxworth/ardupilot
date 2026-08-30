@@ -12,7 +12,6 @@
 #include <AP_Logger/AP_Logger.h>
 #include <AP_Vehicle/AP_Vehicle_Type.h>
 #include <AP_ExternalAHRS/AP_ExternalAHRS.h>
-#include <AP_CustomRotations/AP_CustomRotations.h>
 #include <GCS_MAVLink/GCS.h>
 #include <AP_AHRS/AP_AHRS.h>
 
@@ -666,38 +665,11 @@ const AP_Param::GroupInfo Compass::var_info[] = {
     AP_GROUPINFO("DEV_ID8", 48, Compass, extra_dev_id[4], 0),
 #endif // COMPASS_MAX_UNREG_DEV
 
-    // @Param: CUS_ROLL
-    // @DisplayName: Custom orientation roll offset
-    // @Description: Compass mounting position roll offset. Positive values = roll right, negative values = roll left. This parameter is only used when COMPASS_ORIENT/2/3 is set to CUSTOM.
-    // @Range: -180 180
-    // @Units: deg
-    // @Increment: 1
-    // @RebootRequired: True
-    // @User: Advanced
+    // index 49 was CUS_ROLL
 
-    // index 49
+    // index 50 was CUS_PIT
 
-    // @Param: CUS_PIT
-    // @DisplayName: Custom orientation pitch offset
-    // @Description: Compass mounting position pitch offset. Positive values = pitch up, negative values = pitch down. This parameter is only used when COMPASS_ORIENT/2/3 is set to CUSTOM.
-    // @Range: -180 180
-    // @Units: deg
-    // @Increment: 1
-    // @RebootRequired: True
-    // @User: Advanced
-
-    // index 50
-
-    // @Param: CUS_YAW
-    // @DisplayName: Custom orientation yaw offset
-    // @Description: Compass mounting position yaw offset. Positive values = yaw right, negative values = yaw left. This parameter is only used when COMPASS_ORIENT/2/3 is set to CUSTOM.
-    // @Range: -180 180
-    // @Units: deg
-    // @Increment: 1
-    // @RebootRequired: True
-    // @User: Advanced
-
-    // index 51
+    // index 51 was CUS_YAW
 
     AP_GROUPEND
 };
@@ -744,30 +716,6 @@ void Compass::init()
         }
 #endif
     }
-
-    // convert to new custom rotation method
-    // PARAMETER_CONVERSION - Added: Nov-2021
-#if AP_CUSTOMROTATIONS_ENABLED
-    for (StateIndex i(0); i<COMPASS_MAX_INSTANCES; i++) {
-        if (_state[i].orientation != ROTATION_CUSTOM_OLD) {
-            continue;
-        }
-        _state[i].orientation.set_and_save(ROTATION_CUSTOM_2);
-        AP_Param::ConversionInfo info;
-        if (AP_Param::find_top_level_key_by_pointer(this, info.old_key)) {
-            info.type = AP_PARAM_FLOAT;
-            float rpy[3] = {};
-            AP_Float rpy_param;
-            for (info.old_group_element=49; info.old_group_element<=51; info.old_group_element++) {
-                if (AP_Param::find_old_parameter(&info, &rpy_param)) {
-                    rpy[info.old_group_element-49] = rpy_param.get();
-                }
-            }
-            AP::custom_rotations().convert(ROTATION_CUSTOM_2, rpy[0], rpy[1], rpy[2]);
-        }
-        break;
-    }
-#endif  // AP_CUSTOMROTATIONS_ENABLED
 
 #if COMPASS_MAX_INSTANCES > 1
     // Look if there was a primary compass setup in previous version

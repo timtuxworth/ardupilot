@@ -31,10 +31,12 @@ import tempfile
 import threading
 import time
 import traceback
+import zlib
 
 from datetime import datetime
 from inspect import currentframe
 from inspect import getframeinfo
+from inspect import signature
 from pathlib import Path
 from typing import Dict
 from typing import List
@@ -348,6 +350,10 @@ class Context(object):
         # first context_set_speedup() call in this context (None means
         # speedup was never changed in this context)
         self.original_speedup = None
+        # suite attributes to put back on context_pop(); list of
+        # (name, original value) tuples, filled in by
+        # context_preserve_attribute()
+        self.preserved_attributes = []
         # files snapshotted via context_backup_file() and restored on
         # context_pop(); list of (path, original_bytes) tuples
         self.backup_files = []
@@ -2132,6 +2138,7 @@ class TestSuite(abc.ABC):
                  enable_fgview=False,
                  move_logs_on_test_failure: bool = False,
                  asan=False,
+                 check_parameter_leaks=True,
                  ):
         if breakpoints is None:
             breakpoints = []
@@ -2238,6 +2245,9 @@ class TestSuite(abc.ABC):
         self.dronecan_tests = dronecan_tests
         self.statustext_id = 1
         self.message_hooks = []  # functions or MessageHook instances
+        self.check_parameter_leaks_enabled = check_parameter_leaks
+        # the session's parameters as they were before the first test ran
+        self.pristine_parameters = None
 
     def __del__(self):
         if self.rc_thread is not None:
@@ -2496,6 +2506,8 @@ class TestSuite(abc.ABC):
             else:
                 self.stop_SITL()
                 self.start_SITL(wipe=False)
+            # as below: the vehicle which sent these has gone
+            self.context_clear_collections()
         else:
             # receiving an ACK from the process turns out to be really
             # quite difficult.  So just send it and hope for the best.
@@ -2509,6 +2521,9 @@ class TestSuite(abc.ABC):
                 p2=1,
                 p6=p6,
             )
+            # anything collected up to here came from the vehicle we
+            # have just asked to go away:
+            self.context_clear_collections()
             do_context = True
         if do_context:
             self.context_push()
@@ -2574,12 +2589,22 @@ class TestSuite(abc.ABC):
         tstart = time.time()
         if required_bootcount is None:
             required_bootcount = old_bootcount + 1
+
+        # note that this loop depends on the reconnection announcing us
+        # to the vehicle as it happens - see
+        # announce_ourselves_on_every_connection().  Without that, the
+        # vehicle boots, says everything it has to say and discards all
+        # of it before it has heard from us.
         while True:
             if time.time() - tstart > timeout:
                 raise AutoTestTimeoutException("Did not detect reboot")
             try:
+                # any request we send while the autopilot is restarting
+                # is lost along with the old connection, so poll often
+                # rather than waiting a long time for a reply which will
+                # never come:
                 current_bootcount = self.get_parameter('STAT_BOOTCNT',
-                                                       timeout=1,
+                                                       timeout=0.1,
                                                        attempts=1,
                                                        verbose=True,
                                                        timeout_in_wallclock=True)
@@ -3417,7 +3442,14 @@ class TestSuite(abc.ABC):
         return ret
 
     def apply_default_parameters(self):
-        self.set_parameters(self.default_parameter_list())
+        # deliberately not added to the context: these are the session's
+        # baseline, not something the running test asked for.  A test
+        # which resets the SITL commandline gets here part-way through,
+        # and if the context recorded the post-wipe values then popping
+        # it at the end of that test would revert the whole session to
+        # the firmware defaults.
+        self.set_parameters(self.default_parameter_list(),
+                            add_to_context=False)
         self.reboot_sitl()
 
     def reset_SITL_commandline(self):
@@ -5366,6 +5398,13 @@ class TestSuite(abc.ABC):
         self.install_applet_script(scriptname, **kwargs)
         self.context_get().installed_scripts.append(scriptname)
 
+    def install_driver_script_context(self, scriptname, install_name=None):
+        '''installs a driver script which will be removed when the context goes
+        away'''
+        self.install_driver_script(scriptname, install_name=install_name)
+        installed_name = install_name if install_name is not None else scriptname
+        self.context_get().installed_scripts.append(installed_name)
+
     def rootdir(self):
         this_dir = os.path.dirname(__file__)
         return os.path.realpath(os.path.join(this_dir, "../.."))
@@ -6654,9 +6693,13 @@ class TestSuite(abc.ABC):
     def send_set_parameter_mavproxy(self, name, value):
         self.mavproxy.send("param set %s %s\n" % (name, str(value)))
 
-    def send_set_parameter(self, name, value, verbose=False):
+    def send_set_parameter(self, name, value, verbose=False, add_to_context=False):
         if verbose:
             self.progress("Send set param for (%s) (%f)" % (name, value))
+        if add_to_context:
+            context_param_name_list = [p[0] for p in self.context_get().parameters]
+            if name.upper() not in context_param_name_list:
+                self.context_get().parameters.append((name, self.get_parameter(name)))
         return self.send_set_parameter_direct(name, value)
 
     def set_parameter(self, name, value, **kwargs):
@@ -6936,6 +6979,33 @@ class TestSuite(abc.ABC):
         """Get Saved parameters."""
         return self.contexts[-1]
 
+    def context_preserve_parameters(self, names):
+        """Arrange for these parameters to be restored on context_pop().
+
+        The context restores parameters the *suite* set.  It cannot know
+        about one the vehicle writes for itself - a calibration saving
+        its results, say - so those survive the test and leak into every
+        test which follows in the session.  Registering them here with
+        their current values puts them back with everything else, and
+        does so even if the test raises.
+        """
+        values = self.get_parameters(names)
+        already = [p[0] for p in self.context_get().parameters]
+        for name in names:
+            if name not in already:
+                self.context_get().parameters.append((name, values[name]))
+
+    def context_preserve_attribute(self, name):
+        """Arrange for one of our own attributes to be restored on context_pop().
+
+        For state a test changes on the suite rather than on the vehicle
+        - sitl_start_loc, say - which otherwise applies to every test
+        which follows in the session.
+        """
+        already = [p[0] for p in self.context_get().preserved_attributes]
+        if name not in already:
+            self.context_get().preserved_attributes.append((name, getattr(self, name)))
+
     def context_push(self):
         """Save a copy of the parameters."""
         context = Context()
@@ -6973,6 +7043,17 @@ class TestSuite(abc.ABC):
             return
         context.collections[msg_type] = []
 
+    def context_clear_collections(self):
+        '''empty every message collection, leaving them collecting.  Called
+        when the vehicle reboots: what the old vehicle said is not
+        evidence about the new one.  Without this a test cannot collect
+        across a reboot at all - and it has to, because the messages a
+        vehicle emits as it boots are sent before any collection
+        started after the reboot exists to catch them.'''
+        for context in self.contexts:
+            for msg_type in context.collections:
+                context.collections[msg_type] = []
+
     def context_collection(self, msg_type):
         '''return messages in collection'''
         context = self.context_get()
@@ -6996,11 +7077,191 @@ class TestSuite(abc.ABC):
         del context.collections[msg_type]
         return ret
 
+    # Parameters which legitimately differ across a test through no fault
+    # of the test: cumulative statistics, and values the vehicle learns
+    # for itself in flight.  Anything else changing across a test which
+    # the suite could not revert is a leak into the tests which follow.
+    parameter_leak_exemptions = frozenset([
+        "STAT_BOOTCNT",
+        "STAT_FLTTIME",
+        "STAT_RUNTIME",
+        "STAT_RESET",
+        "STAT_FLTCNT",
+        "STAT_DISTFLWN",
+        # Item counts, not settings: the number of mission, fence and
+        # rally items currently loaded.  MIS_TOTAL additionally reads
+        # 0->1 for the first test in a session, as the mission's home
+        # item appears once home is set.  A leaked mission/fence/rally
+        # is better caught by checking the item count against what the
+        # test uploaded than by watching these.  CMD_TOTAL is Tracker's
+        # equivalent of MIS_TOTAL ("Number of loaded mission items"),
+        # and run_one_test_attempt deliberately does not clear Tracker's
+        # mission, so it goes the other way: 1->0.
+        "MIS_TOTAL",
+        "FENCE_TOTAL",
+        "RALLY_TOTAL",
+        "CMD_TOTAL",
+        # COMPASS_AUTODEC defaults on, so AP_Compass computes and writes
+        # the declination itself from the vehicle's position.  It reads
+        # back as zero until there is a position to compute it from, so
+        # any test which reboots appears to "change" it.
+        "COMPASS_DEC",
+    ])
+
+    def parameter_leak_exempt(self, name):
+        '''True if name is allowed to differ across a test'''
+        if name in self.parameter_leak_exemptions:
+            return True
+        # Barometer ground pressure/temperature: written by the firmware
+        # every time it calibrates, which includes every reboot.  A test
+        # which reboots therefore always "changes" these, and the value
+        # reverts to the default until calibration completes.
+        if re.match(r"^BARO\d*_GND_(PRESS|TEMP)$", name):
+            return True
+        # Airspeed zero offset and ratio: the offset is calibrated at
+        # every boot (AP_Airspeed.cpp set_and_save) and lands a hair
+        # different each time - measured drifting by 0.0007% - and the
+        # ratio is what AIRSPEED_AUTOCAL learns.
+        if re.match(r"^ARSPD\d*_(OFFSET|RATIO)$", name):
+            return True
+        # MAVLink stream rates.  REQUEST_DATA_STREAM makes the firmware
+        # save these itself (GCS_Param.cpp, set_and_save_ifchanged under
+        # persist_streamrates()), and both MAVProxy on connect and the
+        # suite's own set_streamrate() send it - so a test can "change"
+        # them without touching them.  REVIEW: this is the shakiest
+        # entry in this list.  persist_streamrates() is true only for
+        # Plane, yet Rover and Copter tests changed these too, so
+        # something else writes them as well and is not understood yet;
+        # and unlike the other entries here these genuinely do affect
+        # what the next test sees.
+        if re.match(r"^MAV\d+_(RAW_SENS|EXT_STAT|RC_CHAN|RAW_CTRL|POSITION"
+                    r"|EXTRA[123]|PARAMS|ADSB)$", name):
+            return True
+        # Hover throttle / collective: filtered towards the observed hover
+        # value while flying (AP_MotorsMulticopter.cpp, AP_MotorsHeli.cpp),
+        # so any test which hovers moves them.  MOT_ is multicopter, Q_M_
+        # the quadplane equivalent, H_COL_HOVER the helicopter one.
+        if name in ("MOT_THST_HOVER", "Q_M_THST_HOVER", "H_COL_HOVER"):
+            return True
+        # AC_PosControl raises the vertical acceleration controller's
+        # integrator limit to the hover throttle if it is below it
+        # (AC_PosControl.cpp), so it moves the first time a vehicle runs
+        # that controller.  Sub is the one which shows this: it forces
+        # MOT_THST_HOVER to 0.5 (ArduSub/Parameters.cpp) but leaves the
+        # default limit at 0.1.  The write is to the live value only and
+        # never reaches storage, so a reboot puts it back.
+        if name in ("PSC_D_ACC_IMAX", "Q_P_D_ACC_IMAX"):
+            return True
+        # Device IDs: the driver writes these when it detects (or stops
+        # detecting) a sensor, so they follow the simulated hardware
+        # rather than anything a test chose.
+        if re.match(r"^[A-Z0-9_]+_DEVID$", name):
+            return True
+        # the same thing under the compass's older spelling, and the
+        # DroneCAN node a GPS was found on, which the driver records when
+        # it detects one
+        if re.match(r"^COMPASS_DEV_ID\d*$", name):
+            return True
+        if re.match(r"^GPS\d*_CAN_NODEID$", name):
+            return True
+        # compass scale factors are learned in the same way as the
+        # offsets below, and are zeroed when a compass goes away
+        if re.match(r"^COMPASS_SCALE\d*$", name):
+            return True
+        # learned sensor calibration; the vehicle writes these itself
+        for prefix in ("INS_GYROFFS", "INS_GYR2OFFS", "INS_GYR3OFFS",
+                       "INS_ACCOFFS", "INS_ACC2OFFS", "INS_ACC3OFFS",
+                       "INS_ACCSCAL", "INS_ACC2SCAL", "INS_ACC3SCAL",
+                       "INS_GYR_CALTEMP", "INS_GYR1_CALTEMP",
+                       "INS_GYR2_CALTEMP", "INS_GYR3_CALTEMP",
+                       "INS_ACC_CALTEMP", "INS_ACC1_CALTEMP",
+                       "INS_ACC2_CALTEMP", "INS_ACC3_CALTEMP"):
+            if name.startswith(prefix):
+                return True
+        # the same values for instances 4 and up, which are spelled
+        # INS<n>_ rather than folded into the INS_ prefixes above.  These
+        # additionally move when an accel calibration runs on a vehicle
+        # with fewer accels than INS_MAX_INSTANCES:
+        # _acal_save_calibrations() deliberately clears the unused slots
+        # ("clear any unused accels", AP_InertialSensor.cpp), taking
+        # ACCSCAL from its 1.0 default to 0.  Nothing downstream minds -
+        # accel_calibrated_ok_all() treats 0 and 1 alike for an accel
+        # which is not there.
+        if re.match(r"^INS\d+_(ACC|GYR)(OFFS|SCAL)_[XYZ]$", name):
+            return True
+        if re.match(r"^INS\d+_(ACC|GYR)_(CALTEMP|ID)$", name):
+            return True
+        return False
+
+    def snapshot_parameters_for_leak_check(self):
+        '''download the full parameter set, or None if that fails'''
+        try:
+            (parameters, _seq) = self.download_parameters(self.sysid_thismav(), 1)
+            return parameters
+        except Exception as e:  # noqa: BLE001
+            self.progress("Parameter snapshot failed: %s" % str(e))
+            return None
+
+    def check_parameter_leaks(self):
+        """Report and repair parameters which have drifted from pristine.
+
+        Compared against the state before *any* test ran, not against the
+        start of this test, so a test which wipes the parameters cannot be
+        blamed for clearing drift an earlier test left behind - a wipe only
+        moves the session back towards pristine.
+
+        Anything found is put back.  That keeps the attribution exact, since
+        every test starts from the same known state, and it stops the leak
+        reaching the tests which follow - which is the whole reason to care
+        about it.  Restoring is done outside any context; the contexts for
+        this test are long gone by the time we run.
+        """
+        if self.pristine_parameters is None:
+            return None
+        after = self.snapshot_parameters_for_leak_check()
+        if after is None:
+            self.progress("Parameter leak check skipped; no usable snapshot")
+            return None
+        described = []
+        restore = {}
+        for name in sorted(set(self.pristine_parameters) | set(after)):
+            if self.parameter_leak_exempt(name):
+                continue
+            was = self.pristine_parameters.get(name)
+            now = after.get(name)
+            if was is None or now is None:
+                # Appeared or vanished rather than changed.  The shape of
+                # the parameter tree follows enable-style parameters -
+                # BATT_MONITOR decides which BATT_ parameters exist,
+                # CAN_P1_DRIVER whether there are any CAN_D1_UC_ ones -
+                # and only re-shapes on reboot.  A test which sets one of
+                # those and has it restored still leaves the old shape
+                # behind until the vehicle next boots, which is not a leak
+                # and is not something we can put back.  The parameter
+                # which decides the shape is itself compared here, so a
+                # genuine leak of one is still caught on its own account.
+                continue
+            if abs(was - now) > max(abs(was), abs(now)) * 1e-6:
+                described.append("%s %f->%f" % (name, was, now))
+                restore[name] = was
+        if len(described) == 0:
+            self.progress("Parameter leak check: clean")
+            return None
+        if len(restore):
+            self.progress("Restoring %u leaked parameters" % len(restore))
+            try:
+                self.set_parameters(restore, add_to_context=False, verbose=False)
+            except Exception as e:  # noqa: BLE001
+                self.progress("Could not restore leaked parameters: %s" % str(e))
+        return described
+
     def context_pop(self, process_interaction_allowed=True, hooks_already_removed=False):
         """Set parameters to origin values in reverse order."""
         dead = self.contexts.pop()
         if dead.original_speedup is not None:
             self.speedup = dead.original_speedup
+        for (name, value) in dead.preserved_attributes:
+            setattr(self, name, value)
         # remove hooks first; these hooks can raise exceptions which
         # we really don't want...
         if not hooks_already_removed:
@@ -7695,6 +7956,14 @@ class TestSuite(abc.ABC):
         if dist > dist_max:
             raise NotAchievedException("Far from startup location: %s" % data)
         self.progress("Close to startup location: %s" % data)
+
+    def max_distance_from_startup_location_at_end_of_test(self):
+        '''how far a test may leave the vehicle from where the simulation
+        started it, or None not to care.  Only ArduCopter requires its
+        tests to start at the startup location; the others legitimately
+        finish wherever they got to - a rover which fails safe part-way
+        through a mission stops there, 215m out.'''
+        return None
 
     def assert_simstate_location_is_at_startup_location(self, dist_max=1):
         simstate_loc = self.sim_location()
@@ -9422,6 +9691,9 @@ Also, ignores heartbeats not from our target system'''
     def script_applet_source_path(self, scriptname):
         return os.path.join(self.rootdir(), "libraries", "AP_Scripting", "applets", scriptname)
 
+    def script_driver_source_path(self, scriptname):
+        return os.path.join(self.rootdir(), "libraries", "AP_Scripting", "drivers", scriptname)
+
     def script_modules_source_path(self, scriptname):
         return os.path.join(self.rootdir(), "libraries", "AP_Scripting", "modules", scriptname)
 
@@ -9487,6 +9759,10 @@ Also, ignores heartbeats not from our target system'''
         source = self.script_applet_source_path(scriptname)
         self.install_script(source, scriptname, install_name=install_name)
 
+    def install_driver_script(self, scriptname, install_name=None):
+        source = self.script_driver_source_path(scriptname)
+        self.install_script(source, scriptname, install_name=install_name)
+
     def remove_installed_script(self, scriptname):
         dest = self.installed_script_path(os.path.basename(scriptname))
         try:
@@ -9509,20 +9785,86 @@ Also, ignores heartbeats not from our target system'''
         except OSError:
             pass
 
+    def mavlink_connection_supports_reconnect_delay(self):
+        '''returns True if pymavlink lets us choose how long it waits
+        between connection attempts.  This probe exists only so that
+        autotest keeps working (just more slowly) against an older
+        pymavlink.
+        '''
+        return 'reconnect_delay' in signature(mavutil.mavlink_connection).parameters
+
+    def announce_ourselves_to_ardupilot(self):
+        '''send a heartbeat, so that the vehicle knows this channel has a GCS
+        on the end of it'''
+        self.mav.mav.heartbeat_send(mavutil.mavlink.MAV_TYPE_GCS,
+                                    mavutil.mavlink.MAV_AUTOPILOT_INVALID,
+                                    0,
+                                    0,
+                                    0)
+
+    def announce_ourselves_on_every_connection(self):
+        '''arrange that every connection we make to the vehicle transmits
+        before anything else happens on it.
+
+        The vehicle only sends statustexts to channels in
+        active_channel_mask()|streaming_channel_mask(), and a channel
+        only becomes active once the vehicle has received something on
+        it.  Until we speak, everything it says is discarded outright
+        rather than queued - it reaches the onboard log and nowhere
+        else.
+
+        That matters most across a reboot: SITL waits for us in accept()
+        with its clock stopped, then covers seconds of simulated time in
+        the first milliseconds of wall clock, so an entire boot - and
+        the statustexts tests wait for - fits into the gap between the
+        link coming up and our first transmission.  pymavlink reconnects
+        from inside a recv(), which cannot transmit, so we announce
+        ourselves from inside the connect instead and leave no gap.
+        '''
+        original_do_connect = getattr(self.mav, "do_connect", None)
+        if not callable(original_do_connect):
+            # not a connection which reconnects (we use TCP, which is)
+            return
+        mav = self.mav
+
+        def do_connect_and_announce_ourselves():
+            original_do_connect()
+            # do_connect() does not do this, and mavfile.select() waits
+            # on it - leaving it stale means we never see anything
+            # arrive again:
+            mav.fd = mav.port.fileno()
+            self.announce_ourselves_to_ardupilot()
+
+        mav.do_connect = do_connect_and_announce_ourselves
+
     def get_mavlink_connection_going(self):
         # get a mavlink connection going
         try:
-            retries = 20
+            # SITL's listening socket is only gone for the few
+            # milliseconds it takes the process to re-exec itself on
+            # reboot, so retry rapidly rather than at pymavlink's
+            # default of once a second.  retries is a count of
+            # attempts, so scale it to keep the same overall budget.
+            # This is only safe because every connection announces us to
+            # the vehicle as it is made - see
+            # announce_ourselves_on_every_connection().
+            extra_connection_args = {}
+            reconnect_delay = 1
+            if self.mavlink_connection_supports_reconnect_delay():
+                reconnect_delay = 0.05
+                extra_connection_args["reconnect_delay"] = reconnect_delay
+            timeout = 20
             if self.gdb:
-                retries = 20000
+                timeout = 20000
             self.mav = mavutil.mavlink_connection(
                 self.autotest_connection_string_to_ardupilot(),
-                retries=retries,
+                retries=int(timeout/reconnect_delay),
                 robust_parsing=True,
                 source_system=250,
                 source_component=250,
                 autoreconnect=True,
                 dialect="all",  # if we don't pass this in we end up with the wrong mavlink version...
+                **extra_connection_args,
             )
         except Exception as msg:
             self.progress("Failed to start mavlink connection on %s: %s" %
@@ -9530,6 +9872,10 @@ Also, ignores heartbeats not from our target system'''
             raise
         self.mav.message_hooks.append(self.message_hook)
         self.mav.mav.set_send_callback(self.send_message_hook, self)
+        self.announce_ourselves_on_every_connection()
+        # the connection above was made by mavlink_connection() itself,
+        # before that wrapper existed:
+        self.announce_ourselves_to_ardupilot()
         self.mav.idle_hooks.append(self.idle_hook)
 
         # we need to wait for a heartbeat here.  If we don't then
@@ -9562,8 +9908,11 @@ Also, ignores heartbeats not from our target system'''
                       (self.terrain_data_messages_sent,))
 
     def send_statustext(self, text):
-        if not isinstance(text, bytes):
-            text = bytes(text, "ascii")
+        # STATUSTEXT is UTF-8, so send UTF-8: accept it and nothing else.
+        if isinstance(text, bytes):
+            text = text.decode("utf-8", "replace").encode("utf-8")
+        else:
+            text = text.encode("utf-8")
         seq = 0
         while len(text):
             self.mav.mav.statustext_send(mavutil.mavlink.MAV_SEVERITY_WARNING, text[:50], id=self.statustext_id, chunk_seq=seq)
@@ -9700,6 +10049,12 @@ Also, ignores heartbeats not from our target system'''
         old_contexts_length = len(self.contexts)
         self.context_push()
 
+        # capture the session's pristine parameters once, before the
+        # first test has had a chance to change anything
+        if (self.check_parameter_leaks_enabled and
+                self.pristine_parameters is None):
+            self.pristine_parameters = self.snapshot_parameters_for_leak_check()
+
         start_time = time.time()
 
         hooks_removed = False
@@ -9790,6 +10145,30 @@ Also, ignores heartbeats not from our target system'''
                 self.progress("Test failed but ArduPilot process alive; rebooting")
                 self.reboot_sitl() # that'll learn it
 
+        # a test which wanders off and stops somewhere else hands the
+        # next test a displaced vehicle.  ArduCopter's tests require the
+        # vehicle to start where the simulation puts it, and nothing
+        # enforced that between them: the assertion in reboot_sitl()
+        # fires only if a test happens to reboot, and it checks the
+        # position rather than restoring it.  Ask the simulator where
+        # the vehicle really is rather than believing the vehicle.
+        startup_location_dist_max = self.max_distance_from_startup_location_at_end_of_test()
+        if (passed and
+                ardupilot_alive and
+                not reset_needed and
+                startup_location_dist_max is not None):
+            try:
+                self.assert_simstate_location_is_at_startup_location(
+                    dist_max=startup_location_dist_max)
+            except Exception as e:  # noqa: BLE001
+                self.print_exception_caught(e, send_statustext=False)
+                if ex is None:
+                    ex = e
+                passed = False
+                # whatever happens, do not pass the displacement on:
+                self.progress("Resetting SITL to recover the startup location")
+                self.reset_SITL_commandline()
+
         if self._mavproxy is not None:
             self.progress("Stopping auto-started mavproxy")
             if self.use_map:
@@ -9825,6 +10204,43 @@ Also, ignores heartbeats not from our target system'''
                           (str(self.message_hooks), str(start_message_hooks)))
             passed = False
 
+        if self.reset_after_every_test:
+            reset_needed = True
+
+        if reset_needed:
+            self.reset_SITL_commandline()
+
+        # Check for leaked parameters *here*, after every reset and reboot
+        # the harness performs, because what matters is the state the next
+        # test inherits - not the state at the moment this one stopped
+        # running.  reset_SITL_commandline() restarts SITL with wipe=True,
+        # so a test which customised the commandline has had its whole
+        # parameter set replaced and leaks nothing; checking before that
+        # reported every frame default as a leak.  reboot_sitl() does not
+        # wipe, so a genuine leak still survives it and is still caught.
+        if self.check_parameter_leaks_enabled and ardupilot_alive:
+            leaked = self.check_parameter_leaks()
+            if leaked is not None:
+                self.progress("Test leaked %u parameters into the session:" % len(leaked))
+                for line in leaked:
+                    self.progress("  %s" % line)
+                if ex is None:
+                    ex = NotAchievedException(
+                        "Test leaked parameters the suite could not revert: %s" %
+                        ", ".join(leaked))
+                passed = False
+                result.exception = ex
+
+        if not self.is_tracker(): # FIXME - more to the point, fix Tracker's mission handling
+            self.clear_mission(mavutil.mavlink.MAV_MISSION_TYPE_ALL)
+            self.set_current_waypoint(0, check_afterwards=False)
+
+        # report the result only once everything which can still fail
+        # the test has run: the leak check above can flip a test to
+        # failed, and a banner printed before it would claim a success
+        # the result contradicts, skip check_logs() for exactly the
+        # failure the check exists to find, and leave debug_filename
+        # unset so the junit writer emits "see None".
         if passed:
 #            self.remove_bin_logs() # can't do this as one of the binlogs is probably open for writing by the SITL process.  If we force a rotate before running tests then we can do this.  # noqa
             pass
@@ -9847,16 +10263,6 @@ Also, ignores heartbeats not from our target system'''
             if interact:
                 self.progress("Starting MAVProxy interaction as directed")
                 self.mavproxy.interact()
-
-        if self.reset_after_every_test:
-            reset_needed = True
-
-        if reset_needed:
-            self.reset_SITL_commandline()
-
-        if not self.is_tracker(): # FIXME - more to the point, fix Tracker's mission handling
-            self.clear_mission(mavutil.mavlink.MAV_MISSION_TYPE_ALL)
-            self.set_current_waypoint(0, check_afterwards=False)
 
         tee.close()
 
@@ -9941,8 +10347,24 @@ Also, ignores heartbeats not from our target system'''
         self.progress("Starting SITL", send_statustext=False)
         if binary is None:
             binary = self.binary
+        if self.sup_binaries:
+            # the vehicle must not advance its simulation past state
+            # the supplementary peripherals have yet to consume, or
+            # peripheral data streams stall in simulation time whenever
+            # a peripheral process is starved of wall-clock time
+            customisations = list(start_sitl_args.get("customisations") or [])
+            customisations.append("--sim-periph-lockstep")
+            start_sitl_args["customisations"] = customisations
         self.sitl = util.start_SITL(binary, **start_sitl_args)
         self.expect_list_add(self.sitl)
+        # stop the previous start's supplementary programs before we
+        # forget them.  Simply resetting the list left them running,
+        # reparented to init when their test finished - and a simulated
+        # peripheral which outlives its test carries on talking on the
+        # CAN bus, during precisely the tests which care about
+        # peripherals:
+        if getattr(self, "sup_prog", None):
+            self.stop_sup_program()
         self.sup_prog = []
         count = 0
         for sup_binary in self.sup_binaries:
@@ -9967,11 +10389,16 @@ Also, ignores heartbeats not from our target system'''
     def stop_sup_program(self, instance=None):
         self.progress("Stopping supplementary program")
         if instance is None:
-            # close all sup programs
-            for prog in self.sup_prog:
+            # close all sup programs.  Iterate over a copy: removing
+            # from the list being walked skips every other entry, so
+            # this closed only half of them - with the usual two
+            # peripherals, exactly one, and the other was left running.
+            for prog in list(self.sup_prog):
+                if prog is None:
+                    continue
                 self.expect_list_remove(prog)
-                self.sup_prog.remove(prog)
                 util.pexpect_close(prog)
+            self.sup_prog = []
         else:
             # close only the instance passed
             prog = self.sup_prog[instance]
@@ -11580,14 +12007,14 @@ Also, ignores heartbeats not from our target system'''
         self.wait_disarmed()
         self.delay_sim_time(15, reason="Allow log persistence to finish")
         self.assert_current_log_filesizes({
-            1: (1980*1024, 2020*1024),
+            1: (1950*1024, 1980*1024),
         })
         self.progress("Creating a second log")
         self.arm_vehicle()
         self.wait_disarmed()
         self.delay_sim_time(15, reason="Allow log persistence to finish")
         self.assert_current_log_filesizes({
-            1: (1980*1024, 2020*1024),
+            1: (1950*1024, 1980*1024),
             2: (1000*1024, 1100*1024),
         })
 
@@ -12479,12 +12906,14 @@ Also, ignores heartbeats not from our target system'''
         self.context_pop()
         self.reboot_sitl()
 
-    def install_terrain_handlers_context(self):
+    def install_terrain_handlers_context(self, unserveable_requests_fatal=True):
         '''install a message handler into the current context which will
-        listen for an fulfill terrain requests from ArduPilot.  Will
-        die if the data is not available - but
-        self.terrain_in_offline_mode can be set to true in the
-        constructor to change this behaviour
+        listen for and fulfill terrain requests from ArduPilot.  A
+        request for a tile the handler cannot serve fails the test:
+        the tile should be added to Tools/autotest/tilecache/srtm.
+        Pass unserveable_requests_fatal=False to leave such requests
+        unanswered instead - a real terrain server simply does not
+        answer for data it does not have, and the vehicle copes.
         this should be called at the very top of your test context!
         '''
 
@@ -12523,9 +12952,27 @@ Also, ignores heartbeats not from our target system'''
                                       (lat2, lon2))
                         time.sleep(1)
                     if alt is None:
-                        # no data - we can't send the packet
-                        raise ValueError("No elevation data for (%f %f)" % (lat2, lon2))
+                        # no data - we can't send the packet.  Do not make
+                        # that fatal: the vehicle asks about anywhere its
+                        # mission goes, and a mission left behind by an
+                        # earlier test asks about somewhere this test has
+                        # no business having data for -
+                        #     No elevation data for (-26.590366 151.845361)
+                        # which is Kingaroy, from a mission loaded a
+                        # couple of tests earlier.  A real terrain server
+                        # simply does not answer, and the vehicle copes.
+                        self.progress("No elevation data for (%f %f); not "
+                                      "answering this request" % (lat2, lon2))
+                        data = None
+                        break
                     data.append(int(alt))
+                if data is None:
+                    if unserveable_requests_fatal:
+                        raise NotAchievedException(
+                            "Terrain handler asked for a tile it cannot "
+                            "serve (%f %f); add the tile to "
+                            "Tools/autotest/tilecache/srtm" % (lat2, lon2))
+                    continue
                 self.terrain_data_messages_sent += 1
                 self.mav.mav.terrain_data_send(m.lat,
                                                m.lon,
@@ -13605,6 +14052,11 @@ switch value'''
         self.run_tests_called = True
 
         result_list = []
+
+        # a timeout raised before any test has started - during init,
+        # for example - is attributed to this placeholder, rather than
+        # dying with an UnboundLocalError in the handler below:
+        test = Test(self.run_tests)
 
         try:
             self.init()
@@ -16022,7 +16474,6 @@ switch value'''
         try:
             mavproxy.send("module load ftp\n")
             mavproxy.expect(["Loaded module ftp", "module ftp already loaded"])
-            mavproxy.send("ftp set debug 1\n")  # so we get the "Terminated session" message
             mavproxy.send("ftp get %s %s\n" % (path, tmpfile.name))
             mavproxy.expect("Getting")
             tstart = self.get_sim_time()
@@ -16037,9 +16488,6 @@ switch value'''
                     break
                 except Exception:  # noqa: BLE001
                     continue
-            # terminate the connection, or it may still be in progress the next time an FTP is attempted:
-            mavproxy.send("ftp cancel\n")
-            mavproxy.expect("Terminated session")
         except Exception as e:  # noqa: BLE001
             self.print_exception_caught(e)
             ex = e
@@ -16056,6 +16504,9 @@ switch value'''
         mavproxy = self.start_mavproxy()
         ex = None
         try:
+            # let the parameter download finish first; it ends by terminating
+            # the FTP session, which would take any listing with it
+            mavproxy.expect("Saved .* parameters to")
             mavproxy.send("module load ftp\n")
             mavproxy.expect(["Loaded module ftp", "module ftp already loaded"])
             mavproxy.send("ftp list\n")
@@ -16158,17 +16609,7 @@ switch value'''
         '''burst-read a file via raw FTP, return (data, eof_nack)
         where data is the received file content'''
 
-        # reset sessions
-        op = FTP_OP(
-            seq=0, session=0, opcode=mavftp_op.OP_ResetSessions,
-            size=0, req_opcode=0, burst_complete=0,
-            offset=0, payload=None,
-        )
-        self.ftp_send(op)
-        reply = self.ftp_recv(timeout=5)
-        if reply is None:
-            raise NotAchievedException("No reply to ResetSessions")
-        seq = reply.seq
+        seq = self.ftp_reset_sessions()
 
         # open file read-only
         path_bytes = bytearray(path.encode('utf-8')) + bytearray([0])
@@ -16226,16 +16667,7 @@ switch value'''
         '''write bytes to a remote path via MAVLink FTP (CreateFile + WriteFile)'''
         data = bytearray(data)
 
-        # ResetSessions
-        op = FTP_OP(
-            seq=0, session=0, opcode=mavftp_op.OP_ResetSessions,
-            size=0, req_opcode=0, burst_complete=0, offset=0, payload=None,
-        )
-        self.ftp_send(op)
-        reply = self.ftp_recv(timeout=5)
-        if reply is None:
-            raise NotAchievedException("No reply to ResetSessions")
-        seq = reply.seq
+        seq = self.ftp_reset_sessions()
 
         # CreateFile (open write-truncate)
         path_bytes = bytearray(path.encode('utf-8')) + bytearray([0])
@@ -16308,6 +16740,709 @@ switch value'''
             raise NotAchievedException("No reply to RemoveFile")
         if reply.opcode != mavftp_op.OP_Ack:
             raise NotAchievedException(f"RemoveFile failed for {path}: opcode={reply.opcode}")
+
+    def ftp_reset_sessions(self):
+        '''close any FTP sessions we may have left open; returns the sequence
+        number to use for the next request'''
+        op = FTP_OP(
+            seq=0, session=0, opcode=mavftp_op.OP_ResetSessions,
+            size=0, req_opcode=0, burst_complete=0,
+            offset=0, payload=None,
+        )
+        self.ftp_send(op)
+        reply = self.ftp_recv(timeout=5)
+        if reply is None:
+            raise NotAchievedException("No reply to ResetSessions")
+        return reply.seq
+
+    def ftp_path_bytes(self, path):
+        '''encode a path as an FTP request payload'''
+        return bytearray(path.encode('utf-8')) + bytearray([0])
+
+    def ftp_op(self, seq, opcode, payload=None, offset=0, size=None):
+        '''send one raw FTP request and return the reply.  size defaults to
+        the payload length, and is separate so a test can claim a length the
+        payload does not have'''
+        if payload is None:
+            payload = bytearray()
+        if size is None:
+            size = len(payload)
+        self.ftp_send(FTP_OP(
+            seq=seq, session=0, opcode=opcode, size=size,
+            req_opcode=0, burst_complete=0, offset=offset,
+            payload=bytearray(payload),
+        ))
+        reply = self.ftp_recv(timeout=5)
+        if reply is None:
+            raise NotAchievedException(f"No reply to opcode {opcode}")
+        return reply
+
+    def assert_ftp_nack(self, reply, error, label):
+        '''check a reply is a NAK carrying the expected error code'''
+        if reply.opcode != mavftp_op.OP_Nack:
+            raise NotAchievedException(f"{label}: expected Nack, got opcode={reply.opcode}")
+        if len(reply.payload) == 0:
+            raise NotAchievedException(f"{label}: Nack carried no error code")
+        if reply.payload[0] != error:
+            raise NotAchievedException(
+                f"{label}: expected error {int(error)}, got {reply.payload[0]}")
+
+    def assert_ftp_ack(self, reply, label):
+        '''check a reply is an ACK'''
+        if reply.opcode != mavftp_op.OP_Ack:
+            error = reply.payload[0] if len(reply.payload) else None
+            raise NotAchievedException(f"{label}: expected Ack, got opcode={reply.opcode} error={error}")
+
+    def ftp_unsupported_opcode_error(self, opcode):
+        '''send an FTP request carrying an opcode the autopilot does not
+        implement; returns the error code from the NAK'''
+        seq = self.ftp_reset_sessions()
+        path_bytes = bytearray(b"/\0")
+        self.ftp_send(FTP_OP(
+            seq=seq, session=0, opcode=opcode,
+            size=len(path_bytes), req_opcode=0, burst_complete=0,
+            offset=0, payload=path_bytes,
+        ))
+        reply = self.ftp_recv(timeout=5)
+        if reply is None:
+            raise NotAchievedException(f"No reply to opcode {opcode}")
+        if reply.opcode != mavftp_op.OP_Nack:
+            raise NotAchievedException(f"Expected Nack for opcode {opcode}, got opcode={reply.opcode}")
+        if len(reply.payload) == 0:
+            raise NotAchievedException(f"Nack for opcode {opcode} carried no error code")
+        return reply.payload[0]
+
+    def ftp_split_dir_page(self, payload):
+        '''split one page of an FTP directory listing into its entries.
+
+        the page must be an exact run of null-terminated strings; an empty
+        entry means the autopilot emitted a stray null, which makes a client
+        counting entries lose its place in a paged listing
+        '''
+        entries = payload.split(b'\0')
+        if len(entries) == 0 or entries[-1] != b'':
+            raise NotAchievedException(f"Listing page not null-terminated ({payload})")
+        entries.pop()  # the terminator of the final entry
+        for entry in entries:
+            if len(entry) == 0:
+                raise NotAchievedException(f"Empty entry in listing page ({payload})")
+        return [entry.decode('utf-8') for entry in entries]
+
+    def ftp_list_dir(self, path):
+        '''list a remote directory via raw MAVLink FTP, paging through the
+        listing as a GCS does.  returns (entries, page_count)'''
+        opcode = mavftp_op.OP_ListDirectory
+
+        seq = self.ftp_reset_sessions()
+
+        path_bytes = bytearray(path.encode('utf-8')) + bytearray([0])
+        entries = []
+        page_count = 0
+        while True:
+            op = FTP_OP(
+                seq=seq, session=0, opcode=opcode,
+                size=len(path_bytes), req_opcode=0, burst_complete=0,
+                # the offset is a count of entries already seen, so the
+                # autopilot knows where to resume this listing
+                offset=len(entries), payload=path_bytes,
+            )
+            self.ftp_send(op)
+            reply = self.ftp_recv(timeout=5)
+            if reply is None:
+                raise NotAchievedException(f"No reply listing {path} at offset {len(entries)}")
+            seq = reply.seq
+            if reply.opcode == mavftp_op.OP_Nack:
+                error = reply.payload[0] if len(reply.payload) else None
+                if error == FtpError.EndOfFile:
+                    break
+                raise NotAchievedException(f"Listing {path} failed with error {error}")
+            if reply.opcode != mavftp_op.OP_Ack:
+                raise NotAchievedException(f"Listing {path} got unexpected opcode {reply.opcode}")
+            entries.extend(self.ftp_split_dir_page(bytes(reply.payload)))
+            page_count += 1
+            if page_count > 100:
+                raise NotAchievedException(f"Listing {path} did not terminate")
+
+        return entries, page_count
+
+    def ftp_listing_files_and_dirs(self, entries):
+        '''pick an FTP directory listing apart into a {name: size} dict of
+        files and a set of directory names'''
+        files = {}
+        dirs = set()
+        for entry in entries:
+            if entry[0] == 'D':
+                dirs.add(entry[1:])
+                continue
+            if entry[0] != 'F':
+                raise NotAchievedException(f"Unexpected listing entry ({entry})")
+            fields = entry[1:].split("\t")
+            if len(fields) != 2:
+                raise NotAchievedException(
+                    f"Listing entry ({entry}) has {len(fields)} fields, expected 2")
+            name = fields[0]
+            if name in files:
+                raise NotAchievedException(f"Duplicate listing entry for {name}")
+            files[name] = int(fields[1])
+        return files, dirs
+
+    def create_ftp_listing_directory(self, dirname, subdirname, file_count):
+        '''populate dirname with file_count files of distinct sizes, plus a
+        subdirectory.  returns the expected {name: size} for the files'''
+        if os.path.exists(dirname):
+            shutil.rmtree(dirname)
+        os.mkdir(dirname)
+        os.mkdir(os.path.join(dirname, subdirname))
+        expected = {}
+        for i in range(file_count):
+            name = "listentry_%02u.txt" % i
+            content = b"x" * (10 + i)
+            self.write_content_to_filepath(content, os.path.join(dirname, name))
+            expected[name] = len(content)
+        return expected
+
+    def create_ftp_listing_pages(self, dirname, file_count):
+        '''create a directory whose listing needs many packets, so that it is
+        still paging while the next command runs'''
+        if os.path.exists(dirname):
+            shutil.rmtree(dirname)
+        os.mkdir(dirname)
+        for i in range(file_count):
+            self.write_content_to_filepath(b"x", os.path.join(dirname, "entry_%03u.txt" % i))
+
+    def wait_for_path(self, path, present=True, timeout=20):
+        '''wait for a path to appear or disappear.  the autopilot's filesystem
+        root is our working directory under SITL, so an FTP command's effect
+        can be seen directly'''
+        tstart = time.time()
+        while time.time() - tstart < timeout:
+            if os.path.exists(path) == present:
+                return
+            time.sleep(0.1)
+        raise NotAchievedException(
+            "%s did not %s" % (path, "appear" if present else "go away"))
+
+    def MAVFTPListDirectoryEdgeCases(self):
+        '''test how FTP directory listing rejects and terminates'''
+
+        dirname = "ftp_listing_edge_test"
+        self.create_ftp_listing_directory(dirname, "subdir", 3)
+
+        try:
+            self.progress("A trailing slash names the same directory")
+            (with_slash, _) = self.ftp_list_dir(dirname + "/")
+            (without_slash, _) = self.ftp_list_dir(dirname)
+            if sorted(with_slash) != sorted(without_slash):
+                raise NotAchievedException(
+                    f"Listing of {dirname}/ differs from {dirname}: {sorted(with_slash)}")
+
+            seq = self.ftp_reset_sessions()
+
+            self.progress("A directory which is not there is not found")
+            reply = self.ftp_op(seq, mavftp_op.OP_ListDirectory,
+                                self.ftp_path_bytes("ftp_no_such_directory"))
+            self.assert_ftp_nack(reply, FtpError.FileNotFound, "missing directory")
+
+            self.progress("An offset past the end of the listing ends it")
+            reply = self.ftp_op(reply.seq, mavftp_op.OP_ListDirectory,
+                                self.ftp_path_bytes(dirname), offset=10000)
+            self.assert_ftp_nack(reply, FtpError.EndOfFile, "offset past end")
+
+            self.progress("A request with no path at all is rejected")
+            reply = self.ftp_op(reply.seq, mavftp_op.OP_ListDirectory,
+                                self.ftp_path_bytes(dirname), size=0)
+            self.assert_ftp_nack(reply, FtpError.InvalidDataSize, "empty size")
+
+            self.progress("A request claiming more data than a packet holds is rejected")
+            reply = self.ftp_op(reply.seq, mavftp_op.OP_ListDirectory,
+                                self.ftp_path_bytes(dirname), size=255)
+            self.assert_ftp_nack(reply, FtpError.InvalidDataSize, "oversized size")
+        finally:
+            shutil.rmtree(dirname)
+
+    def MAVFTPDuplicateRequest(self):
+        '''test a repeated FTP request is answered from the last reply'''
+
+        dirname = "ftp_duplicate_test"
+        if os.path.exists(dirname):
+            shutil.rmtree(dirname)
+
+        try:
+            seq = self.ftp_reset_sessions()
+            path = self.ftp_path_bytes(dirname)
+
+            first = self.ftp_op(seq, mavftp_op.OP_CreateDirectory, path)
+            self.assert_ftp_ack(first, "first CreateDirectory")
+
+            # the same request again, as a client which lost our reply would
+            # send it. the directory exists now, so running it a second time
+            # would fail - getting the ack back proves the reply was kept
+            second = self.ftp_op(seq, mavftp_op.OP_CreateDirectory, path)
+            self.assert_ftp_ack(second, "repeated CreateDirectory")
+            if second.seq != first.seq:
+                raise NotAchievedException(
+                    f"Repeated request answered with seq {second.seq}, expected {first.seq}")
+
+            # while a genuinely new request does see the directory is there
+            third = self.ftp_op(second.seq, mavftp_op.OP_CreateDirectory, path)
+            self.assert_ftp_nack(third, FtpError.FileExists, "CreateDirectory of an existing directory")
+        finally:
+            if os.path.exists(dirname):
+                shutil.rmtree(dirname)
+
+    def MAVFTPUnknownOpcodeNack(self):
+        '''test an unimplemented FTP opcode is NAKed as an unknown command'''
+
+        # a client which prefers a newer opcode needs to tell "this autopilot
+        # has never heard of that command" apart from "that command failed",
+        # or it cannot fall back to the older one
+        error = self.ftp_unsupported_opcode_error(127)
+        if error != FtpError.UnknownCommand:
+            raise NotAchievedException(f"Expected UnknownCommand, got error={error}")
+
+    def MAVFTPReadFile(self):
+        '''test the FTP read path which does not use bursts'''
+
+        path = "ftp_readfile_test.dat"
+        content = bytes((i * 3 + 1) & 0xff for i in range(600))
+        self.write_content_to_filepath(content, path)
+        read_size = 100
+
+        try:
+            seq = self.ftp_reset_sessions()
+
+            self.progress("Reading with nothing open")
+            reply = self.ftp_op(seq, mavftp_op.OP_ReadFile, size=read_size, offset=0)
+            self.assert_ftp_nack(reply, FtpError.FileNotFound, "read with no file open")
+
+            reply = self.ftp_op(reply.seq, mavftp_op.OP_OpenFileRO, self.ftp_path_bytes(path))
+            self.assert_ftp_ack(reply, "OpenFileRO")
+
+            self.progress("Reading a whole chunk, and a short final one")
+            for offset in 0, len(content) - read_size // 2:
+                reply = self.ftp_op(reply.seq, mavftp_op.OP_ReadFile, size=read_size, offset=offset)
+                self.assert_ftp_ack(reply, f"read at {offset}")
+                if reply.offset != offset:
+                    raise NotAchievedException(f"read at {offset}: reply offset {reply.offset}")
+                expected = content[offset:offset + read_size]
+                if bytes(reply.payload) != expected:
+                    raise NotAchievedException(
+                        f"read at {offset}: got {len(reply.payload)} bytes, expected {len(expected)}")
+
+            self.progress("Reading at the end of the file")
+            reply = self.ftp_op(reply.seq, mavftp_op.OP_ReadFile, size=read_size, offset=len(content))
+            self.assert_ftp_nack(reply, FtpError.EndOfFile, "read at EOF")
+
+            reply = self.ftp_op(reply.seq, mavftp_op.OP_TerminateSession)
+            self.assert_ftp_ack(reply, "TerminateSession")
+
+            self.progress("Reading a file which was opened for writing")
+            reply = self.ftp_op(reply.seq, mavftp_op.OP_CreateFile,
+                                self.ftp_path_bytes("ftp_readfile_write.dat"))
+            self.assert_ftp_ack(reply, "CreateFile")
+            reply = self.ftp_op(reply.seq, mavftp_op.OP_ReadFile, size=read_size, offset=0)
+            self.assert_ftp_nack(reply, FtpError.Fail, "read of a write-mode file")
+            self.ftp_op(reply.seq, mavftp_op.OP_TerminateSession)
+        finally:
+            for name in path, "ftp_readfile_write.dat":
+                if os.path.exists(name):
+                    os.unlink(name)
+
+    def MAVFTPCalcFileCRC32(self):
+        '''test the FTP file checksum'''
+
+        path = "ftp_crc_test.dat"
+        content = bytes((i * 13 + 7) & 0xff for i in range(1000))
+        self.write_content_to_filepath(content, path)
+        # the autopilot runs the reflected CRC32 table from a zero seed with
+        # no final inversion, which zlib gives if we cancel its own inversions
+        expected = zlib.crc32(content, 0xffffffff) ^ 0xffffffff
+
+        try:
+            seq = self.ftp_reset_sessions()
+            reply = self.ftp_op(seq, mavftp_op.OP_CalcFileCRC32, self.ftp_path_bytes(path))
+            self.assert_ftp_ack(reply, "CalcFileCRC32")
+            if len(reply.payload) < 4:
+                raise NotAchievedException(f"CRC reply carried {len(reply.payload)} bytes")
+            crc = struct.unpack("<I", bytes(reply.payload[:4]))[0]
+            if crc != expected:
+                raise NotAchievedException(f"CRC32 0x{crc:08x}, expected 0x{expected:08x}")
+
+            reply = self.ftp_op(reply.seq, mavftp_op.OP_CalcFileCRC32,
+                                self.ftp_path_bytes("ftp_no_such_file.dat"))
+            self.assert_ftp_nack(reply, FtpError.FileNotFound, "CRC of a missing file")
+
+            reply = self.ftp_op(reply.seq, mavftp_op.OP_CalcFileCRC32,
+                                self.ftp_path_bytes(path), size=0)
+            self.assert_ftp_nack(reply, FtpError.InvalidDataSize, "CRC with no path")
+        finally:
+            os.unlink(path)
+
+    def MAVFTPRename(self):
+        '''test renaming a file over FTP'''
+
+        old_name = "ftp_rename_before.dat"
+        new_name = "ftp_rename_after.dat"
+        content = b"rename me\n"
+        self.write_content_to_filepath(content, old_name)
+        if os.path.exists(new_name):
+            os.unlink(new_name)
+
+        def rename_payload(source, destination):
+            return (bytearray(source.encode('utf-8')) + bytearray([0]) +
+                    bytearray(destination.encode('utf-8')) + bytearray([0]))
+
+        try:
+            seq = self.ftp_reset_sessions()
+
+            payload = rename_payload(old_name, new_name)
+            # the size counts both names and the separating null, not the
+            # trailing one
+            reply = self.ftp_op(seq, mavftp_op.OP_Rename, payload, size=len(payload) - 1)
+            self.assert_ftp_ack(reply, "Rename")
+            if os.path.exists(old_name) or not os.path.exists(new_name):
+                raise NotAchievedException("Rename did not move the file")
+            with open(new_name, "rb") as f:
+                if f.read() != content:
+                    raise NotAchievedException("Renamed file has the wrong content")
+
+            self.progress("A size which counts the trailing null is also accepted")
+            payload = rename_payload(new_name, old_name)
+            reply = self.ftp_op(reply.seq, mavftp_op.OP_Rename, payload, size=len(payload))
+            self.assert_ftp_ack(reply, "Rename counting the trailing null")
+            if os.path.exists(new_name) or not os.path.exists(old_name):
+                raise NotAchievedException("Rename back did not move the file")
+
+            self.progress("Renaming something which is not there")
+            payload = rename_payload("ftp_no_such_file.dat", "ftp_rename_never.dat")
+            reply = self.ftp_op(reply.seq, mavftp_op.OP_Rename, payload, size=len(payload) - 1)
+            self.assert_ftp_nack(reply, FtpError.FileNotFound, "rename of a missing file")
+
+            self.progress("A rename request with no data is rejected")
+            reply = self.ftp_op(reply.seq, mavftp_op.OP_Rename, payload, size=0)
+            self.assert_ftp_nack(reply, FtpError.InvalidDataSize, "empty rename")
+        finally:
+            for name in old_name, new_name:
+                if os.path.exists(name):
+                    os.unlink(name)
+
+    def MAVFTPFileCommandsMAVProxy(self):
+        '''test MAVProxy's FTP file management commands'''
+
+        dirname = "ftp_commands_test"
+        old_name = "%s/before.dat" % dirname
+        new_name = "%s/after.dat" % dirname
+        content = bytes((i * 5 + 9) & 0xff for i in range(400))
+        crc = zlib.crc32(content, 0xffffffff) ^ 0xffffffff
+
+        if os.path.exists(dirname):
+            shutil.rmtree(dirname)
+
+        mavproxy = self.start_mavproxy()
+        ex = None
+        try:
+            mavproxy.expect("Saved .* parameters to")
+            mavproxy.send("module load ftp\n")
+            mavproxy.expect(["Loaded module ftp", "module ftp already loaded"])
+            mavproxy.send("ftp set debug 1\n")
+
+            mavproxy.send("ftp status\n")
+            mavproxy.expect("No transfer in progress")
+
+            self.progress("Making a directory")
+            mavproxy.send("ftp mkdir %s\n" % dirname)
+            self.wait_for_path(dirname)
+
+            self.write_content_to_filepath(content, old_name)
+
+            self.progress("Checksumming on the vehicle")
+            mavproxy.send("ftp crc %s\n" % old_name)
+            mavproxy.expect(re.escape("crc: %s 0x%08x" % (old_name, crc)))
+
+            self.progress("Renaming")
+            mavproxy.send("ftp rename %s %s\n" % (old_name, new_name))
+            self.wait_for_path(new_name)
+            self.wait_for_path(old_name, present=False)
+
+            self.progress("Removing the file, then the directory")
+            mavproxy.send("ftp rm %s\n" % new_name)
+            self.wait_for_path(new_name, present=False)
+            mavproxy.send("ftp rmdir %s\n" % dirname)
+            self.wait_for_path(dirname, present=False)
+
+            mavproxy.send("ftp cancel\n")
+            mavproxy.expect("Terminated session")
+        except Exception as e:  # noqa: BLE001
+            self.print_exception_caught(e)
+            ex = e
+
+        self.stop_mavproxy(mavproxy)
+        if os.path.exists(dirname):
+            shutil.rmtree(dirname)
+
+        if ex is not None:
+            raise ex
+
+    def MAVFTPCrcCompareMAVProxy(self):
+        '''test MAVProxy comparing local files against the vehicle by checksum'''
+
+        local_dir = "ftp_crccmp_local"
+        remote_dir = "ftp_crccmp_remote"
+        same = bytes((i * 3) & 0xff for i in range(300))
+        local_only = bytes((i * 9 + 1) & 0xff for i in range(200))
+
+        for d in local_dir, remote_dir:
+            if os.path.exists(d):
+                shutil.rmtree(d)
+            os.mkdir(d)
+        # a.dat matches, b.dat differs, c.dat is not on the vehicle at all
+        self.write_content_to_filepath(same, "%s/a.dat" % local_dir)
+        self.write_content_to_filepath(same, "%s/a.dat" % remote_dir)
+        self.write_content_to_filepath(local_only, "%s/b.dat" % local_dir)
+        self.write_content_to_filepath(same, "%s/b.dat" % remote_dir)
+        self.write_content_to_filepath(local_only, "%s/c.dat" % local_dir)
+
+        mavproxy = self.start_mavproxy()
+        ex = None
+        try:
+            mavproxy.expect("Saved .* parameters to")
+            mavproxy.send("module load ftp\n")
+            mavproxy.expect(["Loaded module ftp", "module ftp already loaded"])
+
+            local_crc = zlib.crc32(same, 0xffffffff) ^ 0xffffffff
+            mavproxy.send("ftp crclocal %s/a.dat\n" % local_dir)
+            mavproxy.expect(re.escape("crclocal: %s/a.dat 0x%08x" % (local_dir, local_crc)))
+
+            # crccmp works through the list in sorted order
+            mavproxy.send("ftp crccmp %s/*.dat %s\n" % (local_dir, remote_dir))
+            mavproxy.expect(r"MATCH\s+a\.dat", timeout=60)
+            mavproxy.expect(r"DIFFER\s+b\.dat", timeout=60)
+            mavproxy.expect(r"MISSING\s+c\.dat", timeout=60)
+            mavproxy.expect("crccmp: 1 match, 1 differ, 1 missing, 0 errors", timeout=60)
+        except Exception as e:  # noqa: BLE001
+            self.print_exception_caught(e)
+            ex = e
+
+        self.stop_mavproxy(mavproxy)
+        for d in local_dir, remote_dir:
+            shutil.rmtree(d)
+
+        if ex is not None:
+            raise ex
+
+    def MAVFTPGapReadMAVProxy(self):
+        '''test a download over a lossy link fills its gaps with reads'''
+
+        remote_name = "ftp_gapread_source.dat"
+        local_name = "ftp_gapread_download.dat"
+        content = bytes((i * 17 + 11) & 0xff for i in range(16384))
+        self.write_content_to_filepath(content, remote_name)
+        if os.path.exists(local_name):
+            os.unlink(local_name)
+
+        mavproxy = self.start_mavproxy()
+        ex = None
+        try:
+            mavproxy.expect("Saved .* parameters to")
+            mavproxy.send("module load ftp\n")
+            mavproxy.expect(["Loaded module ftp", "module ftp already loaded"])
+            mavproxy.send("ftp set debug 1\n")
+
+            # a burst download which loses packets leaves holes, which are
+            # filled with single reads rather than by starting over. keep the
+            # loss modest: the client gives up if it is still short of a slow
+            # link's worth of gaps by the time its retries run out
+            mavproxy.send("ftp set pkt_loss_rx 10\n")
+            mavproxy.send("ftp get %s %s\n" % (remote_name, local_name))
+            mavproxy.expect("Gap read of", timeout=60)
+            mavproxy.send("ftp set pkt_loss_rx 0\n")
+            mavproxy.expect("Wrote %u bytes to %s" % (len(content), local_name), timeout=120)
+        except Exception as e:  # noqa: BLE001
+            self.print_exception_caught(e)
+            ex = e
+
+        self.stop_mavproxy(mavproxy)
+
+        if ex is None:
+            with open(local_name, "rb") as f:
+                data = f.read()
+            if data != content:
+                where = next((i for i in range(min(len(data), len(content)))
+                              if data[i] != content[i]), min(len(data), len(content)))
+                ex = NotAchievedException(
+                    "Gap-filled download differs at offset %u (got %u bytes, expected %u)" %
+                    (where, len(data), len(content)))
+
+        for name in remote_name, local_name:
+            if os.path.exists(name):
+                os.unlink(name)
+
+        if ex is not None:
+            raise ex
+
+    def MAVFTPListDirectoryInterleavedPut(self):
+        '''test an upload started during a directory listing is not corrupted'''
+
+        dirname = "ftp_interleave_test"
+        local_name = "ftp_interleave_local.dat"
+        remote_name = "ftp_interleave_remote.dat"
+
+        # a listing long enough that it is still paging when the upload
+        # starts; entries are about twenty bytes and a page holds 239
+        file_count = 400
+        # distinctive content, over several write blocks
+        content = bytes((i * 7 + 3) & 0xff for i in range(8192))
+
+        if os.path.exists(dirname):
+            shutil.rmtree(dirname)
+        os.mkdir(dirname)
+        for i in range(file_count):
+            self.write_content_to_filepath(b"x", os.path.join(dirname, "entry_%03u.txt" % i))
+        self.write_content_to_filepath(content, local_name)
+
+        mavproxy = self.start_mavproxy()
+        ex = None
+        try:
+            # let the parameter download finish first; it ends by terminating
+            # the FTP session, which would take any listing with it
+            mavproxy.expect("Saved .* parameters to")
+            mavproxy.send("module load ftp\n")
+            mavproxy.expect(["Loaded module ftp", "module ftp already loaded"])
+
+            # both commands in one write, so the upload is under way before
+            # the first page of the listing comes back
+            mavproxy.send("ftp list %s\nftp put %s %s\n" % (dirname, local_name, remote_name))
+            mavproxy.expect("Sent file of length", timeout=60)
+        except Exception as e:  # noqa: BLE001
+            self.print_exception_caught(e)
+            ex = e
+
+        self.stop_mavproxy(mavproxy)
+
+        if ex is None:
+            (data, _) = self.ftp_burst_read(remote_name)
+            data = bytes(data)
+            if data != content:
+                where = next((i for i in range(min(len(data), len(content)))
+                              if data[i] != content[i]), min(len(data), len(content)))
+                ex = NotAchievedException(
+                    "Uploaded file differs at offset %u (got %u bytes, expected %u)" %
+                    (where, len(data), len(content)))
+
+        shutil.rmtree(dirname)
+        os.unlink(local_name)
+        if os.path.exists(remote_name):
+            os.unlink(remote_name)
+
+        if ex is not None:
+            raise ex
+
+    def MAVFTPListDirectoryInterleavedGet(self):
+        '''test a download started during a directory listing is not corrupted'''
+
+        dirname = "ftp_interleave_get_test"
+        remote_name = "ftp_interleave_source.dat"
+        local_name = "ftp_interleave_download.dat"
+        content = bytes((i * 11 + 5) & 0xff for i in range(8192))
+
+        self.create_ftp_listing_pages(dirname, 400)
+        self.write_content_to_filepath(content, remote_name)
+        if os.path.exists(local_name):
+            os.unlink(local_name)
+
+        mavproxy = self.start_mavproxy()
+        ex = None
+        try:
+            # let the parameter download finish first; it ends by terminating
+            # the FTP session, which would take any listing with it
+            mavproxy.expect("Saved .* parameters to")
+            mavproxy.send("module load ftp\n")
+            mavproxy.expect(["Loaded module ftp", "module ftp already loaded"])
+
+            # both commands in one write, so the download is under way before
+            # the first page of the listing comes back
+            mavproxy.send("ftp list %s\nftp get %s %s\n" % (dirname, remote_name, local_name))
+            mavproxy.expect("Wrote %u bytes to %s" % (len(content), local_name), timeout=60)
+        except Exception as e:  # noqa: BLE001
+            self.print_exception_caught(e)
+            ex = e
+
+        self.stop_mavproxy(mavproxy)
+
+        if ex is None:
+            with open(local_name, "rb") as f:
+                data = f.read()
+            if data != content:
+                where = next((i for i in range(min(len(data), len(content)))
+                              if data[i] != content[i]), min(len(data), len(content)))
+                ex = NotAchievedException(
+                    "Downloaded file differs at offset %u (got %u bytes, expected %u)" %
+                    (where, len(data), len(content)))
+
+        shutil.rmtree(dirname)
+        for path in remote_name, local_name:
+            if os.path.exists(path):
+                os.unlink(path)
+
+        if ex is not None:
+            raise ex
+
+    def MAVFTPListDirectoryLongNames(self):
+        '''test a listing is not truncated by an entry too long to fit a packet'''
+
+        dirname = "ftp_listing_long_test"
+        expected_files = self.create_ftp_listing_directory(dirname, "subdir", 12)
+
+        # names long enough that "F<name>\t<size>\0" does not fit in a packet.
+        # several of them, so that some short-named file follows one of them
+        # in readdir order
+        for i in range(8):
+            name = ("longname_%02u_" % i).ljust(240, "x")
+            self.write_content_to_filepath(b"x" * 10, os.path.join(dirname, name))
+
+        try:
+            # a name that long cannot be encoded into a packet at all, but
+            # dropping it must not end the listing
+            (entries, _) = self.ftp_list_dir(dirname)
+            (files, _) = self.ftp_listing_files_and_dirs(entries)
+            missing = sorted(set(expected_files.keys()) - set(files.keys()))
+            if len(missing):
+                raise NotAchievedException(f"Listing missing {missing}")
+        finally:
+            shutil.rmtree(dirname)
+
+    def MAVFTPListDirectoryTabInNameMAVProxy(self):
+        '''test MAVProxy parses a listing entry whose filename contains a tab'''
+
+        dirname = "ftp_listing_tab_test"
+        # the size is the last tab-separated field of an entry, so a name
+        # containing a tab is only ambiguous to a client which picks the
+        # fields off the front
+        name = "tab\there.txt"
+        content = b"x" * 10
+
+        if os.path.exists(dirname):
+            shutil.rmtree(dirname)
+        os.mkdir(dirname)
+        self.write_content_to_filepath(content, os.path.join(dirname, name))
+
+        mavproxy = self.start_mavproxy()
+        ex = None
+        try:
+            mavproxy.expect("Saved .* parameters to")
+            mavproxy.send("module load ftp\n")
+            mavproxy.expect(["Loaded module ftp", "module ftp already loaded"])
+            mavproxy.send("ftp list %s\n" % dirname)
+            mavproxy.expect(re.escape("   %s\t%u" % (name, len(content))) + r"[\r\n]", timeout=20)
+        except Exception as e:  # noqa: BLE001
+            self.print_exception_caught(e)
+            ex = e
+
+        self.stop_mavproxy(mavproxy)
+        shutil.rmtree(dirname)
+
+        if ex is not None:
+            raise ex
 
     def verify_ftp_burst_eof(self, data, eof_nack, expected_size, label):
         '''verify burst read EOF NAK is correct'''
@@ -16405,17 +17540,7 @@ switch value'''
     def MAVFTPBadReadOffset(self):
         '''ask for a very large offset'''
 
-        # reset sessions
-        op = FTP_OP(
-            seq=0, session=0, opcode=mavftp_op.OP_ResetSessions,
-            size=0, req_opcode=0, burst_complete=0,
-            offset=0, payload=None,
-        )
-        self.ftp_send(op)
-        reply = self.ftp_recv(timeout=5)
-        if reply is None:
-            raise NotAchievedException("No reply to ResetSessions")
-        seq = reply.seq
+        seq = self.ftp_reset_sessions()
 
         # open file read-only
         path = "@SYS/storage.bin"

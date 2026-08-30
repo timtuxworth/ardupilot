@@ -385,6 +385,206 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
         '''Check extended sys state works'''
         self.EXTENDED_SYS_STATE_SLT()
 
+    def QRTLGradualAltDescent(self):
+        '''check gradual descent to RTL_ALTITUDE in QRTL'''
+        qrtl_alt = 20
+        rtl_altitude = 60
+        self.set_parameters({
+            "Q_RTL_ALT": qrtl_alt,
+            "RTL_ALTITUDE": rtl_altitude,
+            # decelerate gently, so the airbrake stage starts a long way
+            # out.  That is where the approach altitude profile hands back
+            # to the generic waypoint target, and any step in the target
+            # altitude at that handover shows up clearly
+            "Q_TRANS_DECEL": 0.6,
+        })
+
+        self.start_flying_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 100),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 1500, 0, 100),
+        ])
+
+        self.wait_current_waypoint(2)
+
+        # get well away from home, cruising at the mission altitude, so
+        # QRTL's approach-phase ramp still has a long way to run
+        self.wait_distance_to_home(900, 1000, timeout=180)
+
+        entry_alt = self.get_altitude(relative=True)
+        self.progress("Entering QRTL at altitude %.1fm" % entry_alt)
+        self.change_mode('QRTL')
+
+        # entry_alt (~100m) is well above RTL_ALTITUDE (60m).  Track the
+        # altitude the fixed wing controller is actually chasing,
+        # reconstructed from NAV_CONTROLLER_OUTPUT.alt_error, which is
+        # (target - current) for as long as the fixed wing controller owns
+        # altitude.  That covers the approach and the airbrake stage, up to
+        # the handover to the VTOL position controller at QPOS_POSITION1,
+        # after which alt_error means something else entirely.
+        #
+        # The target must ease down from entry_alt towards RTL_ALTITUDE
+        # rather than snapping down while still ~900m short of home, must
+        # not step at any point (in particular at the approach to airbrake
+        # handover), and must actually make progress downwards - simply
+        # holding entry_alt for ever is not a gradual descent.
+        min_progress = 20           # m, target must come down at least this far
+
+        class MonitorQRTLDescentRate(vehicle_test_suite.TestSuite.MessageHook):
+            '''watches NAV_CONTROLLER_OUTPUT/GLOBAL_POSITION_INT and makes
+            sure the QRTL approach altitude target eases down continuously,
+            without stepping, towards RTL_ALTITUDE'''
+            def __init__(self, suite, entry_alt, max_step_rate=5, max_step_fixed=2):
+                super(MonitorQRTLDescentRate, self).__init__(suite)
+                # max_step_rate: m/s, target may not chase faster than this
+                # max_step_fixed: m, allowed on top of max_step_rate * dt
+                self.max_step_rate = max_step_rate
+                self.max_step_fixed = max_step_fixed
+                self.alt = entry_alt
+                self.prev_target = None
+                self.prev_t = None
+                self.target = None
+
+            def process(self, mav, m):
+                m_type = m.get_type()
+                if m_type == 'GLOBAL_POSITION_INT':
+                    self.alt = m.relative_alt * 0.001
+                    return
+                if m_type != 'NAV_CONTROLLER_OUTPUT':
+                    return
+
+                now = self.suite.get_sim_time_cached()
+                self.target = self.alt + m.alt_error
+                if self.prev_target is not None:
+                    dt = now - self.prev_t
+                    step = abs(self.target - self.prev_target)
+                    max_step = self.max_step_fixed + self.max_step_rate * dt
+                    self.progress("QRTL descent: alt=%.1f target=%.1f step=%.1f" %
+                                  (self.alt, self.target, step))
+                    if step > max_step:
+                        raise NotAchievedException(
+                            "QRTL target altitude stepped by %.1fm in %.2fs "
+                            "(max %.1fm), expected a continuous descent" %
+                            (step, dt, max_step))
+                self.prev_target = self.target
+                self.prev_t = now
+
+        self.context_push()
+        monitor = MonitorQRTLDescentRate(self, entry_alt)
+        self.install_message_hook_context(monitor)
+        # the VTOL position controller taking over altitude marks the end
+        # of the approach-phase ramp this test is checking
+        self.wait_statustext('VTOL position1', timeout=300)
+        self.context_pop()
+
+        if monitor.target is None:
+            raise NotAchievedException("Never saw a target altitude")
+        if monitor.target > entry_alt - min_progress:
+            raise NotAchievedException(
+                "QRTL target altitude only came down from %.1fm to %.1fm, "
+                "expected at least %.1fm of descent" %
+                (entry_alt, monitor.target, min_progress))
+
+        # let it continue home, transition and land normally
+        self.wait_altitude(-5, 1, relative=True, timeout=240)
+        self.wait_disarmed(timeout=60)
+
+    def QRTLGradualAltDescentTerrain(self):
+        '''check QRTL's approach altitude ramp is computed in the correct
+        altitude frame when QRTL is terrain following'''
+        self.install_terrain_handlers_context()
+
+        qrtl_alt = 20
+        rtl_altitude = 60
+        self.set_parameters({
+            "TERRAIN_ENABLE": 1,
+            "TERRAIN_FOLLOW": 1 << 9,  # bit 9 is QRTL
+            "TERRAIN_OPTIONS": 1 << 2,  # accept the cached terrain data as-is
+            "TERRAIN_LOOKAHD": 0,  # isolate the approach ramp; no lookahead confound
+            "ALT_SLOPE_MIN": 1,  # ensure the gradual ramp is used, not an immediate jump
+            "Q_RTL_ALT": qrtl_alt,
+            "RTL_ALTITUDE": rtl_altitude,
+            "Q_TRANS_DECEL": 0.6,
+        })
+
+        # move home to CMAC: the default QuadPlane test location is very
+        # flat, and this test needs real, cached-locally terrain relief
+        # to distinguish correct from buggy behaviour
+        self.customise_SITL_commandline(["--home", "-35.362938,149.165085,585,354"])
+
+        # fly west, where the ground rises steadily away from home for a
+        # couple of kilometres, so the QRTL destination (home) ends up
+        # well below the point the approach starts from
+        homeloc = self.home_position_as_location()
+        far_loc = self.offset_location_ne(homeloc, 0, -2000)
+
+        # prime the terrain database along the route before arming, or
+        # the prearm terrain check will never clear
+        tstart = self.get_sim_time()
+        while True:
+            if self.get_sim_time_cached() - tstart > 60:
+                raise NotAchievedException("Did not get required terrain data")
+            pending = 0
+            for i in range(11):
+                lat = homeloc.lat + i * (far_loc.lat - homeloc.lat) / 10
+                lon = homeloc.lng + i * (far_loc.lng - homeloc.lng) / 10
+                self.mav.mav.terrain_check_send(int(lat*1e7), int(lon*1e7))
+                report = self.assert_receive_message('TERRAIN_REPORT', timeout=60)
+                pending += report.pending
+            self.progress("Terrain pending=%u" % pending)
+            if pending == 0:
+                break
+
+        self.start_flying_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 100),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 0, -2000, 100),
+        ])
+
+        self.wait_current_waypoint(2)
+        self.wait_distance_to_home(1500, 1600, timeout=180)
+
+        entry_agl = self.get_altitude(altitude_source="TERRAIN_REPORT.current_height")
+        self.progress("Entering QRTL at %.1fm AGL" % entry_agl)
+        self.change_mode('QRTL')
+
+        # the approach ramp must start from where the aircraft actually
+        # is. If its initial excess-height figure is computed in the
+        # wrong altitude frame (absolute rather than terrain-relative)
+        # the sloping ground between here and home biases it by the
+        # ground-height difference between the two points, and
+        # alt_error jumps by roughly that amount the moment QRTL is
+        # entered instead of starting near zero
+        class MonitorQRTLTerrainEntryError(vehicle_test_suite.TestSuite.MessageHook):
+            '''watches NAV_CONTROLLER_OUTPUT.alt_error right after QRTL is
+            entered over sloping terrain; a large jump means the approach
+            ramp mixed absolute and terrain-relative altitude frames'''
+            def __init__(self, suite, max_entry_error=8):
+                super(MonitorQRTLTerrainEntryError, self).__init__(suite)
+                self.max_entry_error = max_entry_error  # metres
+                self.seen_sample = False
+
+            def process(self, mav, m):
+                if m.get_type() != 'NAV_CONTROLLER_OUTPUT':
+                    return
+                self.seen_sample = True
+                self.progress("QRTL terrain entry: alt_error=%.1f" % m.alt_error)
+                if abs(m.alt_error) > self.max_entry_error:
+                    raise NotAchievedException(
+                        "QRTL target altitude jumped by %.1fm on entry over "
+                        "sloping terrain (max %.1fm); the approach ramp is "
+                        "mixing altitude frames" % (m.alt_error, self.max_entry_error))
+
+        self.context_push()
+        monitor = MonitorQRTLTerrainEntryError(self)
+        self.install_message_hook_context(monitor)
+        self.delay_sim_time(5, reason="sample QRTL entry altitude error")
+        self.context_pop()
+
+        if not monitor.seen_sample:
+            raise NotAchievedException("Never saw a NAV_CONTROLLER_OUTPUT sample")
+
+        # let it continue home, transition and land normally
+        self.wait_disarmed(timeout=300)
+
     def QAUTOTUNE(self):
         '''test Plane QAutoTune mode'''
 
@@ -1527,6 +1727,31 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
             raise NotAchievedException("Should pass 90m before passing waypoint 5")
         self.wait_disarmed(timeout=300)
 
+    def WPSpdChange(self):
+        '''verify Q_WP_SPD takes effect on AUTO entry without reboot'''
+        # enable VTOL-only AUTO so Q_WP_SPD controls cruise speed
+        self.set_parameter('Q_ENABLE', 2)
+        self.upload_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_VTOL_TAKEOFF, 0, 0, 30),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 700, 0, 40),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, -700, 0, 40),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 700, 0, 40),
+        ])
+
+        # set Q_WP_SPD above default (5) without rebooting after the change
+        self.set_parameter('Q_WP_SPD', 12.0)
+        self.wait_ready_to_arm()
+        self.arm_vehicle()
+        self.change_mode('AUTO')
+
+        # wait for VTOL takeoff to complete, then check cruise speed
+        self.wait_altitude(35, 45, relative=True, timeout=60)
+        self.wait_groundspeed(8, 16, timeout=60)
+
+        # switch to QRTL so the plane ends up where it started
+        self.change_mode('QRTL')
+        self.wait_disarmed(timeout=120)
+
     def Mission(self):
         '''fly the OBC 2016 mission in Dalby'''
         self.load_mission("Dalby-OBC2016.txt")
@@ -1556,8 +1781,20 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
         self.set_current_waypoint(0, check_afterwards=False)
         self.fly_mission('mission.txt')
 
+    # The gains quicktune saves when it finishes.  Written by the applet
+    # or the C++ implementation rather than by us, so the suite cannot
+    # revert them and they would persist for the rest of the session.
+    # everything quicktune can save; the axes and suffixes here are
+    # AP_Quicktune::Param (libraries/AP_Quicktune/AP_Quicktune.h)
+    quicktune_saved_gains = [
+        "Q_A_RAT_%s_%s" % (axis, suffix)
+        for axis in ("RLL", "PIT", "YAW")
+        for suffix in ("P", "I", "D", "SMAX", "FLTT", "FLTD", "FLTE", "FF")
+    ]
+
     def VTOLQuicktune(self):
         '''VTOL Quicktune'''
+        self.context_preserve_parameters(self.quicktune_saved_gains)
         self.install_applet_script_context("VTOL-quicktune.lua")
 
         self.set_parameters({
@@ -1596,12 +1833,16 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
         # to test aux function method, use aux fn for save
         self.run_auxfunc(300, 2)
         self.wait_text("Tuning: saved", check_context=True)
+        # and put the switch back: aux function state survives
+        # context_pop(), and this test does not reboot afterwards
+        self.run_auxfunc(300, 0)
         self.change_mode("QLAND")
 
         self.wait_disarmed(timeout=120)
 
     def VTOLQuicktune_CPP(self):
         '''VTOL Quicktune in C++'''
+        self.context_preserve_parameters(self.quicktune_saved_gains)
         self.set_parameters({
             "RC7_OPTION": 181,
             "QWIK_ENABLE" : 1,
@@ -1683,16 +1924,11 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
 
         self.install_applet_script_context("plane_precland.lua")
 
-        here = self.mav.location()
-        target = self.offset_location_ne(here, 20, 0)
-
         self.set_parameters({
             "SCR_ENABLE": 1,
             "PLND_ENABLED": 1,
             "PLND_TYPE": 4,
             "SIM_PLD_ENABLE":   1,
-            "SIM_PLD_LAT" : target.lat,
-            "SIM_PLD_LON" : target.lng,
             "SIM_PLD_HEIGHT" : 0,
             "SIM_PLD_ALT_LMT" : 50,
             "SIM_PLD_DIST_LMT" : 30,
@@ -1716,6 +1952,19 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
         self.wait_text("PLND: Loaded", check_context=True)
 
         self.wait_ready_to_arm()
+
+        # place the target near the vehicle's current position - which,
+        # having just rebooted, is the spawn position.  Sampling the
+        # position before the reboot places the target wherever the
+        # previous test happened to leave the vehicle, which can be
+        # hundreds of metres from where QRTL will descend:
+        here = self.mav.location()
+        target = self.offset_location_ne(here, 20, 0)
+        self.set_parameters({
+            "SIM_PLD_LAT": target.lat,
+            "SIM_PLD_LON": target.lng,
+        })
+
         self.change_mode("GUIDED")
         self.arm_vehicle()
         self.takeoff(60, 'GUIDED')
@@ -1802,6 +2051,10 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
         max_distance = 1.2
         if distance > max_distance:
             raise NotAchievedException(f"Did not land within {max_distance}m of ship {distance=}")
+
+        # we are not at the home location - reboot so the next test starts there
+        self.set_parameter("SIM_SHIP_ENABLE", 0)
+        self.reboot_sitl()
 
     def RCDisableAirspeedUse(self):
         '''check disabling airspeed using RC switch'''
@@ -2658,6 +2911,12 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
 
         self.progress("Recovery AltChange %.1fm" % alt_change)
 
+        # stop asking for inverted flight.  Aux function state is not a
+        # parameter, so context_pop() does not clear it, and this test
+        # does not reboot - without this the next test on this worker
+        # starts with inverted flight still commanded.
+        self.run_auxfunc(43, 0)
+
         max_alt_change = 3
         if alt_change > max_alt_change:
             raise NotAchievedException("Recovery AltChange too high %.1f > %.1f" % (alt_change, max_alt_change))
@@ -3289,7 +3548,10 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
         defaults_file.write("SERVO17_FUNCTION %d\n" % k_motor1)
         defaults_file.close()
 
-        self.customise_SITL_commandline([], defaults_filepath=defaults_file.name)
+        # wipe: a defaults file only supplies parameters which are not
+        # already saved, so anything an earlier test stored for
+        # SERVO17_FUNCTION would win over the default under test
+        self.customise_SITL_commandline([], defaults_filepath=defaults_file.name, wipe=True)
         self.assert_parameter_values({"SERVO17_FUNCTION": k_motor1})
 
         data, _ = self.ftp_burst_read("@PARAM/param.pck?withdefaults=1")
@@ -3393,6 +3655,153 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
         })
         self.do_RTL()
 
+        # SIM_BARO_DRIFT is a rate: zeroing it stops the offset it has
+        # accumulated from growing but leaves it in place for the life
+        # of the SITL process, and no parameter records it, so a
+        # context revert cannot undo it.  Recalibrating the barometer
+        # moves the ground reference but leaves the EKF to absorb the
+        # resulting step over several seconds, during which the next
+        # test can arm and take home from a height still being
+        # corrected.  Reboot instead: it discards the simulator and
+        # filter state together, with no transient to race.
+        self.reboot_sitl()
+
+    def TECSThrSpikeOnModeChange(self):
+        ''' Regression test for issue #33871. '''
+
+        # The bug only affects vectored tiltrotors.
+        self.customise_SITL_commandline(
+            [],
+            model="quadplane-tilthvec",
+            wipe=True,
+        )
+
+        # Turn off throttle slew limit
+        self.set_parameter("THR_SLEWRATE", 0)
+
+        # Take off and transition to fixed-wing flight.
+        self.takeoff(25, mode='QHOVER', timeout=120)
+        self.context_collect('STATUSTEXT')
+        self.change_mode('FBWA')
+        self.set_rc(3, 2000)
+        self.wait_statustext('Transition FW done', timeout=60)
+
+        # Add hook to check throttle level
+        class DetectThrottleSpike(vehicle_test_suite.TestSuite.MessageHook):
+            '''Checks for spikes in throttle output'''
+            def __init__(self, suite):
+                super(DetectThrottleSpike, self).__init__(suite)
+                self.num_samples = 0
+
+            def hook_removed(self):
+                if self.num_samples == 0:
+                    raise NotAchievedException("Did not get SERVO_OUTPUT_RAW")
+
+            def process(self, mav, m):
+                if m.get_type() != 'SERVO_OUTPUT_RAW':
+                    return
+
+                self.num_samples += 1
+                if m.servo3_raw > 1750:
+                    raise NotAchievedException("Throttle spike (%u)" % (m.servo3_raw))
+
+        self.set_message_rate_hz('SERVO_OUTPUT_RAW', 200)
+
+        # Install a hook to check for throttle spike
+        self.context_push()
+        self.install_message_hook_context(DetectThrottleSpike(self))
+
+        # Fly in CRUISE so TECS runs and _throttle_dem converges toward 80%
+        # (TRIM_THROTTLE feed-forward keeps _throttle_dem well above 40%).
+        self.set_rc(3, 1000)
+        self.delay_sim_time(1, reason="Allow vehicle to stabilize at low throttle")
+        self.change_mode('CRUISE')
+
+        self.delay_sim_time(5, reason="Check throttle output")
+        self.context_pop()
+
+        self.do_RTL()
+
+    def CircuitStatusScript(self):
+        '''test CircuitStatus lua driver against a CAN periph'''
+        self.context_collect('STATUSTEXT')
+
+        self.install_driver_script_context("CircuitStatus.lua")
+
+        # CAN_P1_DRIVER=1 is needed so plane publishes the SITL multicast
+        # sim state the periph blocks on at boot. BATT_MONITOR=8
+        # (DroneCAN) gives a reference monitor fed by BatteryInfo from
+        # the same periph battery the CircuitStatus messages come from.
+        self.set_parameters({
+            "SCR_ENABLE": 1,
+            "CAN_P1_DRIVER": 1,
+            "BATT_MONITOR": 8,  # DroneCAN
+            "BATT2_MONITOR": 29,  # scripting
+            "BATT3_MONITOR": 29,  # scripting
+        })
+        self.restart_SITL_frame('quadplane-can', customisations=[])
+
+        # first boot of the script creates DCS_NUM_CIRCUITS; setting it
+        # and rebooting creates the per-circuit parameters
+        self.set_parameters({
+            "DCS_NUM_CIRCUITS": 2,
+        })
+        self.reboot_sitl()
+        self.wait_statustext("CircuitStatus: loaded 2 circuits", check_context=True, timeout=60)
+
+        # per-circuit parameters are polled at runtime, so no further
+        # reboot is needed. The SITL periph sends a circuit per battery
+        # backend with circuit_id of instance+1; map its first battery
+        # to both scripting monitors
+        self.set_parameters({
+            "DCS1_CIRCUIT_ID": 1,
+            "DCS1_BATT_IDX": 2,
+            "DCS2_CIRCUIT_ID": 1,
+            "DCS2_BATT_IDX": 3,
+        })
+
+        # the scripting monitors should match the DroneCAN reference
+        # monitor, with tolerance for float16 quantisation and sampling
+        # time differences. SYS_STATUS gives the pack voltage of the
+        # reference monitor; BATTERY_STATUS voltages[] of the DroneCAN
+        # monitor holds per-cell voltages so is not comparable.
+        #
+        # The reference values move while we watch - the simulated
+        # battery's current drifted from 8.5A to 10.75A during one
+        # loaded run - so comparing against a single SYS_STATUS
+        # snapshot fails whenever the wait takes any real time: track
+        # the reference live and pass when a scripting reading agrees
+        # with a recent reference reading.
+        self.set_message_rate_hz('BATTERY_STATUS', 10)
+        for instance in 1, 2:
+            for field, ref_field, epsilon in [
+                    ("voltages[0]", "voltage_battery", 100),
+                    ("current_battery", "current_battery", 25),
+            ]:
+                tstart = self.get_sim_time()
+                ref = None
+                last_pair = None
+                while True:
+                    if self.get_sim_time_cached() - tstart > 60:
+                        raise NotAchievedException(
+                            "BATTERY_STATUS.%s (instance %u) never matched "
+                            "SYS_STATUS.%s (last %s)" %
+                            (field, instance, ref_field, last_pair))
+                    m = self.assert_receive_message(['SYS_STATUS', 'BATTERY_STATUS'])
+                    if m.get_type() == 'SYS_STATUS':
+                        ref = getattr(m, ref_field)
+                        continue
+                    if m.id != instance or ref is None:
+                        continue
+                    value = getattr(m, field.rstrip(']').split('[')[0])
+                    if '[' in field:
+                        value = value[int(field.split('[')[1].rstrip(']'))]
+                    last_pair = (value, ref)
+                    if abs(value - ref) <= epsilon:
+                        self.progress("%s instance %u matches reference (%s ~ %s)" %
+                                      (field, instance, value, ref))
+                        break
+
     def tests(self):
         '''return list of all tests'''
 
@@ -3408,6 +3817,8 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
             self.TestLogDownload,
             self.TestLogDownloadWrap,
             self.EXTENDED_SYS_STATE,
+            self.QRTLGradualAltDescent,
+            self.QRTLGradualAltDescentTerrain,
             self.Mission,
             self.Weathervane,
             self.QAssist,
@@ -3477,5 +3888,8 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
             self.FenceRelativeToTerrainMinAlt,
             self.PlaneWindFailsafe,
             self.HighServoFunctionDefault,
+            self.WPSpdChange,
+            self.TECSThrSpikeOnModeChange,
+            self.CircuitStatusScript,
         ])
         return ret

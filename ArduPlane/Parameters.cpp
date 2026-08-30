@@ -72,7 +72,7 @@ const AP_Param::Info Plane::var_info[] = {
 
     // @Param: ALT_SLOPE_MIN
     // @DisplayName: Altitude slope minimum
-    // @Description: This controls the minimum altitude change for a waypoint before an altitude slope will be used instead of an immediate altitude change. The default value is 15 meters, which helps to smooth out waypoint missions where small altitude changes happen near waypoints. If you don't want altitude slopes to be used in missions then you can set this to zero, which will disable altitude slope calculations. Otherwise you can set it to a minimum number of meters of altitude error to the destination waypoint before an altitude slope will be used to change altitude.
+    // @Description: This controls the minimum altitude change for a waypoint before an altitude slope will be used instead of an immediate altitude change. The default value is 15 meters, which helps to smooth out waypoint missions where small altitude changes happen near waypoints. If you don't want altitude slopes to be used in missions then you can set this to zero, which will disable altitude slope calculations. Otherwise you can set it to a minimum number of meters of altitude error to the destination waypoint before an altitude slope will be used to change altitude. This also gates the gradual altitude ramp used during the approach leg of QRTL.
     // @Range: 0 1000
     // @Increment: 1
     // @Units: m
@@ -636,7 +636,7 @@ const AP_Param::Info Plane::var_info[] = {
     // @DisplayName: speed used for speed scaling calculations
     // @Description: Airspeed in m/s to use when calculating surface speed scaling. Note that changing this value will affect all PID values
     // @Units: m/s
-    // @Range: 0 50
+    // @Range: 0.1 50
     // @Increment: 0.1
     // @User: Advanced
     GSCALAR(scaling_speed,        "SCALING_SPEED",    SCALING_SPEED),

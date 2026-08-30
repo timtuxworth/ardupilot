@@ -50,6 +50,7 @@ TARGET_HW_ARK_CAN_RTK_GPS              82
 TARGET_HW_ARK_CANNODE                  83
 TARGET_HW_FF_RTK_CAN_GPS               85
 TARGET_HW_PDW_MAS_MAIN-V1              86
+TARGET_HW_ARK_X20_GPS                  89
 TARGET_HW_ATL_MANTIS_EDU               97
 TARGET_HW_THE_PEACH_K1                212
 TARGET_HW_THE_PEACH_R1                213
@@ -306,7 +307,7 @@ AP_HW_FlywooH743Pro                  1181
 AP_HW_CBU_StampH743_LC               1182
 AP_HW_NarinH7                        1183
 AP_HW_BrahmaF4                       1184
-AP_HW_X-MAV-AP-F405Mini              1185
+AP_HW_X-MAV-AP-H743Lite              1185
 AP_HW_3DRControlN1                   1186
 AP_HW_CORVON405V2_1                  1187
 AP_HW_NarinH5                        1188
@@ -348,6 +349,9 @@ AP_HW_SIMPLIFLYH7                    1221
 
 AP_HW_MUPilot                        1222
 AP_HW_HWH7                           1223
+AP_HW_BrahmaH7                       1224
+AP_HW_TUSTIN_MACH                    1225
+AP_HW_FlyFishRCF405                  1226
 
 AP_HW_ATLAS_CONTROL                  1227
 AP_HW_MatekH7A3_Wing                 1228
@@ -358,6 +362,7 @@ AP_HW_CORVON_V6                      1230
 # IDs 1231-1240 reserved for YARI Robotics
 AP_HW_YARIV6X                        1234
 AP_HW_YARI_GNSS                      1235
+AP_HW_YARI_RTK_GNSS                  1236
 
 AP_HW_PRINCIPIOT_H7PI                1248
 
@@ -365,6 +370,7 @@ AP_HW_KT_FMU_F1                      1250
 
 AP_HW_GPILOT_P1						 1275
 
+AP_HW_MicoAir743v3                   1299
 AP_HW_SKYDROID-S3                    1300
 
 AP_HW_CBUnmanned-CM405-FC            1301
@@ -419,6 +425,7 @@ AP_HW_StellarF4V2                    1504
 AP_HW_BCUBEF745V2                    1511
 
 AP_HW_HGLRCF405V4                    1524
+AP_HW_HGLRC_H743_EVO                 1525
 
 AP_HW_F4BY_F427                      1530
 AP_HW_F4BY_H743                      1531
@@ -431,6 +438,15 @@ AP_HW_AERIUM_RADIAN_H743             1801
 AP_HW_A2M6X                          1850
 AP_HW_A2M6X_NANO                     1855
 AP_HW_A2M6X_V2                       1860
+
+# IDs 1930–1949 reserved for Agam Robotics
+AP_HW_AGAM_GNSS-CAN                  1930
+AP_HW_AGAM_GNSSPLUS                  1931
+AP_HW_AGAM_BASE-RTK                  1932
+AP_HW_AGAM_CAN-RTK                   1933
+AP_HW_AGAM_FloRange                  1939
+AP_HW_AGAM_MegH7                     1940
+AP_HW_AGAM_v6XRT                     1949
 
 # IDs 1950-1979 reserved for HC Robotics
 AP_HW_HCR-504                        1950
@@ -446,6 +462,9 @@ AP_HW_HCR-536                        1959
 AP_HW_HCR-551                        1960
 AP_HW_HCR-565                        1961
 AP_HW_HCR-566                        1962
+
+AP_HW_CORVON_G1                      1963
+AP_HW_CORVON_G2                      1964
 
 AP_HW_MFT-SEMA100                    2000
 
@@ -481,6 +500,7 @@ AP_HW_AeroCogito-H7Digital           4300
 
 # IDs 4500-4509 reserved for Lumenier
 AP_HW_LUMENIER_LUX_F765_NDAA         4500
+AP_HW_LUMENIER_LUX_H743_NDAA         4501
 
 # IDs 5000-5099 reserved for Carbonix
 # IDs 5100-5199 reserved for SYPAQ Systems
@@ -575,6 +595,10 @@ AP_HW_IOMCU_F103_8MHZ                5712  # some boards are clocked differently
 AP_HW_IOMCU_F100                     5713
 
 # IDs 5730-5739 reserved for NWBlue
+AP_HW_NWBLUE_PROH757                 5730
+
+#IDs 5740-5749 reserved for Zenithra Tech
+AP_HW_ZenFC_H743                     5740 
 
 #IDs 5800-5809 reserved for Droneer
 AP_HW_DroneerF405                    5800
@@ -611,6 +635,9 @@ AP_HW_PixSurveyA2-IND                6104
 AP_HW_SVehicle-E2                    6110
 AP_HW_SVehicle-E2-mini               6111
 
+# IDs 6120-6129 reserved for Partizan Security s.r.o
+AP_HW_PILOTIX                          6120
+
 # IDs 6600-6699 reserved for Eagle Eye Drones
 
 # IDs 6900-6909 reserved for Easy Aerial
@@ -638,6 +665,19 @@ AP_HW_Accton_Godwit_GFH7             7122
 # IDs 7130-7139 reserved for CoreWing
 AP_HW_CoreWingF405WingV2             7130
 AP_HW_CoreWingF405WMiniV2            7131
+
+# IDs 7140-7149 reserved for Lectron
+AP_HW_LECTRON_Pi5_H7            7140
+
+# IDs 7150-7159 reserved for SED
+AP_HW_SED_FC_H753                    7150
+AP_HW_SED_GPS                        7151
+AP_HW_SED_AirSpeed                   7152
+AP_HW_SED_UGNSS                      7153
+
+# IDs 7170-7179 reserved for Tykho Electronics
+AP_HW_TYKHO_TLS7V2                   7170
+AP_HW_TYKHO_TLS7-Wing                7171
 
 # please fill gaps in the above ranges rather than adding past ID #7199
 

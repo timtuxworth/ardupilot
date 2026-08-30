@@ -1185,6 +1185,12 @@ const AP_Param::GroupInfo ParametersG2::var_info2[] = {
     AP_GROUPINFO("SURFTRAK_GLSAM", 22, ParametersG2, surf_dist_parameters.glitch_num_samples, AP_SURFACEDISTANCE_GLITCH_NUM_SAMPLES_DEFAULT),
 #endif
 
+#if MODE_FLIP_ENABLED
+    // @Group: FLIP_
+    // @Path: mode_flip.cpp
+    AP_SUBGROUPPTR(mode_flip_ptr, "FLIP_", 23, ParametersG2, ModeFlip),
+#endif
+
     // ID 62 is reserved for the AP_SUBGROUPEXTENSION
 
     AP_GROUPEND
@@ -1251,6 +1257,11 @@ ParametersG2::ParametersG2(void) :
 #if MODE_POSHOLD_ENABLED
     ,mode_poshold_ptr(&copter.mode_poshold)
 #endif
+
+#if MODE_FLIP_ENABLED
+    ,mode_flip_ptr(&copter.mode_flip)
+#endif
+
 {
     AP_Param::setup_object_defaults(this, var_info);
     AP_Param::setup_object_defaults(this, var_info2);

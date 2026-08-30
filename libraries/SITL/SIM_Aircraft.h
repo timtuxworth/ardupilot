@@ -39,6 +39,7 @@
 #include "SIM_GPIO_LED_RGB.h"
 #include "SIM_Siyi.h"
 #include "SIM_Topotek.h"
+#include "SIM_SkyDroid.h"
 #include "SIM_Viewpro.h"
 #include "SIM_Mount.h"
 
@@ -81,6 +82,13 @@ public:
 
     /*  Create and set in/out socket for extenal simulator */
     virtual void set_interface_ports(const char* address, const int port_in, const int port_out) {};
+
+    /*
+      Start the external simulator process, for backends that manage one. Called
+      once the model is fully configured, so the child's command line can depend
+      on anything the setters above supply.
+     */
+    virtual void launch_external_sim(void) {};
 
     /*
       step the FDM by one time step

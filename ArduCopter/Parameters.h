@@ -736,6 +736,10 @@ public:
     void *mode_poshold_ptr;
 #endif
 
+#if MODE_FLIP_ENABLED
+    void *mode_flip_ptr;
+#endif
+
 };
 
 extern const AP_Param::Info        var_info[];

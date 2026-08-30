@@ -169,6 +169,7 @@ for t in $CI_BUILD_TARGET; do
         $waf configure --board sitl
         $waf copter
         run_autotest "Copter" "build.SITLPeriphUniversal" "test.CAN"
+        run_autotest "Copter" "build.SITLPeriphBattMon" "test.BattCAN"
         continue
     fi
     if [ "$t" == "sitltest-plane-tests1a" ]; then
@@ -476,6 +477,13 @@ for t in $CI_BUILD_TARGET; do
 
         $waf --target tool/AP_DAL_Standalone
         $waf clean
+        continue
+    fi
+
+    if [ "$t" == "clang_scan_build" ]; then
+        unset BUILDROOT
+        echo "Running SITL clang-scan-build test"
+        ./Tools/autotest/autotest.py clang-scan-build
         continue
     fi
 

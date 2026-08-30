@@ -15,6 +15,7 @@ const AP_Param::GroupInfo AP_RangeFinder_Params::var_info[] = {
     // @DisplayName: Rangefinder type
     // @Description: Type of connected rangefinder
     // @SortValues: AlphabeticalZeroAtTop
+    // @RebootRequired: True
     // @Values: 0:None
     // @Values: 1:Analog
     // @Values: 2:MaxbotixI2C
@@ -150,7 +151,7 @@ const AP_Param::GroupInfo AP_RangeFinder_Params::var_info[] = {
 
     // @Param: ADDR
     // @DisplayName: Bus address of sensor
-    // @Description: This sets the bus address of the sensor, where applicable. Used for the I2C and DroneCAN sensors to allow for multiple sensors on different addresses.
+    // @Description: This sets the bus address of the sensor, where applicable. Used for the I2C and DroneCAN sensors to allow for multiple sensors on different addresses. For MAVLink rangefinders, this sets the DISTANCE_SENSOR message id to accept. A value of zero accepts any id.
     // @Range: 0 127
     // @Increment: 1
     // @User: Standard

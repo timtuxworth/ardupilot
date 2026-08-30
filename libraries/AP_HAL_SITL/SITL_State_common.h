@@ -28,6 +28,7 @@
 
 #include <SITL/SIM_Siyi_ZT30.h>
 #include <SITL/SIM_Topotek.h>
+#include <SITL/SIM_SkyDroid.h>
 #include <SITL/SIM_Viewpro.h>
 #include <SITL/SIM_AVT_CM62.h>
 
@@ -64,6 +65,16 @@
 #include <SITL/SITL_Input.h>
 
 class HAL_SITL;
+
+/*
+  reply sent by simulated peripherals for each multicast state packet
+  consumed: servo feedback, plus a timestamp echo used for
+  simulated-peripheral lockstep
+ */
+struct sitl_mcast_ack {
+    uint64_t timestamp_us;   // echo of the consumed state timestamp
+    float servos[SITL_NUM_CHANNELS];  // nan means channel not driven
+};
 
 class HALSITL::SITL_State_Common {
     friend class HALSITL::Scheduler;
@@ -234,9 +245,6 @@ public:
     // voltage from the sensor
     float _sonar_pin_voltage() const;
 
-    // multicast state
-    int mc_out_fd = -1;
-    
     // send out SITL state as UDP multicast
     void multicast_state_open(void);
     void multicast_state_send(void);

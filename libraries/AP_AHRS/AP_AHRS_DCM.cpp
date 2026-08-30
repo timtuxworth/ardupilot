@@ -153,6 +153,9 @@ AP_AHRS_DCM::update()
 #endif // HAL_LOGGING_ENABLED
 }
 
+// note that contrary to most code we leave commented code in here as
+// an exhaustive list of all of the data that *can* be returned in the
+// Estimates:
 void AP_AHRS_DCM::get_results(AP_AHRS_Backend::Estimates &results)
 {
     const auto now_ms = AP_HAL::millis();
@@ -181,6 +184,9 @@ void AP_AHRS_DCM::get_results(AP_AHRS_Backend::Estimates &results)
 
     results.gyro_estimate = _omega;
     results.gyro_drift = _omega_I;
+
+    // true when the state estimates are significantly degraded by vibration:
+    // results.is_vibration_affected = false;
 
     /*
      * acceleration estimates
@@ -264,6 +270,14 @@ void AP_AHRS_DCM::get_results(AP_AHRS_Backend::Estimates &results)
     // results.variances_valid = false;
 
     // terrain_alt_variance_valid = false;
+
+    // lower gains in VTOL controllers when flying on DCM
+    results.control_ground_speed_limit_ms = 50.0;
+    results.control_gain_scaler_XY = 0.5;
+    results.control_gain_scaler_Z = 0.25;
+    // control height is never limited:
+    // results.control_height_limit_valid = false;
+    // results.control_height_limit_m = 0;
 }
 
 /*
@@ -1181,6 +1195,10 @@ void AP_AHRS_DCM::set_external_wind_estimate(float speed, float direction) {
 // dead-reckoning or GPS
 bool AP_AHRS_DCM::get_location(Location &loc) const
 {
+    if (_last_lat == 0 && _last_lng == 0) {
+        // we have never had a position
+        return false;
+    }
     loc.lat = _last_lat;
     loc.lng = _last_lng;
     const auto &baro = AP::baro();
@@ -1382,13 +1400,6 @@ bool AP_AHRS_DCM::get_origin(Location &ret) const
 bool AP_AHRS_DCM::yaw_source_available(void) const
 {
     return AP::compass().use_for_yaw();
-}
-
-void AP_AHRS_DCM::get_control_limits(float &ekfGndSpdLimit, float &ekfNavVelGainScaler) const
-{
-    // lower gains in VTOL controllers when flying on DCM
-    ekfGndSpdLimit = 50.0;
-    ekfNavVelGainScaler = 0.5;
 }
 
 #endif  // AP_AHRS_DCM_ENABLED

@@ -97,6 +97,7 @@ void SITL_State::_usage(void)
            "\t--autotest-dir DIR       set directory for additional files\n"
            "\t--defaults path          set path to defaults file\n"
            "\t--list-models            list embedded vehicleinfo.json models and exit\n"
+           "\t--sim-periph-lockstep    do not advance the simulation until all simulated peripherals have consumed our state\n"
            "\t--serial0 device         set device string for SERIAL0\n"
            "\t--serial1 device         set device string for SERIAL1\n"
            "\t--serial2 device         set device string for SERIAL2\n"
@@ -108,7 +109,7 @@ void SITL_State::_usage(void)
            "\t--serial8 device         set device string for SERIAL8\n"
            "\t--serial9 device         set device string for SERIAL9\n"
            "\t--uartA device           alias for --serial0 (do not use)\n"
-           "\t--net-device NAME:PORT   attach simulated device NAME to TCP port PORT rather than to a serial port\n"
+           "\t--net-device NAME:PORT[,udp]   attach simulated device NAME to TCP (or, with ',udp', UDP) port PORT rather than to a serial port\n"
            "\t--base-port PORT         set port num for base port(default 5670) must be before -I option\n"
            "\t--rc-in-port PORT        set port num for rc in\n"
            "\t--sim-address ADDR       set address string for simulator\n"
@@ -266,7 +267,7 @@ void SITL_State::_parse_command_line(int argc, char * const argv[])
     struct AP_Param::defaults_table_struct temp_cmdline_param{};
 
 #if AP_SIM_SERIALDEVICE_NETWORK_ENABLED
-    // NAME:TCPPORT strings from --net-device options:
+    // NAME:PORT[,udp] strings from --net-device options:
     const char *net_device_strings[4];
     uint8_t num_net_device_strings = 0;
 #endif  // AP_SIM_SERIALDEVICE_NETWORK_ENABLED
@@ -316,6 +317,7 @@ void SITL_State::_parse_command_line(int argc, char * const argv[])
         CMDLINE_SYSID,
         CMDLINE_SLAVE,
         CMDLINE_LIST_MODELS,
+        CMDLINE_SIM_PERIPH_LOCKSTEP,
 #if STORAGE_USE_FLASH
         CMDLINE_SET_STORAGE_FLASH_ENABLED,
 #endif
@@ -381,6 +383,7 @@ void SITL_State::_parse_command_line(int argc, char * const argv[])
         {"sysid",           true,   0, CMDLINE_SYSID},
         {"slave",           true,   0, CMDLINE_SLAVE},
         {"list-models",     false,  0, CMDLINE_LIST_MODELS},
+        {"sim-periph-lockstep", false, 0, CMDLINE_SIM_PERIPH_LOCKSTEP},
 #if STORAGE_USE_FLASH
         {"set-storage-flash-enabled", true,   0, CMDLINE_SET_STORAGE_FLASH_ENABLED},
 #endif
@@ -610,6 +613,9 @@ void SITL_State::_parse_command_line(int argc, char * const argv[])
         case CMDLINE_LIST_MODELS:
             list_models_and_exit();
             break;
+        case CMDLINE_SIM_PERIPH_LOCKSTEP:
+            _periph_lockstep = true;
+            break;
         default:
             _usage();
             exit(1);
@@ -662,6 +668,7 @@ void SITL_State::_parse_command_line(int argc, char * const argv[])
             sitl_model->set_instance(_instance);
             sitl_model->set_autotest_dir(autotest_dir);
             sitl_model->set_config(config);
+            sitl_model->launch_external_sim();
             break;
         }
     }

@@ -22,6 +22,15 @@ class AutoTestHelicopter(AutoTestCopter):
 
     sitl_start_loc = mavutil.location(40.072842, -105.230575, 1586, 0)     # Sparkfun AVC Location
 
+    def max_distance_from_startup_location_at_end_of_test(self):
+        # this class inherits ArduCopter's tests but not its
+        # discipline of leaving the vehicle where it started: a heli
+        # which takes off and lands drifts further than a multirotor
+        # (CI measured 2.5m and 3.1m for the takeoff tests), and the
+        # autorotation tests deliberately end well away from the
+        # startup location (110m).
+        return None
+
     def vehicleinfo_key(self):
         return 'Helicopter'
 
@@ -294,7 +303,23 @@ class AutoTestHelicopter(AutoTestCopter):
             wipe=True,
         )
         self.takeoff(10)
-        self.wait_servo_channel_value(4, 1403, timeout=10)
+        self.wait_servo_channel_in_range(7, 1402, 1406, timeout=10)
+        self.do_RTL()
+        # check that battery compensation logic
+        self.set_parameters({
+            "H_DDFP_BAT_V_MAX": 50.4,
+            "H_DDFP_BAT_V_MIN": 39.6,
+            "SIM_BATT_CAP_AH": 5.0,
+            "GCS_PID_MASK": 4.0,
+            "ATC_RAT_YAW_I": 0.00001
+        })
+        self.takeoff(10)
+        self.change_mode("LOITER")
+        self.delay_sim_time(500, reason="allow time for battery to deplete and battery compensation to take effect")
+        m = self.assert_receive_message('PID_TUNING')
+        if m.P > 0.42:
+            raise NotAchievedException("Battery compensation not working")
+        self.set_parameter("ATC_RAT_YAW_I", 0.2)
         self.do_RTL()
 
     def DDVPTail(self):
@@ -993,7 +1018,10 @@ class AutoTestHelicopter(AutoTestCopter):
             "ARSPD_PIN": 1,      # Analog airspeed driver pin for SITL
         })
         # set the start location to CMAC to use same test script as other vehicles
-
+        # sitl_start_location() returns this for the rest of the session,
+        # so every later start_SITL() would come up at CMAC rather than
+        # at the heli's own start location; put it back afterwards.
+        self.context_preserve_attribute("sitl_start_loc")
         self.sitl_start_loc = mavutil.location(-35.362881, 149.165222, 582.000000, 90.0)   # CMAC
         self.customise_SITL_commandline(["--home", "%s,%s,%s,%s"
                                          % (-35.362881, 149.165222, 582.000000, 90.0)])

@@ -1170,16 +1170,19 @@ class AutoTestSub(vehicle_test_suite.TestSuite):
         self.context_pop()
 
         dfreader = self.dfreader_for_current_onboard_log()
+        temp_min = 35
+        temp_max = 45
         while True:
             m = dfreader.recv_match(type='TEMP')
             if m is None:
                 break
             self.progress(m)
-            if m.Temp > 15 or m.Temp < 30:
+            if temp_min < m.Temp < temp_max:
                 # success!
                 break
         if m is None:
-            raise NotAchievedException("Did not get good TEMP message")
+            raise NotAchievedException(
+                f"Did not get good TEMP message (want {temp_min} < Temp < {temp_max})")
 
     def MAV_mgs(self):
         '''test individual GCS backends timestamps'''
@@ -1218,13 +1221,24 @@ class AutoTestSub(vehicle_test_suite.TestSuite):
         chan2_last_timestamp_us = 0
         chan2_last_mgs = 0
         att_ts_us = 0
+        gcs_sysid_set_ts_us = None
         while True:
-            m = dfreader.recv_match(type=['MAV', 'ATT'])
+            m = dfreader.recv_match(type=['MAV', 'ATT', 'PARM'])
             if m is None:
                 raise NotAchievedException("Did not find everything wanted in log")
             if chan2_count > 10:
                 self.progress("Received 10 heartbeats on chan==2")
                 break
+            if m.get_type() == 'PARM':
+                # the moment MAV_GCS_SYSID took effect; heartbeats from
+                # us only count towards mgs from here on.  Measuring
+                # chan 0's latching relative to this rather than to
+                # boot keeps the check independent of how much
+                # simulated time the reboot-detection polling burnt,
+                # which at high speedup can be many seconds.
+                if m.Name == 'MAV_GCS_SYSID' and int(m.Value) == self.mav.source_system:
+                    gcs_sysid_set_ts_us = m.TimeUS
+                continue
             if m.get_type() == 'ATT':
                 att_ts_us = m.TimeUS
                 continue
@@ -1233,8 +1247,10 @@ class AutoTestSub(vehicle_test_suite.TestSuite):
                 continue
             if m.chan == 0:
                 if chan0_count == 0:
-                    if att_ts_us > 5000000:
-                        raise NotAchievedException(f"Late arrival on chan=0 {att_ts_us=}")
+                    if gcs_sysid_set_ts_us is None:
+                        raise NotAchievedException(f"mgs nonzero on chan=0 before MAV_GCS_SYSID was set {att_ts_us=}")
+                    if att_ts_us - gcs_sysid_set_ts_us > 5000000:
+                        raise NotAchievedException(f"Late arrival on chan=0 {att_ts_us=} {gcs_sysid_set_ts_us=}")
                 chan0_count += 1
                 if chan0_count > 3:
                     if att_ts_us - chan0_last_timestamp_us > 2000000:
@@ -1277,6 +1293,14 @@ class AutoTestSub(vehicle_test_suite.TestSuite):
 
     def SurfaceSensorless(self):
         """Test surface mode with sensorless thrust"""
+        # this drives the throttle down and waits to arrive at 9.5m, so
+        # it has to start above that.  The vehicle is wherever the
+        # previous test left it, which can be a long way below:
+        #     Failed to attain Altitude want -9.5, reached -52.093
+        # with the depth not moving at all - it was already far past the
+        # altitude it was descending towards.  Reboot back to the
+        # surface first, as several tests in this file already do.
+        self.reboot_sitl()
         # set GCS failsafe to SURFACE
         self.wait_ready_to_arm()
         self.arm_vehicle()

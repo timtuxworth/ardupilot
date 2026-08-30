@@ -1081,7 +1081,7 @@ private:
     // Plane.cpp
     void disarm_if_autoland_complete();
     bool trigger_land_abort(const float climb_to_alt_m);
-    void get_osd_roll_pitch_rad(float &roll, float &pitch) const override;
+    void get_osd_attitude_rad(float &roll, float &pitch, float &yaw) override;
     float tecs_hgt_afe(void);
     void get_scheduler_tasks(const AP_Scheduler::Task *&tasks,
                              uint8_t &task_count,
@@ -1174,6 +1174,7 @@ private:
     float apply_throttle_limits(float throttle_in);
     void set_throttle(void);
     void set_takeoff_expected(void);
+    float get_auto_flap_speed() const;
     void set_servos_flaps(void);
     void dspoiler_update(void);
     void airbrake_update(void);
