@@ -407,6 +407,14 @@ Written when the script commands an avoidance manoeuvre towards a DAA target.
 | `DstH` | Horizontal distance to the obstacle (m) |
 | `DstZ` | Vertical distance to the obstacle (+ve is up) (m) |
 | `ObjT` | `OBSTACLE_TYPE` of the obstacle (see table below) |
+| `Age` | Age of the obstacle's reported position (s); 0 means on-board/fresh |
+| `TrR` | Turn radius available at `ROLL_LIMIT_DEG` and the current airspeed (m); 0 when there is no usable airspeed |
+
+`TrR` records the turn radius the standoff sizing assumes at that moment,
+`R = V² / (g · tan φ)`. Compare it against the radius actually flown over the same
+window — airspeed divided by turn rate, or `ATT.Roll` — to check whether the aircraft
+achieves the modelled performance. That comparison is what decides whether a standoff
+sized on the roll limit is enough, or whether the wider `WP_LOITER_RAD` is warranted.
 
 ### DAAG — General aviation aircraft
 
