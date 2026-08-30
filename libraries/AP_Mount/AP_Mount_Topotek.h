@@ -155,6 +155,16 @@ private:
         LENS_UNSUPPORT_TRACK = 0x34,            // this lens does not support tracking
     };
 
+    // memory card state, as last reported by "SDC" (see gimbal_sdcard_analyse()).
+    // UNKNOWN until the first reply arrives - camera-addressed replies can take a
+    // while, so capture attempts must not be blocked on a card that may simply not
+    // have reported in yet
+    enum class SDCardState : uint8_t {
+        UNKNOWN = 0,
+        PRESENT = 1,
+        ABSENT = 2,
+    };
+
     // send text prefix string
     static const char* send_message_prefix;
 
@@ -244,7 +254,7 @@ private:
     bool _is_tracking;                                          // whether to enable the tracking state
     TrackingStatus _last_tracking_state = TrackingStatus::STOPPED_TRACKING; // last tracking state received from gimbal
     uint8_t _last_mode;                                         // mode during latest update, used to detect mode changes and cancel tracking
-    bool _sdcard_status;                                        // memory card status (received from gimbal)
+    SDCardState _sdcard_state = SDCardState::UNKNOWN;           // memory card state, as last reported by the gimbal (see SDCardState)
     bool _last_lock;                                            // last lock mode sent to gimbal, only meaningful once _lock_sent
     bool _lock_sent;                                            // true once set_gimbal_lock() has sent a mode at least once
     bool _got_gimbal_version;                                   // true if gimbal's version has been received
