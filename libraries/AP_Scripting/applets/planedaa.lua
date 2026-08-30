@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-061"
+SCRIPT_VERSION      = "4.8.0-062"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -1087,16 +1087,21 @@ local loiteralt = {
     local target_alt_m = nil
     local target_alt_frame = ALT_FRAME.GLOBAL
 
+    -- Returns true when the loiter is running once this call returns, so the caller can
+    -- decide whether to enter STATE.loitering.  It used to return nil on every path,
+    -- including the three that do not loiter - already active, no current_loc, and the
+    -- vehicle refusing the target - and callers set STATE.loitering regardless, so the
+    -- state machine could claim to be loitering while loiteralt.active was false.
     function loiteralt.start(new_alt_m, new_alt_frame, direction_right, _speed_ms)
         local direction
 
         if loiteralt.active then
-            return nil
+            return true     -- already loitering: the caller's state is correct as it stands
         end
 
         if current_loc == nil then
             gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT ..": loiteralt no current_location")
-            return nil
+            return false
         end
         pre_loiteralt_heading_deg   = math.deg(ahrs:get_yaw_rad())
         target_alt_frame            = new_alt_frame
@@ -1131,7 +1136,7 @@ local loiteralt = {
             loiteralt.stop()
         end
 
-        return nil
+        return loiteralt.active
     end
 
     function loiteralt.aircraft_seen()
@@ -2520,16 +2525,20 @@ local DAA = {
         -- Checked here rather than inside loiteralt.start() so that nothing is announced and
         -- no state is entered: we fall through to monitoring and ordinary bendy avoidance.
         elseif aircraft_avoiding ~= nil and crewed_avoid_alt_m > 0 then
-            gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITER AIRCRAFT: %s", aircraft_avoiding.label))
-            loiteralt.start(crewed_avoid_alt_m, crewed_avoid_alt_frame, true, airspeed_ms)
-            current_state = STATE.loitering
+            if loiteralt.start(crewed_avoid_alt_m, crewed_avoid_alt_frame, true, airspeed_ms) then
+                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITER AIRCRAFT: %s", aircraft_avoiding.label))
+                current_state = STATE.loitering
 
-            gcs:send_named_string("DAA-AVOID", "LOITER")
-            gcs:send_named_float("DAA-LOITER", crewed_avoid_alt_m)
-            gcs:send_named_string("DAA-ARCRFT", aircraft_avoiding.label)
-            gcs:send_named_float("DAA-DIST", aircraft_avoiding.distance_m)
+                gcs:send_named_string("DAA-AVOID", "LOITER")
+                gcs:send_named_float("DAA-LOITER", crewed_avoid_alt_m)
+                gcs:send_named_string("DAA-ARCRFT", aircraft_avoiding.label)
+                gcs:send_named_float("DAA-DIST", aircraft_avoiding.distance_m)
 
-            return
+                return
+            end
+            -- the loiter did not start: do not announce it and do not claim the state.
+            -- Fall through to ordinary bendy-ruler avoidance below.
+            current_state = STATE.monitoring
         else
             current_state = STATE.monitoring
         end
@@ -2559,16 +2568,20 @@ local DAA = {
             -- still fires unconditionally at close range - safer-first. Only a plane in the outer
             -- detection band that will miss beyond well-clear AND is not closing is skipped, and it
             -- then falls through to normal monitoring. A missing/uncertain velocity => conflict.
-            gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITER AIRCRAFT: %s", aircraft_avoiding.label))
-            loiteralt.start(crewed_avoid_alt_m, crewed_avoid_alt_frame, true, airspeed_ms)
-            current_state = STATE.loitering
+            if loiteralt.start(crewed_avoid_alt_m, crewed_avoid_alt_frame, true, airspeed_ms) then
+                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITER AIRCRAFT: %s", aircraft_avoiding.label))
+                current_state = STATE.loitering
 
-            gcs:send_named_string("DAA-AVOID", "LOITER")
-            gcs:send_named_float("DAA-LOITER", crewed_avoid_alt_m)
-            gcs:send_named_string("DAA-ARCRFT", aircraft_avoiding.label)
-            gcs:send_named_float("DAA-DIST", aircraft_avoiding.distance_m)
+                gcs:send_named_string("DAA-AVOID", "LOITER")
+                gcs:send_named_float("DAA-LOITER", crewed_avoid_alt_m)
+                gcs:send_named_string("DAA-ARCRFT", aircraft_avoiding.label)
+                gcs:send_named_float("DAA-DIST", aircraft_avoiding.distance_m)
 
-            return
+                return
+            end
+            -- the loiter did not start: do not announce it and do not claim the state.
+            -- Fall through to ordinary bendy-ruler avoidance below.
+            current_state = STATE.monitoring
         else
             current_state = STATE.monitoring
         end
