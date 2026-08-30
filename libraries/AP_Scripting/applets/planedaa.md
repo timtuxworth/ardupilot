@@ -168,8 +168,8 @@ Collision volumes, and the `FENCE_*` parameters for the altitude/geo fences.
 | `DAA_MARGIN_BIRD` | 100 | m | Avoidance margin for migratory birds. |
 | `DAA_MARGIN_PREY` | 200 | m | Avoidance radius for birds of prey. |
 | `DAA_MARGIN_UAV` | 50 | m | Avoidance radius for UAVs/drones (MAVLink sourced). |
-| `DAA_MARGIN_AIS` | 50 | m | Avoidance radius for AIS ship contacts (MAVLink sourced). |
-| `DAA_MARGIN_PRX` | 50 | m | Avoidance radius for obstacles detected by proximity sensors. |
+| `DAA_MARGIN_AIS` | 50 | m | Avoidance radius for AIS ship contacts. **Not active by default — see "Proximity and AIS obstacles" below.** |
+| `DAA_MARGIN_PRX` | 50 | m | Avoidance radius for obstacles detected by proximity sensors. **Not active by default — see "Proximity and AIS obstacles" below.** |
 | `DAA_BR_RATIO` | 1.5 | | BendyRuler will avoid changing bearing unless the ratio of the previous margin to the newly calculated margin is at least this much. |
 | `DAA_BR_ANGLE` | 45 | deg | BendyRuler resists changing the current bearing if the change exceeds this angle. A change above it is also the point at which the smoothing asks whether there is time to damp it — see `DAA_SLEW_DPS`. |
 | `DAA_AVD_ALT` | 50 | m | Altitude to loiter/descend to when avoiding a crewed aircraft contact. Ignored if zero. |
@@ -441,7 +441,39 @@ The `ObjT` field uses the following `OBSTACLE_TYPE` enumeration:
 | 9  | FENCE_POLYGON_INCLUSION | Polygon inclusion fence |
 | 10 | FENCE_POLYGON_EXCLUSION | Polygon exclusion fence |
 | 11 | FENCE_LUA | Fence defined in Lua |
-| 12 | PROXIMITY | Detected by a proximity sensor, typically close |
-| 13 | AIS | AIS-tracked maritime (ship) vehicle |
+| 12 | PROXIMITY | Detected by a proximity sensor, typically close (not active by default) |
+| 13 | AIS | AIS-tracked maritime (ship) vehicle (not active by default) |
 | 14 | FENCE_ALT_MAX | Max altitude fence (FENCE_TYPE bit 0) |
 | 15 | FENCE_ALT_MIN | Min altitude fence (FENCE_TYPE bit 3) |
+
+## Proximity and AIS obstacles
+
+`PROXIMITY` and `AIS` obstacles are **not active in a default build**, and neither
+`DAA_MARGIN_PRX` nor `DAA_MARGIN_AIS` has any effect unless the whole path is enabled.
+
+Those two obstacle types reach the script from `AP_OADatabase`, and on Plane that database
+does not exist: it is a member of `AP_OAPathPlanner`, which only Copter and Rover
+instantiate. `AP::oadatabase()` is therefore null on Plane and the query returns
+immediately. AIS has a second, independent blocker — `AP_AIS` compiles to dummy methods on
+anything that is not Rover (`AP_AIS_ENABLED == 2`), so nothing decodes vessels in the first
+place.
+
+The query is compiled out by default so it costs no flash. Build it in with:
+
+```
+./waf configure --board <board> --enable-AP_OASCRIPTING --enable-AP_OASCRIPTING_OADB
+```
+
+That flag alone is **not sufficient to make the feature work** on Plane — it only restores
+the query. Making proximity or AIS obstacles actually reach the script still needs:
+
+1. something on the vehicle that owns an `AP_OADatabase`, calls `init()` on it and pumps
+   `process_queue()` / `update()` (roughly 7 KB of RAM at the default sizes, plus the
+   `OA_DB_*` parameters);
+2. for AIS, a non-dummy `AP_AIS` build on Plane;
+3. `OA_DB_EXPIRE` raised well above its 10 s default — AIS is a low-rate source and an
+   anchored vessel need only report every 3 minutes, so a short timeout makes contacts
+   flicker in and out.
+
+`AP_OADatabase` also has no lock around its item array, so a vehicle reading it from the
+scripting thread while its avoidance thread mutates it would need that fixed first.
