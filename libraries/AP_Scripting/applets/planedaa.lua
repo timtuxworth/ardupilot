@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-062"
+SCRIPT_VERSION      = "4.8.0-063"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -545,6 +545,19 @@ local function max_turn_rate_dps(speed_ms)
         return 0.0
     end
     return math.deg(GRAVITY_MSS * math.tan(math.rad(roll_limit_deg)) / speed_ms)
+end
+
+-- Radius of the tightest level turn available at the configured roll limit:
+-- R = V^2 / (g * tan(phi)).  This is what the aircraft can actually fly, and so what
+-- decides whether it can turn away from something in time.  WP_LOITER_RAD is a commanded
+-- loiter setting, not a capability: ArduPlane's own documentation notes that the achieved
+-- loiter radius is determined by ROLL_LIMIT_DEG when WP_LOITER_RAD is small.  Returns 0
+-- when there is no usable speed, and the caller decides what that means.
+local function turn_radius_m(speed_ms)
+    if speed_ms == nil or speed_ms < 1.0 or roll_limit_deg <= 0 then
+        return 0.0
+    end
+    return (speed_ms * speed_ms) / (GRAVITY_MSS * math.tan(math.rad(roll_limit_deg)))
 end
 
 local bearing_inc_deg = DAA_HEADING_INC:get() or DEFAULT_HEADING_INC_DEG
@@ -1300,11 +1313,15 @@ local DAA = {
         if target_loc == nil then
             return
         end
+        -- TrR records the turn radius the sizing assumed at this moment, so a flight log can
+        -- be checked against what the aircraft actually flew: compare it with the achieved
+        -- radius over the same window (airspeed / turn rate, or ATT.Roll).  That is the open
+        -- question behind using the roll limit rather than WP_LOITER_RAD for the standoffs.
         local status, err = pcall(logger.write, logger, "DAAV",
-            'DstO,TLat,TLng,TAlt,TFra,DstH,DstZ,ObjT,Age',
-            'fLLfBffBf',                        -- Formats (L for Lat/Lng, f for Alt)
-            'mDUm-mm-s',                        -- Units (D=lat deg, U=lng deg, m=meter, s=second)
-            '-GG------',                        -- Multipliers (G=1e-7 for L types)
+            'DstO,TLat,TLng,TAlt,TFra,DstH,DstZ,ObjT,Age,TrR',
+            'fLLfBffBff',                       -- Formats (L for Lat/Lng, f for Alt)
+            'mDUm-mm-sm',                       -- Units (D=lat deg, U=lng deg, m=meter, s=second)
+            '-GG-------',                       -- Multipliers (G=1e-7 for L types)
             obstacle.distance_m,                -- DstO - Distance to found obstacle in meters
             target_loc:lat(),                   -- TLat - Latitude of DAA target in degrees
             target_loc:lng(),                   -- TLng - Longitude of DAA target in degrees
@@ -1313,7 +1330,8 @@ local DAA = {
             obstacle.distance_xy,               -- DstH - Horizontal distance to the obstacle
             obstacle.distance_z,                -- DstZ - Vertical distance to the aircraft (+ve is up),
             obstacle.type,                      -- ObjT - the type of the obstacle as an OBSTACLE_TYPE
-            obstacle.timestamp_ms and ((now_ms:tofloat() - obstacle.timestamp_ms) * 0.001) or 0  -- Age - obstacle position age in s (0 = fresh/on-board)
+            obstacle.timestamp_ms and ((now_ms:tofloat() - obstacle.timestamp_ms) * 0.001) or 0,  -- Age - obstacle position age in s (0 = fresh/on-board)
+            turn_radius_m(airspeed_ms)          -- TrR - achievable turn radius at ROLL_LIMIT_DEG and the current airspeed (0 = no usable airspeed)
         )
         if not status then
             gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " log avoid:" .. tostring(err) )
@@ -1359,7 +1377,6 @@ local DAA = {
     -- flag disabled features. Advisory only (GCS text, nothing is changed). Fires on every
     -- enable (incl. switch flips). Messages are kept short (STATUSTEXT truncates ~50 chars).
     function DAA.warnings()
-        local turn_r = math.abs(wp_loiter_rad_m)
         local function warn(sev, msg)
             gcs:send_text(sev, SCRIPT_NAME_SHORT .. ": " .. msg)
         end
@@ -1372,7 +1389,12 @@ local DAA = {
         local adsb_type   = param:get('ADSB_TYPE') or 0
         local cruise_ms   = param:get('AIRSPEED_CRUISE') or 0
 
-        -- turn radius vs avoidance standoffs (WP_LOITER_RAD is the turn radius)
+        -- The turn radius these standoffs are compared against is the achievable one at the
+        -- roll limit, not WP_LOITER_RAD: a standoff only has to clear the turn the aircraft
+        -- will actually fly while avoiding, and it is not loitering when it does that.
+        -- Falls back to WP_LOITER_RAD when no cruise speed is set, so the check still fires.
+        local turn_r = turn_radius_m(cruise_ms)
+        if turn_r <= 0 then turn_r = math.abs(wp_loiter_rad_m) end
         if turn_r > 0 and margin_fence_m < turn_r then
             warn(W, string.format("MARGIN_FENCE %.0f < turn %.0f: fences may thrash", margin_fence_m, turn_r)) end
         if turn_r > 0 and uav_clear_xy < turn_r then
