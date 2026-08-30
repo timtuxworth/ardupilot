@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-060"
+SCRIPT_VERSION      = "4.8.0-061"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -2516,7 +2516,10 @@ local DAA = {
         -- if branch", suppressed on the next line).
         elseif current_state == STATE.hovering or current_state == STATE.avoiding or current_state == STATE.landing then -- luacheck: ignore 542
             -- (deliberately empty)
-        elseif aircraft_avoiding ~= nil then
+        -- DAA_AVD_ALT = 0 disables the loiter-to-altitude, as its documentation says.
+        -- Checked here rather than inside loiteralt.start() so that nothing is announced and
+        -- no state is entered: we fall through to monitoring and ordinary bendy avoidance.
+        elseif aircraft_avoiding ~= nil and crewed_avoid_alt_m > 0 then
             gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITER AIRCRAFT: %s", aircraft_avoiding.label))
             loiteralt.start(crewed_avoid_alt_m, crewed_avoid_alt_frame, true, airspeed_ms)
             current_state = STATE.loitering
@@ -2547,7 +2550,10 @@ local DAA = {
         -- if branch", suppressed on the next line).
         elseif current_state == STATE.hovering or current_state == STATE.avoiding or current_state == STATE.landing then -- luacheck: ignore 542
             -- (deliberately empty)
-        elseif aircraft_avoiding ~= nil and assess_obstacle_motion(aircraft_avoiding).is_conflict then
+        -- DAA_AVD_ALT = 0 disables the loiter-to-altitude (see above).  Tested before
+        -- assess_obstacle_motion() so the CPA work is skipped when the loiter is off.
+        elseif aircraft_avoiding ~= nil and crewed_avoid_alt_m > 0
+                and assess_obstacle_motion(aircraft_avoiding).is_conflict then
             -- CONSERVATIVE CPA gate on the loiter trigger: an aircraft inside the well-clear
             -- radius is always a conflict (assess_obstacle_motion's range check), so the loiter
             -- still fires unconditionally at close range - safer-first. Only a plane in the outer
