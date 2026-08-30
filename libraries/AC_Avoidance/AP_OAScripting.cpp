@@ -74,12 +74,16 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
         distance_m          = distance_new_m;
     }
 
-    // "objects" are stored in the AP_OADatabase - they are typically populated by proximity sensors
+#if AP_OA_SCRIPTING_OADB_ENABLED
+    // "objects" are stored in the AP_OADatabase - they are typically populated by proximity
+    // sensors and by AIS.  See AP_OA_SCRIPTING_OADB_ENABLED: this needs a vehicle that owns
+    // and pumps an AP_OADatabase, which Plane does not have today.
     distance_new_m = _distance_to_object(start_NED_m, end_NED_m, obstacle_found);
     if (distance_new_m < distance_m) {
         obstacle            = obstacle_found;
         distance_m          = distance_new_m;
     }
+#endif  // AP_OA_SCRIPTING_OADB_ENABLED
 
 #if AP_FENCE_ENABLED
     const AC_Fence *fence = AC_Fence::get_singleton();
@@ -256,6 +260,7 @@ bool AP_OAScripting::fence_distance(const Location &loc, uint8_t fence_type, flo
 #endif
 }
 
+#if AP_OA_SCRIPTING_OADB_ENABLED
 // Distance to objects in the AP_OADatabase
 float AP_OAScripting::_distance_to_object(const Vector3f &start_NED_m, const Vector3f end_NED_m, OAObstacle &script_obstacle) const
 {
@@ -301,6 +306,7 @@ float AP_OAScripting::_distance_to_object(const Vector3f &start_NED_m, const Vec
 
     return distance_new_m;
 }
+#endif  // AP_OA_SCRIPTING_OADB_ENABLED
 
 // translate an AP_Avoidance obstacle src_id into an enum for further processing in Lua
 AP_OAScripting::ObstacleType AP_OAScripting::_get_obstacle_type(uint8_t emitter_type, int32_t icao_code)
