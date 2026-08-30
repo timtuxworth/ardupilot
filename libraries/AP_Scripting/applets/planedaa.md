@@ -460,7 +460,7 @@ place.
 
 The query is compiled out by default so it costs no flash. Build it in with:
 
-```
+```bash
 ./waf configure --board <board> --enable-AP_OASCRIPTING --enable-AP_OASCRIPTING_OADB
 ```
 
