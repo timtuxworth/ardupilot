@@ -1241,10 +1241,39 @@ bool AP_Mount_Backend::get_angle_target_to_sysid(MountAngleTarget& angle_rad) co
     if (follow != nullptr &&
         follow->enabled() &&
         follow->get_target_sysid() == (uint32_t)_target_sysid) {
-        Location follow_loc;
-        Vector3f follow_vel_ned;
-        if (follow->get_target_location_and_velocity(follow_loc, follow_vel_ned)) {
-            return get_angle_target_to_location(follow_loc, angle_rad);
+        // use the raw NED-relative-to-origin estimate rather than
+        // get_target_location_and_velocity(), which re-expresses the
+        // altitude in FOLL_ALT_TYPE's frame; for ABOVE_HOME (Copter's
+        // default) AP_Follow bakes the *target's* own home-relative
+        // altitude into its internal NED estimate as if it were relative
+        // to the *follower's* home, at ingestion time - wrong whenever the
+        // two vehicles don't share a home, and not something a different
+        // getter can avoid since the contamination happens before any
+        // getter runs. Override with our own independently-tracked
+        // absolute altitude below, which has no such ambiguity.
+        Vector3p follow_pos_ned_m;
+        Vector3f follow_vel_ned_ms, follow_accel_ned_mss;
+        if (follow->get_target_pos_vel_accel_NED_m(follow_pos_ned_m, follow_vel_ned_ms, follow_accel_ned_mss)) {
+            Location follow_loc;
+            if (AP::ahrs().get_location_from_origin_offset_NED(follow_loc, follow_pos_ned_m)) {
+                if (_target_sysid_location.initialised()) {
+                    follow_loc.set_alt_cm(_target_sysid_location.alt, Location::AltFrame::ABSOLUTE);
+                }
+                if (get_angle_target_to_location(follow_loc, angle_rad)) {
+                    return true;
+                }
+            }
+            // AP_Follow has a usable estimate but we couldn't turn it into
+            // an angle (eg terrain data unavailable); fall through to the
+            // timeout-based path below rather than just failing outright
+        } else {
+            // we're relying on AP_Follow for this target and it currently
+            // has no estimate (eg its own FOLL_TIMEOUT elapsed, which may
+            // be shorter than AP_MOUNT_SYSID_TIMEOUT_MS) - hold the last
+            // commanded angle rather than falling back to the raw,
+            // differently-timed location below, which would cause a
+            // visible snap back to a less current position
+            return false;
         }
     }
 #endif

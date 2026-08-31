@@ -8208,6 +8208,52 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
                     "Mount should continue tracking via AP_Follow's kinematic estimate "
                     "while the target is moving and telemetry is temporarily stale "
                     "(pitch was %f before gap, %f after)" % (pre_gap_pitch, post_gap_pitch))
+
+            self.progress("Testing mount uses absolute altitude, not AP_Follow's home-relative one")
+            # a stationary target at a modest, non-saturating elevation
+            (alt_test_lat, alt_test_lon) = mavextra.gps_offset(start.lat, start.lng, 0, 30)
+            alt_test_abs_alt_m = start.alt + 20  # true, unambiguous AMSL altitude
+            # establish a ground-truth pitch using the non-AP_Follow (bare
+            # timeout) path, which always uses the packet's absolute
+            # altitude and so cannot be affected by this bug
+            self.set_parameters({"FOLL_ENABLE": 0})
+            self.mav.mav.global_position_int_send(
+                0, # time boot ms
+                int(alt_test_lat * 1e7),
+                int(alt_test_lon * 1e7),
+                int(alt_test_abs_alt_m * 1000), # mm alt amsl - ground truth
+                int(alt_test_abs_alt_m * 1000),  # mm above home; irrelevant here
+                0, 0, 0, 0,
+            )
+            self.delay_sim_time(1, reason="let the mount settle on the ground-truth target")
+            expected_pitch = poll_mount_pitch_deg()
+
+            # now re-enable AP_Follow and send the *same* target position,
+            # but with a relative_alt that only makes sense if the target's
+            # home is 50m lower than ours - AP_Follow's ABOVE_HOME handling
+            # would (if not corrected for) resolve that home-relative value
+            # against *our* home instead, putting the target 50m higher
+            # than it really is and producing a visibly different pitch
+            self.set_parameters({"FOLL_ENABLE": 1})
+            relalt_if_target_home_50m_lower_m = alt_test_abs_alt_m - (start.alt - 30 - 50)
+            tstart = self.get_sim_time()
+            while self.get_sim_time_cached() - tstart < 1:
+                self.mav.mav.global_position_int_send(
+                    int(self.get_sim_time_cached() * 1000), # time boot ms
+                    int(alt_test_lat * 1e7),
+                    int(alt_test_lon * 1e7),
+                    int(alt_test_abs_alt_m * 1000), # mm alt amsl - ground truth
+                    int(relalt_if_target_home_50m_lower_m * 1000), # mm above (a different) home
+                    0, 0, 0, 0,
+                )
+                self.delay_sim_time(0.1, reason="feed AP_Follow the mismatched-home target")
+            got_pitch = poll_mount_pitch_deg()
+            if abs(got_pitch - expected_pitch) > 3:
+                raise NotAchievedException(
+                    "Mount should use the target's absolute altitude, not AP_Follow's "
+                    "home-relative one which assumes a shared home "
+                    "(expected pitch %f, got %f)" % (expected_pitch, got_pitch))
+
             self.context_pop()
 
             self.set_mount_mode(mavutil.mavlink.MAV_MOUNT_MODE_NEUTRAL)
