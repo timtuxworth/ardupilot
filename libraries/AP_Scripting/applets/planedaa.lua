@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-068"
+SCRIPT_VERSION      = "4.8.0-069"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -158,7 +158,7 @@ assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 34), SCRIPT_NAME_SHO
     // @Param: DAA_ACT_FN
     // @DisplayName: DAA Activation
     // @Description: Disable the DAA capability or turn it off (defaults to on)
-    // @Range: 300 307
+    // @Range: 300 308
 --]]
 DAA_ACT_FN = bind_add_param("ACT_FN", 1, 308)
 
@@ -275,9 +275,8 @@ DAA_AVD_ALT = bind_add_param('AVD_ALT', 14, 50)
 --[[
     // @Param: DAA_AVD_ALT_TP
     // @DisplayName: The frame of the DAA_AVD_ALT
-    // @Description:  DAA will loiter and descent to DAA_AVD_ALT in this frame. 0: Absolute, 1: Above Home, 2: Above Origin, 3: Above Terrain (default)
-    // @Range: 20 5000
-    // @Increment: 5
+    // @Description:  DAA will loiter and descent to DAA_AVD_ALT in this frame.
+    // @Values: 0:Absolute,1:Above Home,2:Above Origin,3:Above Terrain
     // @User: Standard
 --]]
 DAA_AVD_ALT_TP = bind_add_param('AVD_ALT_TP', 15, 3)
@@ -414,7 +413,7 @@ DAA_CPA_MIN = bind_add_param('CPA_MIN', 27, 2)
 --[[
     // @Param: DAA_TRAP_ACT
     // @DisplayName: Trapped-failsafe action
-    // @Description: What to do when avoidance cannot find a way out (boxed in, or unable to keep clear of an obstacle for DAA_TRAP_S). 0 disables the trapped-failsafe entirely (avoidance just keeps trying). For a VTOL, QLOITER stops forward flight and hovers (zero turn radius) - the safest way out of a tight space. If the aircraft has no VTOL (Q_ENABLE=0) the VTOL options fall back to RTL. Trapped by a fixed obstacle (fence) is sticky (held until the pilot changes mode); trapped by a moving obstacle (drone/aircraft) recovers to the previous mode after DAA_TRAP_CLR_S. NOTE: the fence branch of the trap stands down when the core fence library will refuse a scripted mode change - i.e. FENCE_ACTION is non-zero AND FENCE_OPTIONS bit0 (DISABLE_MODE_CHANGE) is set - because in that case the core already handles the breach and the trap's mode change would only be denied. The aircraft near-miss branch (AVD_NMAC_XY/Z) is unaffected.
+    // @Description: What to do when the vehicle has been compromised continuously for DAA_TRAP_S - a fence breach, or a crewed aircraft inside the AVD_NMAC_XY/Z near-miss volume. (Detecting that the bendy ruler is boxed in - no clear heading at all - is not implemented yet, so being boxed in without a breach does not fire the failsafe.) 0 disables the trapped-failsafe entirely (avoidance just keeps trying). For a VTOL, QLOITER stops forward flight and hovers (zero turn radius) - the safest way out of a tight space. If the aircraft has no VTOL (Q_ENABLE=0) the VTOL options fall back to RTL. Trapped by a fixed obstacle (fence) is sticky (held until the pilot changes mode); trapped by a moving obstacle (a crewed aircraft) recovers to the previous mode after DAA_TRAP_CLR_S. NOTE: the fence branch of the trap stands down when the core fence library will refuse a scripted mode change - i.e. FENCE_ACTION is non-zero AND FENCE_OPTIONS bit0 (DISABLE_MODE_CHANGE) is set - because in that case the core already handles the breach and the trap's mode change would only be denied. The aircraft near-miss branch (AVD_NMAC_XY/Z) is unaffected.
     // @Values: 0:Disabled,1:RTL,2:QRTL,3:QLOITER,4:QLAND
     // @User: Standard
 --]]
@@ -423,7 +422,7 @@ DAA_TRAP_ACT = bind_add_param('TRAP_ACT', 28, 0)
 --[[
     // @Param: DAA_TRAP_S
     // @DisplayName: Trapped-failsafe trigger time
-    // @Description: Avoidance must be unable to find a way out continuously for this long before the DAA_TRAP_ACT failsafe fires. Prevents transient clutter from triggering it.
+    // @Description: The vehicle must be compromised continuously for this long before the DAA_TRAP_ACT failsafe fires - a fence breach, or a crewed aircraft inside the AVD_NMAC_XY/Z near-miss volume. Prevents transient clutter from triggering it.
     // @Units: s
     // @Range: 0 30
     // @Increment: 0.5
@@ -434,7 +433,7 @@ DAA_TRAP_S = bind_add_param('TRAP_S', 29, 5)
 --[[
     // @Param: DAA_TRAP_CLR_S
     // @DisplayName: Trapped-failsafe recover time
-    // @Description: For a trap caused by a MOVING obstacle (drone/aircraft), resume the previous mode this long after the failsafe fired, on the assumption the obstacle has passed (if it has not, forward flight simply re-triggers the failsafe). A trap caused by a fixed obstacle (fence) is not auto-recovered - it is held until the pilot changes mode.
+    // @Description: For a trap caused by a MOVING obstacle (a crewed aircraft), resume the previous mode this long after the failsafe fired, on the assumption the obstacle has passed (if it has not, forward flight simply re-triggers the failsafe). A trap caused by a fixed obstacle (fence) is not auto-recovered - it is held until the pilot changes mode.
     // @Units: s
     // @Range: 1 60
     // @Increment: 1
@@ -512,7 +511,10 @@ local margin_proximity_m    = DAA_MARGIN_PRX:get()
 local refresh_period_ms     = 1000.0 / math.max(DAA_UPDATE_RATE:get(), 1.0)
 local bendy_ratio           = DAA_BR_RATIO:get()
 local bendy_angle           = DAA_BR_ANGLE:get()
-local wp_loiter_rad_m       = WP_LOITER_RAD:get()
+-- WP_LOITER_RAD is signed: negative selects a counter-clockwise loiter.  Every use here
+-- wants the magnitude - as a distance, as a reposition radius, and as a turn-radius stand-in -
+-- and the loiter direction is carried separately, so take the sign out once, at the source.
+local wp_loiter_rad_m       = math.abs(WP_LOITER_RAD:get())
 local crewed_avoid_alt_m    = DAA_AVD_ALT:get()
 local crewed_avoid_alt_frame = DAA_AVD_ALT_TP:get()
 local daa_alert             = DAA_AVD_ALERT:get()
@@ -704,7 +706,7 @@ local function get_vehicle_state()
         refresh_period_ms     = 1000.0 / math.max(DAA_UPDATE_RATE:get(), 1.0)
         bendy_ratio           = DAA_BR_RATIO:get()
         bendy_angle           = DAA_BR_ANGLE:get()
-        wp_loiter_rad_m       = WP_LOITER_RAD:get()
+        wp_loiter_rad_m       = math.abs(WP_LOITER_RAD:get())
         crewed_avoid_alt_m    = DAA_AVD_ALT:get()
         crewed_avoid_alt_frame  = DAA_AVD_ALT_TP:get()
         daa_alert             = DAA_AVD_ALERT:get()
@@ -1173,8 +1175,13 @@ local loiteralt = {
             end
         end
         if previous_mode >= 0 and previous_mode ~= PLANE_MODE.GUIDED then
-            vehicle:set_mode(previous_mode)
-            gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": Loiter Done set mode: %s", get_mode_string(previous_mode) ))
+            if vehicle:set_mode(previous_mode) then
+                gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": Loiter Done set mode: %s", get_mode_string(previous_mode) ))
+            else
+                -- say so rather than announcing a handback that did not happen: the vehicle
+                -- is still in GUIDED on the loiter target and the pilot needs to know
+                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(": Loiter Done but %s REFUSED - still in Guided", get_mode_string(previous_mode) ))
+            end
             gcs:send_named_string("DAA-AVOID", "")
             gcs:send_named_float("DAA-LOITER", 0.0)
         end
@@ -1402,7 +1409,7 @@ local DAA = {
         -- will actually fly while avoiding, and it is not loitering when it does that.
         -- Falls back to WP_LOITER_RAD when no cruise speed is set, so the check still fires.
         local turn_r = turn_radius_m(cruise_ms)
-        if turn_r <= 0 then turn_r = math.abs(wp_loiter_rad_m) end
+        if turn_r <= 0 then turn_r = wp_loiter_rad_m end
         if turn_r > 0 and margin_fence_m < turn_r then
             warn(W, string.format("MARGIN_FENCE %.0f < turn %.0f: fences may thrash", margin_fence_m, turn_r)) end
         if turn_r > 0 and uav_clear_xy < turn_r then
@@ -2068,30 +2075,20 @@ local DAA = {
     end
 
 
-    -- detect flying objects or fences when flying towards navigation_target_loc
-    function DAA.detect()
-        -- TODO be smarter about re-populating this
-        local obstacle_distance_m = FLT_MAX
-        obstacle_avoiding = nil
-        aircraft_avoiding = nil
-
-        -- we want to calculate avoidance towards the current NAVIGATION TARGET (navigation_target_loc) - coping to target_loc to avoid changing the copy/pasted code
-        if navigation_target_loc == nil or current_loc == nil then
-            gcs:send_text(MAV_SEVERITY.ERROR, " AVOIDING: NO TARGET ")
-            return
-        end
-        local target_loc = navigation_target_loc:copy()
-
-        local bearing_deg       = math.deg(current_loc:get_bearing(target_loc))
-        local best_bearing_deg  = bearing_deg
-        local best_distance_m   = -FLT_MAX
-
-        local distance_to_target_m = limit_distance(current_loc, target_loc, bearing_deg)
-        -- If the full distance is less than 20m, no avoidance is needed
+    -- Sweep for the heading that best clears the obstacles between here and target_loc.
+    -- Returns the updated best_distance_m and best_bearing_deg; obstacle_avoiding is an
+    -- upvalue and is updated in place as closer obstacles are found.
+    local function sweep_for_heading(bearing_deg, distance_to_target_m, target_loc,
+                                     best_distance_m, best_bearing_deg)
+        -- Under 20 m to the target there is nothing useful to sweep for.  Only the sweep
+        -- declines: detect_aircraft() and detect_altitude_fence() are independent of it, and
+        -- returning from DAA.detect() here - as this check used to - cleared aircraft_avoiding
+        -- and then suppressed traffic alerts, NMAC, the trapped failsafe, the aircraft loiter
+        -- and the altitude clamp for as long as the target stayed close.
         if distance_to_target_m < 20 then
-            return nil
+            return best_distance_m, best_bearing_deg
         end
-
+        local obstacle_distance_m = FLT_MAX
         -- Try increments around a circle, alternating left and right. The first heading
         -- that clears all obstacles for two look-ahead steps wins (a bounded downwind
         -- preference is applied afterwards, once we know we are avoiding).
@@ -2180,6 +2177,30 @@ local DAA = {
                 end
             end
         end
+        return best_distance_m, best_bearing_deg
+    end
+
+    -- detect flying objects or fences when flying towards navigation_target_loc
+    function DAA.detect()
+        -- TODO be smarter about re-populating this
+        obstacle_avoiding = nil
+        aircraft_avoiding = nil
+
+        -- we want to calculate avoidance towards the current NAVIGATION TARGET (navigation_target_loc) - coping to target_loc to avoid changing the copy/pasted code
+        if navigation_target_loc == nil or current_loc == nil then
+            gcs:send_text(MAV_SEVERITY.ERROR, " AVOIDING: NO TARGET ")
+            return
+        end
+        local target_loc = navigation_target_loc:copy()
+
+        local bearing_deg       = math.deg(current_loc:get_bearing(target_loc))
+        local best_bearing_deg  = bearing_deg
+        local best_distance_m   = -FLT_MAX
+
+        local distance_to_target_m = limit_distance(current_loc, target_loc, bearing_deg)
+        best_distance_m, best_bearing_deg =
+                sweep_for_heading(bearing_deg, distance_to_target_m, target_loc,
+                                  best_distance_m, best_bearing_deg)
 
         -- we need to independently detect aircraft because even if an aircraft may not be the closest obstacle found by bendy ruler, we may still need to deal with it
         -- in other words, sometimes aircraft have higher priority than any other obstacles
@@ -2779,9 +2800,14 @@ local DAA = {
         if trap_dynamic and (now_ms - trap_trigger_ms) >= (trap_clr_s * 1000) then
             -- transient moving-obstacle squeeze: resume the mission; if the obstacle is
             -- still there, forward flight will simply re-trigger the failsafe
-            if trap_prev_mode >= 0 then vehicle:set_mode(trap_prev_mode) end
-            gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(
-                ": trap clear -> resume %s", get_mode_string(trap_prev_mode)))
+            local resumed = (trap_prev_mode >= 0) and vehicle:set_mode(trap_prev_mode)
+            if resumed then
+                gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(
+                    ": trap clear -> resume %s", get_mode_string(trap_prev_mode)))
+            else
+                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(
+                    ": trap clear but resume %s REFUSED", get_mode_string(trap_prev_mode)))
+            end
             gcs:send_named_string("DAA-AVOID", "")
             trap_active = false
             trap_since_ms = uint32_t(0)
@@ -2845,7 +2871,7 @@ end
 function Protected_Wrapper()
     local success, err = pcall(update)
     if not success then
-       gcs:send_text(0, SCRIPT_NAME_SHORT .. ": Error: " .. err)
+       gcs:send_text(0, SCRIPT_NAME_SHORT .. ": Error: " .. tostring(err))
        -- when we fault we run the update function again after 1s, slowing it
        -- down a bit so we don't flood the console with errors
        return Protected_Wrapper, 1000
