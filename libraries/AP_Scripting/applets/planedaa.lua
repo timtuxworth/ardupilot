@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-070"
+SCRIPT_VERSION      = "4.8.0-071"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -2478,35 +2478,9 @@ local DAA = {
     end
 
     local function avoid_obstacle(new_target_loc, obstacle)
-        if obstacle == nil then -- no obstacle, so clear any specific avoidance we might have been doing
-            if current_state == STATE.loitering  and false then
-                if loiteralt.stop(false) then
-                    gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": loiteralt.stop NO OBSTACLE" ))
-                    current_state = STATE.monitoring
-                end
-            end
-            -- reset the target back to the original target
+        if obstacle == nil then
+            -- no obstacle: reset the target back to the original target
             new_target_loc = nil
-        elseif obstacle.type == OBSTACLE_TYPE.CREWED_AIRCRAFT and false then
-            -- depending on the obstacle we might do different things. Specifically if the obstacle is a crewed aircraft
-            -- in Canada we want to do a "Right 2" circuit descending to XXX altitude
-            -- which for now we are doing by simply doing a loiter to alt in guided mode
-
-            -- we might already be doing a loiter because of this aircraft. As long as it's far enough away, thats all we need to do
-            if obstacle == aircraft_avoiding then
-                return
-            end
-
-            loiteralt.start(crewed_avoid_alt_m, crewed_avoid_alt_frame, true, airspeed_ms)
-            current_state = STATE.loitering
-
-            gcs:send_named_string("DAA-AVOID", "loiter")
-            if aircraft_avoiding ~= nil then
-                gcs:send_named_string("DAA-ARCRFT", aircraft_avoiding.label)
-            end
-            gcs:send_named_float("DAA-LOITER", crewed_avoid_alt_m)
-
-            return
         end
         -- if we have a new target - update it if it's different from our current target otherwise revert to the original target
         if set_avoid_location(new_target_loc) and navigation_target_loc ~= nil then
@@ -2564,50 +2538,6 @@ local DAA = {
             end
         end
         loiteralt.update()
-    end
-
-    -- execute avoidance maneuvers depending on the nature of the obstacle
-    function DAA.avoidstates(new_target_loc)
-        if daa_action == 0 then
-            return              -- parameter DAA_AVOID can be used to disable avoidance
-        end
-        if current_state == STATE.loitering or current_state == STATE.loitering_avoiding then
-            do_loitering()
-            if obstacle_avoiding ~= nil then
-                current_state = STATE.loitering_avoiding
-                avoid_obstacle(new_target_loc,obstacle_avoiding)
-            else
-                current_state = STATE.loitering
-            end
-            return
-        -- while mid-manoeuvre (hovering/avoiding/landing) don't re-decide: match here so the
-        -- chain skips the loiter trigger and the monitoring reset, then fall through to
-        -- avoid_obstacle() below. The branch is intentionally empty (luacheck 542 = "empty
-        -- if branch", suppressed on the next line).
-        elseif current_state == STATE.hovering or current_state == STATE.avoiding or current_state == STATE.landing then -- luacheck: ignore 542
-            -- (deliberately empty)
-        -- DAA_AVD_ALT = 0 disables the loiter-to-altitude, as its documentation says.
-        -- Checked here rather than inside loiteralt.start() so that nothing is announced and
-        -- no state is entered: we fall through to monitoring and ordinary bendy avoidance.
-        elseif aircraft_avoiding ~= nil and crewed_avoid_alt_m > 0 then
-            if loiteralt.start(crewed_avoid_alt_m, crewed_avoid_alt_frame, true, airspeed_ms) then
-                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITER AIRCRAFT: %s", aircraft_avoiding.label))
-                current_state = STATE.loitering
-
-                gcs:send_named_string("DAA-AVOID", "LOITER")
-                gcs:send_named_float("DAA-LOITER", crewed_avoid_alt_m)
-                gcs:send_named_string("DAA-ARCRFT", aircraft_avoiding.label)
-                gcs:send_named_float("DAA-DIST", aircraft_avoiding.distance_m)
-
-                return
-            end
-            -- the loiter did not start: do not announce it and do not claim the state.
-            -- Fall through to ordinary bendy-ruler avoidance below.
-            current_state = STATE.monitoring
-        else
-            current_state = STATE.monitoring
-        end
-        avoid_obstacle(new_target_loc, obstacle_avoiding)
     end
 
     -- execute avoidance maneuvers depending on the nature of the obstacle
