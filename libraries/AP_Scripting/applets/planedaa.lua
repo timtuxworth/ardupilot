@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-064"
+SCRIPT_VERSION      = "4.8.0-065"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -1164,7 +1164,7 @@ local loiteralt = {
                 return false
             end
         end
-        if previous_mode > 0 and previous_mode ~= PLANE_MODE.GUIDED then
+        if previous_mode >= 0 and previous_mode ~= PLANE_MODE.GUIDED then
             vehicle:set_mode(previous_mode)
             gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": Loiter Done set mode: %s", get_mode_string(previous_mode) ))
             gcs:send_named_string("DAA-AVOID", "")
@@ -2762,7 +2762,7 @@ local DAA = {
         if trap_dynamic and (now_ms - trap_trigger_ms) >= (trap_clr_s * 1000) then
             -- transient moving-obstacle squeeze: resume the mission; if the obstacle is
             -- still there, forward flight will simply re-trigger the failsafe
-            if trap_prev_mode > 0 then vehicle:set_mode(trap_prev_mode) end
+            if trap_prev_mode >= 0 then vehicle:set_mode(trap_prev_mode) end
             gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(
                 ": trap clear -> resume %s", get_mode_string(trap_prev_mode)))
             gcs:send_named_string("DAA-AVOID", "")
