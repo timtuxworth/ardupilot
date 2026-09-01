@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-065"
+SCRIPT_VERSION      = "4.8.0-066"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -1135,7 +1135,14 @@ local loiteralt = {
                 direction, target_alt_m, target_alt_frame, mavlink_wrappers.alt_frame_to_mavlink(target_alt_frame), radius_m ))
 
         previous_mode = vehicle:get_mode()
-        vehicle:set_mode(PLANE_MODE.GUIDED)
+        if not vehicle:set_mode(PLANE_MODE.GUIDED) then
+            -- never command a target we cannot fly: without GUIDED the reposition either
+            -- is refused too or is silently ignored, and previous_mode must not be left
+            -- armed for a mode change that did not happen
+            gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. ": loiteralt GUIDED refused")
+            previous_mode = -1
+            return false
+        end
 
         if mavlink_wrappers.set_vehicle_target_location({lat    = loiteralt_loc:lat(),
                                                         lng     = loiteralt_loc:lng(),
@@ -2738,7 +2745,16 @@ local DAA = {
                     trap_prev_mode  = mode_now
                     trap_fs_mode    = resolve_trap_mode(mode_now)
                     trap_trigger_ms = now_ms
-                    vehicle:set_mode(trap_fs_mode)
+                    if not vehicle:set_mode(trap_fs_mode) then
+                        -- do not claim a failsafe that never engaged: trap_active would
+                        -- be released again next cycle by the mode-changed check, which
+                        -- would blame a pilot who never touched anything
+                        gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(
+                            ": TRAPPED - %s refused", get_mode_string(trap_fs_mode)))
+                        trap_prev_mode  = -1
+                        trap_since_ms   = uint32_t(0)
+                        return false
+                    end
                     trap_active     = true
                     gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(
                         ": TRAPPED (%s) -> %s", trap_dynamic and "moving" or "fence", get_mode_string(trap_fs_mode)))
