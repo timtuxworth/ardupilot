@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-067"
+SCRIPT_VERSION      = "4.8.0-068"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -45,6 +45,9 @@ PLANE_MODE          = {MANUAL = 0, CIRCLE = 1, STABILIZE = 2, TRAINING = 3, ACRO
                         AUTOTUNE = 8, AUTO=10, RTL=11, LOITER=12, TAKEOFF = 13, AVOID_ADSB = 14, GUIDED=15,
                         INITIALISING = 16, QSTABILIZE = 17, QHOVER=18, QLOITER=19, QLAND = 20, QRTL=21,
                         QAUTOTUNE = 22, QACRO = 23, THERMAL = 24, LOITER_ALT_QLAND = 25, AUTOLAND = 26}
+-- MAV_DO_REPOSITION_FLAGS: setting CHANGE_MODE makes the reposition switch to GUIDED
+-- itself, so the mode change and the target load are one operation rather than two
+MAV_DO_REPOSITION_FLAGS = {CHANGE_MODE = 1}
 
 ALT_FRAME           = {GLOBAL = 0, RELATIVE = 1, ORIGIN = 2, TERRAIN = 3}
 
@@ -1134,32 +1137,24 @@ local loiteralt = {
         gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": LOITER %s to %.0f/%.0f(%.0f) alt radius %.0f m",
                 direction, target_alt_m, target_alt_frame, mavlink_wrappers.alt_frame_to_mavlink(target_alt_frame), radius_m ))
 
+        -- Ask the reposition to change mode itself.  Every rejection in Plane's
+        -- handle_command_int_do_reposition() - bad location, failed sanitize(), outside the
+        -- fence - returns before it touches the mode, so a refused loiter leaves the
+        -- vehicle exactly where it was and there is nothing to undo.  Switching to GUIDED
+        -- here first would mean owning that undo, and getting it wrong strands the aircraft
+        -- in GUIDED with loiteralt.active false, which nothing recovers from.
         previous_mode = vehicle:get_mode()
-        if not vehicle:set_mode(PLANE_MODE.GUIDED) then
-            -- never command a target we cannot fly: without GUIDED the reposition either
-            -- is refused too or is silently ignored, and previous_mode must not be left
-            -- armed for a mode change that did not happen
-            gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. ": loiteralt GUIDED refused")
-            previous_mode = -1
-            return false
-        end
-
         if mavlink_wrappers.set_vehicle_target_location({lat    = loiteralt_loc:lat(),
                                                         lng     = loiteralt_loc:lng(),
                                                         alt     = target_alt_m,
                                                         frame   = target_alt_frame,
                                                         radius  = radius_m,
-                                                        yaw     = 0 }) then
+                                                        yaw     = 0,
+                                                        bitmask = MAV_DO_REPOSITION_FLAGS.CHANGE_MODE }) then
             loiteralt.active = true
         else
-            gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": loiteralt.stop set_vehicle FAILED" ))
-            -- force past the DAA_LTR_COOL_S hold: it is anti-thrash hysteresis for a
-            -- RUNNING loiter, and has no business holding one that never began.  An
-            -- unforced stop() here returns false whenever the hold happens to be warm,
-            -- leaving the aircraft in GUIDED with loiteralt.active false - a state nothing
-            -- recovers, because loiteralt.update() and DAA.clear_avoidance() both act only
-            -- when active is true.
-            loiteralt.stop(true)
+            gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": loiteralt set_vehicle FAILED" ))
+            previous_mode = -1
         end
 
         return loiteralt.active
