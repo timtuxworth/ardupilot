@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-066"
+SCRIPT_VERSION      = "4.8.0-067"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -1153,7 +1153,13 @@ local loiteralt = {
             loiteralt.active = true
         else
             gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": loiteralt.stop set_vehicle FAILED" ))
-            loiteralt.stop()
+            -- force past the DAA_LTR_COOL_S hold: it is anti-thrash hysteresis for a
+            -- RUNNING loiter, and has no business holding one that never began.  An
+            -- unforced stop() here returns false whenever the hold happens to be warm,
+            -- leaving the aircraft in GUIDED with loiteralt.active false - a state nothing
+            -- recovers, because loiteralt.update() and DAA.clear_avoidance() both act only
+            -- when active is true.
+            loiteralt.stop(true)
         end
 
         return loiteralt.active
