@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-069"
+SCRIPT_VERSION      = "4.8.0-070"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -1673,6 +1673,51 @@ local DAA = {
         keep the LAST FLOWN bearing (known clear) rather than a mirrored one that
         was never clearance-checked.
     --]]
+    -- (2) Side commitment: once a side is chosen, hold it until the sweep has wanted the
+    -- other one continuously for DAA_SIDE_HOLD_S.  Returns the bearing to fly.
+    local function apply_side_commitment(bearing, side, pass_behind)
+        if side_hold_s <= 0 then
+            return bearing
+        end
+        if committed_side_sign == 0 then
+            -- fresh episode: commit; prefer passing behind a moving obstacle
+            committed_side_sign = (pass_behind ~= 0) and pass_behind or side
+            side_flip_pending = false
+            return bearing
+        end
+        if side == 0 or side == committed_side_sign then
+            side_flip_pending = false
+            return bearing
+        end
+        -- sweep wants the opposite side: only honour it once it has persisted; meanwhile
+        -- hold the last flown (clearance-proven) bearing, do NOT mirror
+        if not side_flip_pending then
+            side_flip_pending = true
+            side_flip_want_ms = now_ms
+        end
+        if (now_ms - side_flip_want_ms) < (side_hold_s * 1000) then
+            return last_avoid_bearing_deg
+        end
+        committed_side_sign = side
+        side_flip_pending = false
+        return bearing
+    end
+
+    -- (3) Heading slew-rate limit, for small changes only - large turns bypass this.
+    local function apply_slew_limit(bearing)
+        if slew_dps <= 0 or last_avoid_bearing_deg == nil then
+            return bearing
+        end
+        local dt = (now_ms - last_cmd_bearing_ms):tofloat() / 1000.0
+        local max_step = slew_dps * dt
+        if max_step <= 0 then
+            return bearing
+        end
+        local d = wrap_180(bearing - last_avoid_bearing_deg)
+        if d > max_step then d = max_step elseif d < -max_step then d = -max_step end
+        return wrap_360(last_avoid_bearing_deg + d)
+    end
+
     local function refine_avoidance_bearing(direct_bearing_deg, raw_bearing_deg, raw_distance_m, motion, obstacle)
         local pass_behind = motion.pass_behind
         local ttc_s = motion.ttc
@@ -1704,41 +1749,10 @@ local DAA = {
             committed_side_sign = (last_avoid_bearing_deg == nil) and 0 or side
             side_flip_pending = false
         else
-            -- small adjustment only: damp the jitter
-            -- (2) side commitment ('side' was computed above from this same bearing)
-            if side_hold_s > 0 then
-                if committed_side_sign == 0 then
-                    -- fresh episode: commit; prefer passing behind a moving obstacle
-                    committed_side_sign = (pass_behind ~= 0) and pass_behind or side
-                    side_flip_pending = false
-                elseif side ~= 0 and side ~= committed_side_sign then
-                    -- sweep wants the opposite side: only honour it once it has persisted;
-                    -- meanwhile hold the last flown (clearance-proven) bearing, do NOT mirror
-                    if not side_flip_pending then
-                        side_flip_pending = true
-                        side_flip_want_ms = now_ms
-                    end
-                    if (now_ms - side_flip_want_ms) < (side_hold_s * 1000) then
-                        bearing = last_avoid_bearing_deg
-                    else
-                        committed_side_sign = side
-                        side_flip_pending = false
-                    end
-                else
-                    side_flip_pending = false
-                end
-            end
-
-            -- (3) heading slew-rate limit (small changes only; large turns bypassed above)
-            if slew_dps > 0 and last_avoid_bearing_deg ~= nil then
-                local dt = (now_ms - last_cmd_bearing_ms):tofloat() / 1000.0
-                local max_step = slew_dps * dt
-                if max_step > 0 then
-                    local d = wrap_180(bearing - last_avoid_bearing_deg)
-                    if d > max_step then d = max_step elseif d < -max_step then d = -max_step end
-                    bearing = wrap_360(last_avoid_bearing_deg + d)
-                end
-            end
+            -- small adjustment only: damp the jitter ('side' was computed above from this
+            -- same bearing)
+            bearing = apply_side_commitment(bearing, side, pass_behind)
+            bearing = apply_slew_limit(bearing)
         end
         last_cmd_bearing_ms = now_ms
 
@@ -2746,6 +2760,32 @@ local DAA = {
         return false, false
     end
 
+    -- Arm the trapped failsafe: latch the cause, commit the mode change, announce it.
+    -- Returns true if the failsafe took control, false if the mode change was refused.
+    local function trap_engage(mode_now, cause_is_dynamic)
+        -- classify from the cause the compromise check reported, not from
+        -- whatever the bendy ruler happens to be closest to right now
+        trap_dynamic    = cause_is_dynamic
+        trap_prev_mode  = mode_now
+        trap_fs_mode    = resolve_trap_mode(mode_now)
+        trap_trigger_ms = now_ms
+        if not vehicle:set_mode(trap_fs_mode) then
+            -- do not claim a failsafe that never engaged: trap_active would be released
+            -- again next cycle by the mode-changed check, which would blame a pilot who
+            -- never touched anything
+            gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(
+                ": TRAPPED - %s refused", get_mode_string(trap_fs_mode)))
+            trap_prev_mode  = -1
+            trap_since_ms   = uint32_t(0)
+            return false
+        end
+        trap_active     = true
+        gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(
+            ": TRAPPED (%s) -> %s", trap_dynamic and "moving" or "fence", get_mode_string(trap_fs_mode)))
+        gcs:send_named_string("DAA-AVOID", "TRAPPED")
+        return true
+    end
+
     -- Trapped-failsafe state machine. Returns true while the failsafe is controlling the
     -- vehicle (so update() skips normal avoidance). See DAA_TRAP_ACT/S/CLR_S.
     function DAA.trap_update()
@@ -2758,35 +2798,15 @@ local DAA = {
 
         if not trap_active then
             local compromised, cause_is_dynamic = daa_compromised_now()
-            if compromised then
-                if trap_since_ms == uint32_t(0) then trap_since_ms = now_ms end
-                if (now_ms - trap_since_ms) >= (trap_s * 1000) then
-                    -- classify from the cause the compromise check reported, not from
-                    -- whatever the bendy ruler happens to be closest to right now
-                    trap_dynamic    = cause_is_dynamic
-                    trap_prev_mode  = mode_now
-                    trap_fs_mode    = resolve_trap_mode(mode_now)
-                    trap_trigger_ms = now_ms
-                    if not vehicle:set_mode(trap_fs_mode) then
-                        -- do not claim a failsafe that never engaged: trap_active would
-                        -- be released again next cycle by the mode-changed check, which
-                        -- would blame a pilot who never touched anything
-                        gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(
-                            ": TRAPPED - %s refused", get_mode_string(trap_fs_mode)))
-                        trap_prev_mode  = -1
-                        trap_since_ms   = uint32_t(0)
-                        return false
-                    end
-                    trap_active     = true
-                    gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(
-                        ": TRAPPED (%s) -> %s", trap_dynamic and "moving" or "fence", get_mode_string(trap_fs_mode)))
-                    gcs:send_named_string("DAA-AVOID", "TRAPPED")
-                    return true
-                end
-            else
+            if not compromised then
                 trap_since_ms = uint32_t(0)
+                return false
             end
-            return false
+            if trap_since_ms == uint32_t(0) then trap_since_ms = now_ms end
+            if (now_ms - trap_since_ms) < (trap_s * 1000) then
+                return false        -- still inside the DAA_TRAP_S dwell
+            end
+            return trap_engage(mode_now, cause_is_dynamic)
         end
 
         -- failsafe active
