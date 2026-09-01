@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-072"
+SCRIPT_VERSION      = "4.8.0-073"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -1379,7 +1379,7 @@ local DAA = {
             (urgent and 1 or 0),                -- Urg - slew limit bypassed (urgent)
             motion.closing_speed,               -- Cls - closing speed
             motion.cpa_miss,                    -- CPA - predicted horizontal miss distance
-            math.min(motion.ttc, 999.0),        -- TTC - time to closest approach (capped)
+            math.min(motion.ttc, 999.0),        -- TTC - time until the keep-out boundary is crossed (capped)
             motion.pass_behind,                 -- PsB - side that passes behind the obstacle
             obstacle.distance_m,                -- Dst - range to the obstacle
             obstacle.type)                      -- Typ - OBSTACLE_TYPE
@@ -1618,13 +1618,32 @@ local DAA = {
         local miss_n = rn + rvn * t_cpa
         local miss_e = re + rve * t_cpa
         local cpa_miss_h = math.sqrt(miss_n * miss_n + miss_e * miss_e)
-        local ttc_s = (closing_speed > 0.1) and (range_h / closing_speed) or FLT_MAX
 
         -- Type-aware keep-out radius: the miss distance below which this obstacle is a conflict.
         -- The range check uses the same value, so any obstacle already inside the keep-out radius
         -- is unconditionally a conflict (the conservative floor); only one that will miss beyond it
         -- AND is not closing AND is already beyond it is treated as leaving (no manoeuvre needed).
         local standoff_m = get_standoff(obstacle.type)
+
+        -- Time until the obstacle crosses that keep-out boundary: the earlier root of
+        -- |rel + rv*t| = standoff_m.  This was range_h / closing_speed, which is the time to
+        -- ZERO range - a point crossing traffic never reaches, so it read later than the
+        -- encounter really was and left the slew limiter damping turns that had no time left.
+        local ttc_s = FLT_MAX
+        if rv2 > 1e-4 then
+            local c_term = range_h * range_h - standoff_m * standoff_m
+            if c_term <= 0.0 then
+                ttc_s = 0.0                     -- already inside the keep-out radius
+            else
+                local disc = rel_dot_rv * rel_dot_rv - rv2 * c_term
+                if disc >= 0.0 then
+                    local t_enter = (-rel_dot_rv - math.sqrt(disc)) / rv2
+                    if t_enter >= 0.0 then
+                        ttc_s = t_enter         -- negative => boundary behind us, receding
+                    end
+                end
+            end
+        end
         local is_conflict = true
         if cpa_miss_h > standoff_m and closing_speed < cpa_min_ms and range_h > standoff_m then
             is_conflict = false
