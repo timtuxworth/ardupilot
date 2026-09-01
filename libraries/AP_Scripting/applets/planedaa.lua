@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-073"
+SCRIPT_VERSION      = "4.8.0-074"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -1050,12 +1050,10 @@ local function find_closest_obstacle(loc1, loc2, lookahead_m, wind_ms)
         return FLT_MAX, nil
     end
 
-    -- If any fence is currently breached, skip all fence avoidance.
-    -- When inside an exclusion zone or outside an inclusion zone the bendy ruler sees every
-    -- exit/return path as "blocked", trapping the plane. Let it navigate freely instead.
-    if is_fence_obstacle(obstacle_type_val) and fence ~= nil and fence:get_breaches() ~= 0 then
-        return FLT_MAX, nil
-    end
+    -- NOTE: a breached fence is not dropped here.  OAScripting:find_threats() already
+    -- leaves the breached fence categories out of its search, because a breached fence
+    -- reports a large negative clearance and would otherwise mask every other obstacle -
+    -- including traffic - for as long as the breach lasted.
 
     obstacle = populate_obstacle(distance_m, any_obstacle)
     return distance_m, obstacle
