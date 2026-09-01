@@ -97,15 +97,31 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
         const Vector2f start_NE_cm(start_NED_m.x * 100.0f, start_NED_m.y * 100.0f);
         const Vector2f end_NE_cm(end_NED_m.x * 100.0f, end_NED_m.y * 100.0f);
 
+        // A breached fence reports a large NEGATIVE clearance, so it would always win the
+        // minimum below and no other obstacle - another fence, or traffic - could ever be
+        // returned while it stayed breached.  The caller cannot avoid it either: inside an
+        // exclusion, or outside an inclusion, every route reads as blocked and a bendy
+        // ruler would trap the vehicle trying to get back.  So skip the breached fences
+        // here and let the next real obstacle surface.  AC_Fence reports the home circle
+        // as AC_FENCE_TYPE_CIRCLE and every polyfence item - inclusion and exclusion,
+        // circle and polygon alike - as AC_FENCE_TYPE_POLYGON, which is as fine-grained as
+        // the core can tell us.  The altitude fences carry their own bits and so never
+        // stand a horizontal fence down.
+        const uint8_t breached_fences = fence->get_breaches();
+        const bool home_breached = (breached_fences & AC_FENCE_TYPE_CIRCLE) != 0;
+        const bool poly_breached = (breached_fences & AC_FENCE_TYPE_POLYGON) != 0;
+
         // We do each type of fence one at a time, because
         // a. they are stored in separate lists and
         // b. we want to tell the user which fence type of fence it is
-        distance_new_m = fence->distance_line_to_home_inclusion(start_NE_cm, end_NE_cm);
+        distance_new_m = home_breached ? FLT_MAX
+                            : fence->distance_line_to_home_inclusion(start_NE_cm, end_NE_cm);
         if (distance_new_m < distance_m) {
             _populate_fence_obstacle(obstacle, ObstacleType::FENCE_HOME);
             distance_m          = distance_new_m;
         }
-        distance_new_m = fence->distance_line_to_circle_exclusion(start_NE_cm, end_NE_cm);
+        distance_new_m = poly_breached ? FLT_MAX
+                            : fence->distance_line_to_circle_exclusion(start_NE_cm, end_NE_cm);
         if (distance_new_m < distance_m) {
             _populate_fence_obstacle(obstacle, ObstacleType::FENCE_CIRCLE_EXCLUSION);
             distance_m          = distance_new_m;
@@ -113,7 +129,8 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
         // inclusion circles and polygons are one query: FENCE_OPTIONS INCLUSION_UNION makes
         // "inside any one of them" legal, which cannot be evaluated per category
         AC_PolyFenceType inclusion_type = AC_PolyFenceType::POLYGON_INCLUSION;
-        distance_new_m = fence->distance_line_to_inclusion(start_NE_cm, end_NE_cm, inclusion_type);
+        distance_new_m = poly_breached ? FLT_MAX
+                            : fence->distance_line_to_inclusion(start_NE_cm, end_NE_cm, inclusion_type);
         if (distance_new_m < distance_m) {
             _populate_fence_obstacle(obstacle,
                                      (inclusion_type == AC_PolyFenceType::CIRCLE_INCLUSION)
@@ -121,7 +138,8 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
                                         : ObstacleType::FENCE_POLYGON_INCLUSION);
             distance_m          = distance_new_m;
         }
-        distance_new_m = fence->distance_line_to_polygon_exclusion(start_NE_cm, end_NE_cm);
+        distance_new_m = poly_breached ? FLT_MAX
+                            : fence->distance_line_to_polygon_exclusion(start_NE_cm, end_NE_cm);
         if (distance_new_m < distance_m) {
             _populate_fence_obstacle(obstacle, ObstacleType::FENCE_POLYGON_EXCLUSION);
             distance_m          = distance_new_m;
