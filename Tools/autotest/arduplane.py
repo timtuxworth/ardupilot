@@ -8658,8 +8658,9 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         It did not.  loiteralt.start() was called unconditionally, so at zero the vehicle
         still changed to GUIDED and commanded a target altitude of 0, which
         set_vehicle_target_location() then refused - leaving a mode change, a
-        "loiteralt.stop set_vehicle FAILED" message and no way for an operator to turn the
-        loiter off at all.
+        "set_vehicle FAILED" message and no way for an operator to turn the loiter off at
+        all.  (loiteralt.start() no longer changes mode itself, so a refusal today leaves
+        the mode alone; the missing-parameter-check this test guards is unaffected.)
 
         A steady crewed aircraft is held inside the well-clear volume, which is exactly the
         condition that triggers the loiter.  With the parameter at zero the vehicle must
