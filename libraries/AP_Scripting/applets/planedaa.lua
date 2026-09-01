@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-071"
+SCRIPT_VERSION      = "4.8.0-072"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -2545,15 +2545,19 @@ local DAA = {
         if daa_action == 0 then
             return              -- parameter DAA_AVOID can be used to disable avoidance
         end
+        -- mid-manoeuvre (hovering/avoiding/landing): don't re-decide the state, just fall
+        -- through to avoid_obstacle() below and keep flying the manoeuvre we are on.
+        local mid_manoeuvre = current_state == STATE.hovering
+                              or current_state == STATE.avoiding
+                              or current_state == STATE.landing
+
         if loiteralt.active then
             current_state = STATE.loitering
             do_loitering()
-        -- while mid-manoeuvre (hovering/avoiding/landing) don't re-decide: match here so the
-        -- chain skips the loiter trigger and the monitoring reset, then fall through to
-        -- avoid_obstacle() below. The branch is intentionally empty (luacheck 542 = "empty
-        -- if branch", suppressed on the next line).
-        elseif current_state == STATE.hovering or current_state == STATE.avoiding or current_state == STATE.landing then -- luacheck: ignore 542
-            -- (deliberately empty)
+        -- Crewed traffic outranks whatever we are already avoiding, so the loiter trigger is
+        -- tested BEFORE mid_manoeuvre below.  An aircraft that appears while a fence or drone
+        -- avoidance is already running must still be able to take over; previously the
+        -- mid-manoeuvre branch matched first and the loiter could never start.
         -- DAA_AVD_ALT = 0 disables the loiter-to-altitude (see above).  Tested before
         -- assess_obstacle_motion() so the CPA work is skipped when the loiter is off.
         elseif aircraft_avoiding ~= nil and crewed_avoid_alt_m > 0
@@ -2575,8 +2579,13 @@ local DAA = {
                 return
             end
             -- the loiter did not start: do not announce it and do not claim the state.
-            -- Fall through to ordinary bendy-ruler avoidance below.
-            current_state = STATE.monitoring
+            -- Fall through to ordinary bendy-ruler avoidance below, keeping any
+            -- mid-manoeuvre state rather than dropping it for a loiter that never began.
+            if not mid_manoeuvre then
+                current_state = STATE.monitoring
+            end
+        elseif mid_manoeuvre then   -- luacheck: ignore 542
+            -- (deliberately empty)
         else
             current_state = STATE.monitoring
         end
