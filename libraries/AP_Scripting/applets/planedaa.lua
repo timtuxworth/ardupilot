@@ -37,14 +37,14 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-063"
+SCRIPT_VERSION      = "4.8.0-064"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
-PLANE_MODE          = {CIRCLE = 1, STABILIZE = 2, TRAINING = 3, ACRO = 4, FBWA = 4, FBWB = 6, CRUISE = 7,
+PLANE_MODE          = {MANUAL = 0, CIRCLE = 1, STABILIZE = 2, TRAINING = 3, ACRO = 4, FBWA = 5, FBWB = 6, CRUISE = 7,
                         AUTOTUNE = 8, AUTO=10, RTL=11, LOITER=12, TAKEOFF = 13, AVOID_ADSB = 14, GUIDED=15,
-                        QSTABILIZE = 17,  QHOVER=18, QLOITER=19, QLAND = 20, QRTL=21, QAUTOTUNE = 22, QACRO = 23,
-                        THERMAL = 24, LOITER_ALT_QLAND = 25, AUTOLAND = 26}
+                        INITIALISING = 16, QSTABILIZE = 17, QHOVER=18, QLOITER=19, QLAND = 20, QRTL=21,
+                        QAUTOTUNE = 22, QACRO = 23, THERMAL = 24, LOITER_ALT_QLAND = 25, AUTOLAND = 26}
 
 ALT_FRAME           = {GLOBAL = 0, RELATIVE = 1, ORIGIN = 2, TERRAIN = 3}
 
