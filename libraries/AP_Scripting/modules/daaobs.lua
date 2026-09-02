@@ -22,20 +22,19 @@ local DAAobstacles = {}
 DAAobstacles.OBSTACLE_TYPE = {
     GENERAL                     = 0,    -- generic obstacle, we don't really know what it is
     MAV_SYSID                   = 1,    -- another MAVLINK drone with a MAV_SYSID
-    CREWED_AIRCRAFT             = 2,    -- crewed aircraft, usually with an ICAO ADSB identifier
-    WEATHER                     = 3,
-    BIRD_MIGRATORY              = 4,    -- typically one or more Canada Geese
-    BIRD_OF_PREY                = 5,    -- a bird that might attack the vehicle
-    FENCE_HOME                  = 6,    -- all fixed/unmovable fences
-    FENCE_CIRCLE_INCLUSION      = 7,
-    FENCE_CIRCLE_EXCLUSION      = 8,
-    FENCE_POLYGON_INCLUSION     = 9,
-    FENCE_POLYGON_EXCLUSION     = 10,
-    FENCE_LUA                   = 11,
-    PROXIMITY                   = 12,   -- detected by a proximty sensor, typically quite close
-    AIS                         = 13,   -- Automatic Identification System for ship (maritime) vehicles
-    FENCE_ALT_MAX               = 14,   -- max altitude fence (AC_FENCE_TYPE_ALT_MAX, FENCE_TYPE bit 0)
-    FENCE_ALT_MIN               = 15,   -- min altitude fence (AC_FENCE_TYPE_ALT_MIN, FENCE_TYPE bit 3)
+    CREWED_AIRCRAFT             = 2,
+    -- 3, 4 and 5 were WEATHER, BIRD_MIGRATORY and BIRD_OF_PREY; removed, but the numbering
+    -- is left alone because it is what DAAD.ObjT means in every log already recorded.    -- crewed aircraft, usually with an ICAO ADSB identifier
+    FENCE_HOME                  = 3,    -- all fixed/unmovable fences
+    FENCE_CIRCLE_INCLUSION      = 4,
+    FENCE_CIRCLE_EXCLUSION      = 5,
+    FENCE_POLYGON_INCLUSION     = 6,
+    FENCE_POLYGON_EXCLUSION     = 7,
+    FENCE_LUA                   = 8,
+    PROXIMITY                   = 9,   -- detected by a proximty sensor, typically quite close
+    AIS                         = 10,   -- Automatic Identification System for ship (maritime) vehicles
+    FENCE_ALT_MAX               = 11,   -- max altitude fence (AC_FENCE_TYPE_ALT_MAX, FENCE_TYPE bit 0)
+    FENCE_ALT_MIN               = 12,   -- min altitude fence (AC_FENCE_TYPE_ALT_MIN, FENCE_TYPE bit 3)
 }
 
 -- ADS-B emitter categories (MAV_ADSB_EMITTER_TYPE), used only to label a contact.
@@ -103,9 +102,6 @@ function DAAobstacles.new(geo)
 
         standoff_by_type = {
             [OBSTACLE_TYPE.MAV_SYSID]               = settings.uav_clear_xy,   -- drone/UAV: AVD_UAV_XY
-            [OBSTACLE_TYPE.BIRD_MIGRATORY]          = settings.margin_bird_m,
-            [OBSTACLE_TYPE.BIRD_OF_PREY]            = settings.margin_prey_m,
-            [OBSTACLE_TYPE.WEATHER]                 = settings.margin_weather_m,
             [OBSTACLE_TYPE.PROXIMITY]               = settings.margin_proximity_m,
         }
         detect_margin_by_type = {
@@ -151,12 +147,6 @@ function DAAobstacles.new(geo)
             return "Obstacle"
         elseif emitter_type == 101 then
             return "Drone"
-        elseif emitter_type == 102 then
-            return "Weather"
-        elseif emitter_type == 103 then
-            return "Migratory Bird"
-        elseif emitter_type == 104 then
-            return "Bird of Prey"
 
         -- these obstacle types are returned by AP_OAScripting for fences
         elseif obstacle_type == OBSTACLE_TYPE.FENCE_CIRCLE_EXCLUSION then
@@ -193,15 +183,6 @@ function DAAobstacles.new(geo)
         end
         if type == OBSTACLE_TYPE.CREWED_AIRCRAFT then
             return "aircraft"
-        end
-        if type == OBSTACLE_TYPE.WEATHER then
-            return "weather"
-        end
-        if type == OBSTACLE_TYPE.BIRD_MIGRATORY then
-            return "bird"
-        end
-        if type == OBSTACLE_TYPE.BIRD_OF_PREY then
-            return "predator"
         end
         if type == OBSTACLE_TYPE.FENCE_HOME then
             return "fence:home"
