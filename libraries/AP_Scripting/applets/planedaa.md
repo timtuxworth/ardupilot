@@ -181,7 +181,7 @@ Collision volumes, and the `FENCE_*` parameters for the altitude/geo fences.
 | `DAA_ALT_HYST_M` | 10 | m | Hysteresis band for altitude-fence avoidance, preventing chatter as the plane levels off. |
 | `DAA_ALT_COOL_S` | 15 | s | Minimum time between altitude-fence "levelling off" notices, so brief re-engagements do not re-spam the GCS. |
 | `DAA_HEADING_INC` | 1.5 | deg | Angular step used when searching candidate headings around the target bearing for a collision-free path. The search sweeps a full circle in increments of this size, alternating left and right. Smaller values search more finely but cost more CPU per update. |
-| `DAA_WIND_MIN` | 2 | m/s | Minimum wind speed before the wind-aware avoidance behaviour engages. Below this, the still-air path is used so calm-air behaviour is unchanged. Gates both the wind-aware look-ahead projection and the wind-scaled fence margin. |
+| `DAA_WIND_MIN` | 2 | m/s | Minimum wind speed before the wind-scaled fence margin (`DAA_WIND_MARG`) engages. Below this the standoff is not widened. It no longer conditions the look-ahead projection: that projection is a _turn_ lead and is always applied — see _Why a candidate heading is judged from where the turn ends_. |
 | `DAA_WIND_MARG` | 5 | m per m/s | Extra fence avoidance margin added per m/s of wind above `DAA_WIND_MIN`. The standoff from fences is widened by `DAA_WIND_MARG * max(0, wind_speed - DAA_WIND_MIN)`, giving the controller buffer to absorb cross-track drift so the aircraft is less likely to be blown across the boundary in wind. Set to 0 to disable wind scaling. |
 | `DAA_SLEW_DPS` | 20 | deg/s | Maximum rate the commanded avoidance heading is allowed to change. Rate-limiting the heading smooths the oscillation a per-cycle bendy ruler produces against moving obstacles and near fences. Bypassed when the estimated time-to-conflict is below `DAA_SLEW_URG`, and also when a change larger than `DAA_BR_ANGLE` could not be slewed through before the conflict, so an urgent manoeuvre keeps full authority. Set to 0 to disable the slew limit. Must be below the turn rate the airframe can actually fly or it has no effect — see _Tuning for your vehicle_. |
 | `DAA_SLEW_URG` | 4 | s | If the estimated time-to-conflict with a moving obstacle is below this, the `DAA_SLEW_DPS` slew limit is bypassed so the aircraft can turn at full authority. Set to 0 to always apply the slew limit. |
@@ -254,6 +254,32 @@ or near your path, the aircraft begins avoiding — and the `AVOIDING:` message
 reports the true range — while the obstacle is still hundreds of metres ahead.
 The standoff is the _lateral_ clearance held around the obstacle, not the range
 at which avoidance begins.
+
+### Why a candidate heading is judged from where the turn ends
+
+A candidate heading is not flown from where the aircraft is now. Getting onto it
+costs a turn, and the arc of that turn carries the aircraft up to twice the turn
+radius towards whatever lies on the inside of it. At 25 m/s with 60° of roll the
+radius is about 35 m, so a reversal displaces roughly 70 m sideways — more than a
+typical fence standoff.
+
+So each candidate is probed from the position the aircraft will actually occupy
+once it has turned onto that course, and the chord covering the turn itself is
+probed as well as the straight leg that follows it. Without this a heading that
+needs a large deflection reads as perfectly clear and then flies the aircraft
+through the fence while it is still turning onto it — with the roll on the stop
+the whole way, which is what makes it look in a log like a controller fault
+rather than a planning one.
+
+Two consequences worth knowing:
+
+- Large-deflection headings are now **penalised**, so the ruler prefers a smaller
+  deflection that it can actually reach. Near a fence this reads as the aircraft
+  committing earlier and turning less.
+- The turn cost scales with `ROLL_LIMIT_DEG` and airspeed. A low roll limit makes
+  every deflection more expensive and pushes the ruler towards shallower
+  avoidance started further out, which is the correct trade — but it needs the
+  look-ahead (`DAA_LKAHD`) to be long enough to see the obstacle by then.
 
 ### Moving obstacles and closest-approach
 
@@ -397,7 +423,8 @@ target to dodge it has been computed.
 | Field | Description |
 |-------|-------------|
 | `Obs`  | Obstacle found (1/0) |
-| `DstF` | Distance to the detected obstacle (m) |
+| `DstF` | Clearance of the **worst** heading in the sweep (m) — the closest any candidate came to an obstacle, which is what names the obstacle being avoided. It is normal for this to be very negative: some candidate heading usually points straight at the obstacle. **It is not the clearance of the path being flown** — read `DstB` for that. |
+| `DstB` | Clearance of the heading actually **chosen**, `HdgB` (m). Negative means no heading cleared and the best available one still breaches — the genuine boxed-in signal. Clamped to ±9999; a heading that clears everything reports the clamp. |
 | `DstT` | Distance to the proposed new target that avoids the obstacle (m) |
 | `HdgB` | Best bearing found to avoid the obstacle (deg) |
 | `Tfnd` | Avoidance target found (1/0) |
