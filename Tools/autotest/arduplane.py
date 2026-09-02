@@ -9489,6 +9489,115 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             raise NotAchievedException("unexpected trap message: %s" % trapped_text)
         self.disarm_vehicle(force=True)
 
+    def PlaneDAAHungTrapFires(self):
+        '''Avoidance that is running but making no progress must be detected, alerted and
+        trapped - and released again when the mission moves on.
+
+        The trapped-failsafe only ever fired on a sustained fence breach or an aircraft
+        near-miss.  A vehicle avoiding correctly - never breaching, no traffic anywhere -
+        but unable to close on its waypoint slipped through entirely: it orbited until
+        fuel ran out, or until it eventually clipped the fence it had been dodging and the
+        autopilot's own FENCE_ACTION caught it.  Seen in flight on T2 Cruza log_77/83/84
+        and Niska log_104, and reproduced in SITL.
+
+        The geometry is log_77's: waypoint 2 sits just inside the fence standoff, where the
+        mission pull and the fence push are irreconcilable.  A 300 m exclusion circle with
+        DAA_MARGIN_FENCE=150 gives a 450 m keep-out; the waypoint is 350 m from the centre,
+        so it is 100 m inside the standoff but still 50 m OUTSIDE the fence itself.  That
+        matters: the vehicle is never boxed in and never has to breach anything, it simply
+        stops at 450 m and can never close the last 100 m.  (A waypoint placed DEEP inside
+        the keep-out is not a stall - the sweep runs out of clear headings, falls through to
+        the best blocked one, flies in and arrives.)  WP_RADIUS is pinned small so waypoint
+        acceptance cannot paper over the shortfall.
+
+        DAA_HUNG_ALRT_S must notice, DAA_TRAP_ACT must fire with the cause reported as
+        "hung", and advancing the mission to a reachable waypoint must release it - progress
+        toward the target cannot be the release test, because the trap's own RTL retargets
+        the vehicle to home and would read as instant progress.'''
+        self.install_applet_script_context("planedaa.lua")
+        self.install_script_module_context(
+            self.script_modules_source_path("mavlink_wrappers.lua"),
+            "mavlink_wrappers.lua",
+        )
+
+        self.set_parameters({
+            "SCR_ENABLE": 1,
+            "SCR_VM_I_COUNT": 1000000,
+            "AVD_ENABLE": 1,
+            "FENCE_ENABLE": 0,  # enabled in flight so arming is unimpeded
+            "FENCE_ACTION": 0,  # report only: the core must not rescue this, that is the point
+            "FENCE_TYPE": 4,    # polygon/circle fences
+        })
+
+        home = self.home_position_as_location()
+        excl_north_m = 1600
+        excl_radius_m = 300
+        margin_m = 150                          # keep-out = 450 m from the centre
+        wp_from_centre_m = 350                  # 100 m inside the keep-out, 50 m outside the fence
+        self.upload_fences_from_locations([(
+            mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION,
+            {"radius": excl_radius_m, "loc": self.offset_location_ne(home, excl_north_m, 0)},
+        )])
+
+        self.context_collect('STATUSTEXT')
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+
+        self.set_parameters({
+            "WP_RADIUS": 20,            # the shortfall must not be swallowed by acceptance
+            "DAA_MARGIN_FENCE": margin_m,
+            "DAA_HUNG_ALRT_S": 20,
+            "DAA_TRAP_S": 5,
+            "DAA_TRAP_ACT": 1,          # RTL: no VTOL on this airframe, and it retargets to
+                                        # home - which is what the release rule must survive
+        })
+
+        # waypoint 2 sits inside the keep-out on the near side: approachable to 450 m from
+        # the centre and no closer, so it can never be reached.  Waypoint 3 is well south of
+        # the circle and reachable, for the release.
+        self.start_flying_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 50),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, excl_north_m - wp_from_centre_m, 0, 80),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 400, 0, 80),
+            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+        ])
+        self.wait_current_waypoint(2, timeout=120)
+        self.do_fence_enable()
+        self.wait_text("Plane DAA", check_context=True, timeout=60)
+
+        def require_text(text, why, timeout=120):
+            try:
+                self.wait_text(text, check_context=True, timeout=timeout)
+            except AutoTestTimeoutException:
+                raise NotAchievedException(why)
+
+        require_text(
+            "HUNG: no progress",
+            "avoidance orbited an unreachable waypoint without ever reporting it as hung",
+            timeout=300)
+        self.progress("hung avoidance detected - the failsafe must follow")
+
+        require_text(
+            "TRAPPED (hung)",
+            "the hung avoidance was alerted but never became a compromise: DAA_TRAP_ACT "
+            "did not fire, so the vehicle is still orbiting",
+            timeout=60)
+        self.wait_mode("RTL", timeout=30)
+
+        # the pilot advances the mission past the unreachable waypoint: the geometry that
+        # hung the vehicle is no longer what it is being asked to fly, so the trap must let go
+        self.set_current_waypoint(3)
+        require_text(
+            "trap clear (mission moved)",
+            "the mission was advanced to a reachable waypoint but the hung trap held on",
+            timeout=60)
+        self.wait_mode("AUTO", timeout=30)
+        self.progress("hung trap released after the mission moved on")
+
+        self.set_parameter("DAA_TRAP_ACT", 0)   # stand the failsafe down before cleanup
+        self.do_fence_disable()
+        self.disarm_vehicle(force=True)
+
     def PlaneDAADisableRevertsTarget(self):
         '''planedaa steers by hijacking the vehicle's active navigation target in
         place (vehicle:update_target_location), which also works in RTL.  If the
@@ -11602,6 +11711,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             Test(self.PlaneDAADroneCpaGate),
             Test(self.PlaneDAATrapNoFalseFire),
             Test(self.PlaneDAATrapCauseClassified),
+            Test(self.PlaneDAAHungTrapFires),
             Test(self.PlaneDAADisableRevertsTarget),
             Test(self.PlaneDAADisableDuringLoiter),
             Test(self.PlaneDAAFenceAvoidanceWind),
