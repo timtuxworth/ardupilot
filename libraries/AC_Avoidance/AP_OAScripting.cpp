@@ -331,12 +331,6 @@ AP_OAScripting::ObstacleType AP_OAScripting::_get_obstacle_type(uint8_t emitter_
 {
     if (AP_Avoidance::is_adsb_uav(emitter_type) || icao_code <= 0x0BFFF) {
         return ObstacleType::MAV_SYSID;
-    } else if (icao_code >= 0xB00000 && icao_code <= 0xB10000) {
-        return ObstacleType::WEATHER;
-    } else if (icao_code >= 0xB10000 && icao_code <= 0xB20000) {
-        return ObstacleType::BIRD_MIGRATORY;
-    } else if (icao_code >= 0xB20000 && icao_code <= 0xB30000) {
-        return ObstacleType::BIRD_OF_PREY;
     } else if (AP_Avoidance::is_adsb_aircraft(emitter_type)) {
         return ObstacleType::CREWED_AIRCRAFT;
     }
