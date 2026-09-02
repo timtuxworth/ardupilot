@@ -7914,6 +7914,25 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         self.wait_current_waypoint(6, timeout=5)
         self.fly_home_land_and_disarm()
 
+    def install_planedaa_scripts(self):
+        """Install planedaa.lua and every module it requires.
+
+        planedaa.lua is split so that the applet holds avoidance POLICY and the modules
+        hold mechanism; a module missing at runtime is a load failure, not a degraded
+        mode, so they are installed together and this is the single place to add another.
+        """
+        self.install_applet_script_context("planedaa.lua")
+        for module in ("mavlink_wrappers.lua", "daageo.lua", "daaobs.lua"):
+            self.install_script_module_context(
+                self.script_modules_source_path(module),
+                module,
+            )
+        # TEMPORARY: planedaa + its modules need more than the 200 KB SITL default to run.
+        # The load-time cliff is fixed (see planedaa.md, "Distinct names are a budget"), but
+        # the live footprint is still ~149 KB and the working set does not fit on top of it.
+        # Remove this once the footprint is back under the default.
+        self.set_parameters({"SCR_HEAP_SIZE": 262144})
+
     def PlaneDAAFenceBreachEscape(self):
         '''planedaa must not trap the plane inside an exclusion fence after a breach.
         Home is inside a large exclusion circle.  The fence is enabled after takeoff
@@ -7921,11 +7940,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         is breached, fence:get_breaches() is non-zero; the fix causes it to skip fence
         avoidance so the plane can reach the waypoint outside the fence.  Without the
         fix the bendy ruler traps the plane inside and the test times out.'''
-        self.install_applet_script_context("planedaa.lua")
-        self.install_script_module_context(
-            self.script_modules_source_path("mavlink_wrappers.lua"),
-            "mavlink_wrappers.lua",
-        )
+        self.install_planedaa_scripts()
         self.context_collect('STATUSTEXT')
 
         self.set_parameters({
@@ -7980,11 +7995,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         contained, again without ever breaching.  Each scenario also asserts that the
         obstacle ALERT reaches the GCS, which catches the whole message path being
         suppressed.'''
-        self.install_applet_script_context("planedaa.lua")
-        self.install_script_module_context(
-            self.script_modules_source_path("mavlink_wrappers.lua"),
-            "mavlink_wrappers.lua",
-        )
+        self.install_planedaa_scripts()
 
         self.set_parameters({
             "SCR_ENABLE": 1,
@@ -8085,7 +8096,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
                     "Fence breached during %s scenario" % name)
 
             # the pilot must actually be told.  alert_obstacle() suppresses the
-            # ALERT when the reported range exceeds DAA_LKAHD, and a fence carries
+            # ALERT when the reported range exceeds DAA_DETECT_M, and a fence carries
             # no single location, so this regressed silently once before: the range
             # was measured to an unset Location (lat/lng 0,0) and every fence ALERT
             # was dropped.  Nothing else in the suite reads a DAA message body.
@@ -8111,11 +8122,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         one "Excl. Circle dist: >200 m"; the old unscoped behaviour never could (it would
         report the ~120 m polygon under the circle label).'''
         import re
-        self.install_applet_script_context("planedaa.lua")
-        self.install_script_module_context(
-            self.script_modules_source_path("mavlink_wrappers.lua"),
-            "mavlink_wrappers.lua",
-        )
+        self.install_planedaa_scripts()
         self.set_parameters({
             "SCR_ENABLE": 1,
             "SCR_VM_I_COUNT": 1000000,
@@ -8186,11 +8193,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         bendy-ruler detour (no loiter-to-altitude), and it is labelled by its ICAO
         in hex rather than a decimal SYSID.  The ADSB_VEHICLE is re-sent
         continuously because AP_Avoidance prunes obstacles after 5 s.'''
-        self.install_applet_script_context("planedaa.lua")
-        self.install_script_module_context(
-            self.script_modules_source_path("mavlink_wrappers.lua"),
-            "mavlink_wrappers.lua",
-        )
+        self.install_planedaa_scripts()
 
         self.set_parameters({
             "SCR_ENABLE": 1,
@@ -8288,11 +8291,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         double-counted one is 700 m: a 550 m miss distance must be accepted, and a 250 m one
         must still be avoided - the second case keeps the test honest about drone avoidance
         working at all.'''
-        self.install_applet_script_context("planedaa.lua")
-        self.install_script_module_context(
-            self.script_modules_source_path("mavlink_wrappers.lua"),
-            "mavlink_wrappers.lua",
-        )
+        self.install_planedaa_scripts()
 
         uav_xy_m = 300
         margin_uav_m = 100
@@ -8389,11 +8388,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         see the note at that check -- SITL fixed-wing does not visibly wiggle even
         with the smoothing off, so that bound is a gross-oscillation guard, not a
         proof of the smoothing.'''
-        self.install_applet_script_context("planedaa.lua")
-        self.install_script_module_context(
-            self.script_modules_source_path("mavlink_wrappers.lua"),
-            "mavlink_wrappers.lua",
-        )
+        self.install_planedaa_scripts()
 
         self.set_parameters({
             "SCR_ENABLE": 1,
@@ -8545,11 +8540,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         beyond the 50 m DAA_MARGIN_CA (so the old code would flip) but well inside the
         250 m detection distance.  The ADSB_VEHICLE is re-sent continuously because
         AP_Avoidance prunes obstacles after 5 s.'''
-        self.install_applet_script_context("planedaa.lua")
-        self.install_script_module_context(
-            self.script_modules_source_path("mavlink_wrappers.lua"),
-            "mavlink_wrappers.lua",
-        )
+        self.install_planedaa_scripts()
 
         # core AVD_ params exist without the script; pin the well-clear volume so the
         # geometry is deterministic: horizontal detect = AVD_WCLR_XY + DAA_MARGIN_CA
@@ -8666,11 +8657,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         condition that triggers the loiter.  With the parameter at zero the vehicle must
         stay in AUTO and must never announce the loiter; ordinary bendy-ruler avoidance
         still applies, which is what falling through to monitoring gives us.'''
-        self.install_applet_script_context("planedaa.lua")
-        self.install_script_module_context(
-            self.script_modules_source_path("mavlink_wrappers.lua"),
-            "mavlink_wrappers.lua",
-        )
+        self.install_planedaa_scripts()
 
         self.set_parameters({
             "SCR_ENABLE": 1,
@@ -8762,11 +8749,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         wall is 100 m from track while DAA_MARGIN_FENCE is 20 m, so no fence is ever
         avoided.  That matters because current_state == STATE.avoiding would skip the loiter
         branch entirely and the test would prove nothing.'''
-        self.install_applet_script_context("planedaa.lua")
-        self.install_script_module_context(
-            self.script_modules_source_path("mavlink_wrappers.lua"),
-            "mavlink_wrappers.lua",
-        )
+        self.install_planedaa_scripts()
 
         self.set_parameters({
             "SCR_ENABLE": 1,
@@ -8870,11 +8853,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         crewed aircraft (emitter LIGHT) injected 120 m abeam - inside AVD_WCLR_XY, so
         assess_obstacle_motion() calls it a conflict unconditionally.  The loiter must
         start.  On the unfixed chain it never does.'''
-        self.install_applet_script_context("planedaa.lua")
-        self.install_script_module_context(
-            self.script_modules_source_path("mavlink_wrappers.lua"),
-            "mavlink_wrappers.lua",
-        )
+        self.install_planedaa_scripts()
 
         self.set_parameters({
             "SCR_ENABLE": 1,
@@ -8966,11 +8945,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         loiters unconditionally - the conservative floor - proven by
         PlaneDAAAircraftLoiterNoFlip.)  Fails on the pre-CPA-gate code, which loitered for
         any detected aircraft regardless of motion.'''
-        self.install_applet_script_context("planedaa.lua")
-        self.install_script_module_context(
-            self.script_modules_source_path("mavlink_wrappers.lua"),
-            "mavlink_wrappers.lua",
-        )
+        self.install_planedaa_scripts()
         self.set_parameters({
             "SCR_ENABLE": 1,
             "SCR_VM_I_COUNT": 1000000,
@@ -9047,11 +9022,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         (prunes after 5 s, dwell expires) the vehicle cleanly resumes AUTO.  The
         ADSB_VEHICLE is re-sent each cycle because AP_Avoidance prunes obstacles after
         5 s.'''
-        self.install_applet_script_context("planedaa.lua")
-        self.install_script_module_context(
-            self.script_modules_source_path("mavlink_wrappers.lua"),
-            "mavlink_wrappers.lua",
-        )
+        self.install_planedaa_scripts()
         self.set_parameters({
             "SCR_ENABLE": 1,
             "SCR_VM_I_COUNT": 1000000,
@@ -9161,11 +9132,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         AVD_WCLR_XY + DAA_MARGIN_CA detection volume, so it is still a live contact).
         Each step must produce its own clear message.  On the unfixed applet neither
         clear is ever sent.'''
-        self.install_applet_script_context("planedaa.lua")
-        self.install_script_module_context(
-            self.script_modules_source_path("mavlink_wrappers.lua"),
-            "mavlink_wrappers.lua",
-        )
+        self.install_planedaa_scripts()
 
         self.set_parameters({
             "SCR_ENABLE": 1,
@@ -9265,11 +9232,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         vehicle must reach the waypoint without ever announcing "AVOIDING" for the drone.  Fails
         on the pre-change code, whose conflict test used the (much larger) aircraft well-clear
         radius for every type, so it avoided the diverging drone.'''
-        self.install_applet_script_context("planedaa.lua")
-        self.install_script_module_context(
-            self.script_modules_source_path("mavlink_wrappers.lua"),
-            "mavlink_wrappers.lua",
-        )
+        self.install_planedaa_scripts()
         self.set_parameters({
             "SCR_ENABLE": 1,
             "SCR_VM_I_COUNT": 1000000,
@@ -9331,11 +9294,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         the plane detours around it and reaches the waypoint.  With the failsafe
         enabled (RTL, which would be obvious if it wrongly fired), the detour must
         complete WITHOUT tripping the failsafe (no "TRAPPED", mission still runs).'''
-        self.install_applet_script_context("planedaa.lua")
-        self.install_script_module_context(
-            self.script_modules_source_path("mavlink_wrappers.lua"),
-            "mavlink_wrappers.lua",
-        )
+        self.install_planedaa_scripts()
         self.set_parameters({
             "SCR_ENABLE": 1,
             "SCR_VM_I_COUNT": 1000000,
@@ -9394,11 +9353,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         it is a genuine near-miss.  No fences are loaded at all, so with the old code
         obstacle_avoiding is nil and the trap reports "(fence)"; the cause is an aircraft
         and it must report "(moving)".'''
-        self.install_applet_script_context("planedaa.lua")
-        self.install_script_module_context(
-            self.script_modules_source_path("mavlink_wrappers.lua"),
-            "mavlink_wrappers.lua",
-        )
+        self.install_planedaa_scripts()
 
         self.set_parameters({
             "SCR_ENABLE": 1,
@@ -9514,11 +9469,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         "hung", and advancing the mission to a reachable waypoint must release it - progress
         toward the target cannot be the release test, because the trap's own RTL retargets
         the vehicle to home and would read as instant progress.'''
-        self.install_applet_script_context("planedaa.lua")
-        self.install_script_module_context(
-            self.script_modules_source_path("mavlink_wrappers.lua"),
-            "mavlink_wrappers.lua",
-        )
+        self.install_planedaa_scripts()
 
         self.set_parameters({
             "SCR_ENABLE": 1,
@@ -9613,11 +9564,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         the circle on the way back so DAA starts avoiding, and DAA is then switched
         off.  With the fix the plane reverts to the home target and returns home;
         without it the plane never reaches home.'''
-        self.install_applet_script_context("planedaa.lua")
-        self.install_script_module_context(
-            self.script_modules_source_path("mavlink_wrappers.lua"),
-            "mavlink_wrappers.lua",
-        )
+        self.install_planedaa_scripts()
         self.set_parameters({
             "SCR_ENABLE": 1,
             "SCR_VM_I_COUNT": 1000000,
@@ -9700,11 +9647,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
 
         The contact keeps being injected after the switch is thrown, so a release
         caused by the contact pruning cannot pass this test by accident.'''
-        self.install_applet_script_context("planedaa.lua")
-        self.install_script_module_context(
-            self.script_modules_source_path("mavlink_wrappers.lua"),
-            "mavlink_wrappers.lua",
-        )
+        self.install_planedaa_scripts()
 
         self.set_parameters({
             "SCR_ENABLE": 1,
@@ -9820,11 +9763,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
 
         Asserted physically as well as by message: the plane must never come within the
         exclusion radius.  Before the fix it flies straight through the centre.'''
-        self.install_applet_script_context("planedaa.lua")
-        self.install_script_module_context(
-            self.script_modules_source_path("mavlink_wrappers.lua"),
-            "mavlink_wrappers.lua",
-        )
+        self.install_planedaa_scripts()
 
         home_radius_m = 300
         excl_north_m = 1400
@@ -9915,11 +9854,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
 
         Two disjoint inclusion circles are loaded, the vehicle flies well inside the
         first, and no avoidance may occur at all.'''
-        self.install_applet_script_context("planedaa.lua")
-        self.install_script_module_context(
-            self.script_modules_source_path("mavlink_wrappers.lua"),
-            "mavlink_wrappers.lua",
-        )
+        self.install_planedaa_scripts()
 
         self.set_parameters({
             "SCR_ENABLE": 1,
@@ -9992,11 +9927,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         differs - a regression that drops the extra margin makes the standoffs equal and
         fails the test.  (SITL tracks ground course cleanly, so this verifies the
         commanded standoff grows; the breach-prevention benefit is on real hardware.)'''
-        self.install_applet_script_context("planedaa.lua")
-        self.install_script_module_context(
-            self.script_modules_source_path("mavlink_wrappers.lua"),
-            "mavlink_wrappers.lua",
-        )
+        self.install_planedaa_scripts()
 
         self.set_parameters({
             "SCR_ENABLE": 1,
@@ -10109,8 +10040,8 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         '''planedaa's bendy-ruler second step must look beyond step 1 and be able to
         reject a heading that leads into a dead end.
 
-        Step 1 covers 0 -> DAA_LKAHD ahead of the aircraft; step 2 continues from the
-        end of step 1 for a further 2 x DAA_LKAHD, probing straight and +/-45 degrees.
+        Step 1 covers 0 -> DAA_LKAHD_M ahead of the aircraft; step 2 continues from the
+        end of step 1 for a further 2 x DAA_LKAHD_M, probing straight and +/-45 degrees.
         As upstream AP_OABendyRuler does, a heading is only rejected when ALL THREE of
         those continuations are blocked - a lone obstacle in open country always leaves
         a dogleg, so it is handled by step 1 instead.  This test therefore uses a wall
@@ -10124,13 +10055,9 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         notices: the whole PlaneDAA suite passes with the second step doing nothing.
 
         The visible symptom is the range at which the plane turns away from the wall.'''
-        self.install_applet_script_context("planedaa.lua")
-        self.install_script_module_context(
-            self.script_modules_source_path("mavlink_wrappers.lua"),
-            "mavlink_wrappers.lua",
-        )
+        self.install_planedaa_scripts()
 
-        # DAA_LKAHD is the operator setting; use the shipping default so the test
+        # DAA_LKAHD_M is the operator setting; use the shipping default so the test
         # exercises the configuration that actually flies
         lookahead_m = 1000
         step2_leg_m = 2 * lookahead_m
@@ -10228,11 +10155,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         self.disarm_vehicle(force=True)
 
     def _PlaneDAAFenceAltitude(self, terrain=False):
-        self.install_applet_script_context("planedaa.lua")
-        self.install_script_module_context(
-            self.script_modules_source_path("mavlink_wrappers.lua"),
-            "mavlink_wrappers.lua",
-        )
+        self.install_planedaa_scripts()
 
         # Location::AltFrame: 1 = ABOVE_HOME, 3 = ABOVE_TERRAIN
         alt_tp = 3 if terrain else 1
