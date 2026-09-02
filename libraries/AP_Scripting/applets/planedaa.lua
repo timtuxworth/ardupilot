@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-082"
+SCRIPT_VERSION      = "4.8.0-083"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -125,30 +125,6 @@ PARAM.UPDATE_RATE  = bind_add_param('UPDATE_RATE', 4, 10.0)
   // @Units: m
 --]]
 PARAM.MARGIN_CA  = bind_add_param('MARGIN_CA', 5, 50)
-
---[[
-  // @Param: DAA_MARGIN_WTH
-  // @DisplayName: Radius for Weather
-  // @Description: Avoidance radius for Weather/Clouds/Rain
-  // @Units: m
---]]
-PARAM.MARGIN_WTH  = bind_add_param('MARGIN_WTH', 6, 173)
-
---[[
-  // @Param: DAA_MARGIN_BIRD
-  // @DisplayName: Margin for Birds
-  // @Description: Avoidance margin for Migratory Birds
-  // @Units: m
---]]
-PARAM.MARGIN_BIRD  = bind_add_param('MARGIN_BIRD', 7, 100)
-
---[[
-  // @Param: DAA_MARGIN_PREY
-  // @DisplayName: Radius for Birds of Prey
-  // @Description: Avoidance radius for Birds of Prey
-  // @Units: m
---]]
-PARAM.MARGIN_PREY  = bind_add_param('MARGIN_PREY', 8, 200)
 
 --[[
   // @Param: DAA_MARGIN_UAV
@@ -465,10 +441,7 @@ local alt_cool_ms           = PARAM.ALT_COOL_S:get() * 1000
 local loiter_cool_ms        = PARAM.LTR_COOL_S:get() * 1000
 local margin_crewed_m       = PARAM.MARGIN_CA:get()
 local margin_vertical_m     = PARAM.MARGIN_CA_Z:get()
-local margin_bird_m         = PARAM.MARGIN_BIRD:get()
-local margin_prey_m         = PARAM.MARGIN_PREY:get()
 local margin_uav_m          = PARAM.MARGIN_UAV:get()
-local margin_weather_m      = PARAM.MARGIN_WTH:get()
 local margin_ais_m          = PARAM.MARGIN_AIS:get()
 local margin_proximity_m    = PARAM.MARGIN_PRX:get()
 -- refresh_period_ms is the loop period in ms; DAA_UPDATE_RATE is in Hz (floored at 1 Hz to avoid /0)
@@ -585,9 +558,6 @@ local function configure_modules()
         margin_uav_m        = margin_uav_m,
         margin_ais_m        = margin_ais_m,
         margin_proximity_m  = margin_proximity_m,
-        margin_bird_m       = margin_bird_m,
-        margin_prey_m       = margin_prey_m,
-        margin_weather_m    = margin_weather_m,
         well_clear_xy       = well_clear_xy,
         uav_clear_xy        = uav_clear_xy,
         wind_min_ms         = wind_min_ms,
@@ -728,10 +698,7 @@ local function get_vehicle_state()
         loiter_cool_ms        = PARAM.LTR_COOL_S:get() * 1000
         margin_crewed_m       = PARAM.MARGIN_CA:get()
         margin_vertical_m     = PARAM.MARGIN_CA_Z:get()
-        margin_bird_m         = PARAM.MARGIN_BIRD:get()
-        margin_prey_m         = PARAM.MARGIN_PREY:get()
         margin_uav_m          = PARAM.MARGIN_UAV:get()
-        margin_weather_m      = PARAM.MARGIN_WTH:get()
         margin_ais_m          = PARAM.MARGIN_AIS:get()
         margin_proximity_m    = PARAM.MARGIN_PRX:get()
         refresh_period_ms     = 1000.0 / math.max(PARAM.UPDATE_RATE:get(), 1.0)
