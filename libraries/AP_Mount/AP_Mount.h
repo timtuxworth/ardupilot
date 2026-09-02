@@ -220,6 +220,10 @@ public:
     // that same external kinematic estimator, whenever one is available
     void set_target_sysid_kinematic_estimate(uint8_t sysid, const Location &loc);
 
+    // called by vehicle code the moment that same external kinematic
+    // estimator no longer has a usable estimate for sysid
+    void clear_target_sysid_kinematic_estimate(uint8_t sysid);
+
     // handling of set_roi_sysid message
     MAV_RESULT handle_command_do_set_roi_sysid(const mavlink_command_int_t &packet);
 

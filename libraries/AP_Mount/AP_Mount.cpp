@@ -833,6 +833,17 @@ void AP_Mount::set_target_sysid_kinematic_estimate(uint8_t sysid, const Location
     }
 }
 
+// called by vehicle code the moment that same external kinematic estimator
+// no longer has a usable estimate for sysid
+void AP_Mount::clear_target_sysid_kinematic_estimate(uint8_t sysid)
+{
+    for (uint8_t instance=0; instance<AP_MOUNT_MAX_INSTANCES; instance++) {
+        if (_backends[instance] != nullptr) {
+            _backends[instance]->clear_target_sysid_kinematic_estimate(sysid);
+        }
+    }
+}
+
 // set_roi_target - sets target location that mount should attempt to point towards
 void AP_Mount::set_roi_target(uint8_t instance, const Location &target_loc)
 {

@@ -132,6 +132,15 @@ public:
     // external kinematic estimator, whenever one is available
     void set_target_sysid_kinematic_estimate(uint8_t sysid, const Location &loc);
 
+    // called by vehicle code the moment that same external kinematic
+    // estimator no longer has a usable estimate (even though it may still
+    // be actively tracking the sysid, eg between an estimate expiring and
+    // set_target_sysid_kinematic_active() no longer being called at all) -
+    // without this, a previously-pushed estimate would keep looking fresh
+    // by timestamp alone for up to AP_MOUNT_SYSID_TIMEOUT_MS after the
+    // estimator itself considers it stale
+    void clear_target_sysid_kinematic_estimate(uint8_t sysid);
+
 #if AP_MOUNT_ROI_WPNEXT_OFFSET_ENABLED
     // set_roi_target_wpnext_offset - point to next waypoint, with offsets
     void set_roi_target_wpnext_offset(const Vector3f &rpy);

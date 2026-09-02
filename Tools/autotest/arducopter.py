@@ -8159,6 +8159,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             self.set_parameters({
                 "FOLL_ENABLE": 1,
                 "FOLL_SYSID": self.mav.source_system,
+                "FOLL_ALT_TYPE": 1,  # ABOVE_HOME - pin explicitly rather than relying on Copter's default
             })
             # use a target with a modest elevation angle, comfortably inside
             # the mount's pitch limits (MNT1_PITCH_MAX=45 in this test): the

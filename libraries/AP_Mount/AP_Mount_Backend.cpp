@@ -439,6 +439,16 @@ void AP_Mount_Backend::set_target_sysid_kinematic_estimate(uint8_t sysid, const 
     _target_sysid_kinematic_update_ms = AP_HAL::millis();
 }
 
+// called by vehicle code the moment that same external kinematic estimator
+// no longer has a usable estimate
+void AP_Mount_Backend::clear_target_sysid_kinematic_estimate(uint8_t sysid)
+{
+    if (sysid != _target_sysid) {
+        return;
+    }
+    _target_sysid_kinematic_update_ms = 0;
+}
+
 #if HAL_GCS_ENABLED
 // send a CAMERA_INFORMATION message to GCS
 void AP_Mount_Backend::send_camera_information(mavlink_channel_t chan) const
@@ -1264,31 +1274,46 @@ bool AP_Mount_Backend::get_angle_target_to_sysid(MountAngleTarget& angle_rad) co
     // bare timeout below
     if (_target_sysid_kinematic_active_ms != 0 &&
         AP_HAL::millis() - _target_sysid_kinematic_active_ms <= AP_MOUNT_SYSID_KINEMATIC_ACTIVE_TIMEOUT_MS) {
+        // _target_sysid_kinematic_update_ms is cleared by vehicle code (see
+        // clear_target_sysid_kinematic_estimate()) the moment the estimator
+        // itself no longer has a usable estimate, so its freshness here
+        // tracks the estimator's own validity rather than ticking down on a
+        // second, independent timeout - without that, this window and the
+        // estimator's own timeout could stack, serving a frozen location
+        // (re-deriving the angle to it every loop, not holding) for up to
+        // both timeouts combined before ever reaching the hold branch below
         if (_target_sysid_kinematic_update_ms != 0 &&
             AP_HAL::millis() - _target_sysid_kinematic_update_ms <= AP_MOUNT_SYSID_TIMEOUT_MS) {
-            // the estimator's location may be expressed in a home-relative
-            // altitude frame that doesn't match our own home (eg AP_Follow's
-            // ABOVE_HOME handling assumes a shared home with the target,
-            // which isn't guaranteed) - override with our own
-            // independently-tracked absolute altitude, which has no such
-            // ambiguity, whenever we have one
-            Location loc = _target_sysid_kinematic_location;
             if (_target_sysid_location.initialised()) {
+                // the estimator's location may be expressed in a home-relative
+                // altitude frame that doesn't match our own home (eg AP_Follow's
+                // ABOVE_HOME handling assumes a shared home with the target,
+                // which isn't guaranteed) - override with our own
+                // independently-tracked absolute altitude, which has no such
+                // ambiguity
+                Location loc = _target_sysid_kinematic_location;
                 loc.set_alt_cm(_target_sysid_location.alt, Location::AltFrame::ABSOLUTE);
+                if (get_angle_target_to_location(loc, angle_rad)) {
+                    return true;
+                }
+                // the estimator has a usable estimate but we couldn't turn it
+                // into an angle (eg terrain data unavailable); fall through to
+                // the timeout-based path below rather than just failing outright
+            } else {
+                // we have no independently-tracked absolute altitude to
+                // override with yet (eg the target was only just set and our
+                // own handle_global_position_int() hasn't seen a packet for
+                // it); using the estimator's own altitude frame unchecked
+                // risks the exact altitude-reference bug the override exists
+                // to prevent, so hold rather than risk it
+                return false;
             }
-            if (get_angle_target_to_location(loc, angle_rad)) {
-                return true;
-            }
-            // the estimator has a usable estimate but we couldn't turn it
-            // into an angle (eg terrain data unavailable); fall through to
-            // the timeout-based path below rather than just failing outright
         } else {
             // we're relying on this estimator for the target and it
-            // currently has no estimate (eg its own timeout elapsed, which
-            // may be shorter than AP_MOUNT_SYSID_TIMEOUT_MS) - hold the last
-            // commanded angle rather than falling back to the raw,
-            // differently-timed location below, which would cause a
-            // visible snap back to a less current position
+            // currently has no estimate - hold the last commanded angle
+            // rather than falling back to the raw, differently-timed
+            // location below, which would cause a visible snap back to a
+            // less current position
             return false;
         }
     }
