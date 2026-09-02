@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-076"
+SCRIPT_VERSION      = "4.8.0-077"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -556,6 +556,12 @@ MIN_HUNG_PROGRESS_M = 10.0
 -- minimum length of the bendy-ruler second-leg probe, so a plane sitting almost on top
 -- of its waypoint still tests a sane segment (mirrors OA_BENDYRULER_LOOKAHEAD_STEP2_MIN)
 MIN_STEP2_M = 2.0
+-- Shortest turn chord worth its own obstacle probe.  Below this the post-turn point is on
+-- top of us and the bearing to it is noise, so probe_turn_arc() declines.
+MIN_TURN_CHORD_M = 5.0
+-- Clamp for the clearances written to DAAD: "no obstacle at all" is FLT_MAX internally and
+-- would wreck the autoscaling of any plot it shares an axis with.
+LOG_CLEARANCE_MAX_M = 9999.0
 
 -- Maximum achievable rate of turn (deg/s) in a level banked turn at the configured
 -- roll limit: omega = g * tan(phi) / V.  Both the startup sanity checks and the
@@ -1290,18 +1296,21 @@ local DAA = {
     end
 
     -- methods to log DAA results DAAD = Detect, DAAA = Alert, DAAV = aVoid
-    local function log_detect_result(obstacle_found, distance_found_m, distance_to_target_m, best_bearing_deg, target_loc, obstacle_type)
+    local function log_detect_result(obstacle_found, distance_found_m, best_distance_m, distance_to_target_m, best_bearing_deg, target_loc, obstacle_type)
         if target_loc == nil or distance_found_m == nil or distance_to_target_m == nil or best_bearing_deg == nil then
             -- we can't be avoiding if no target, so no loggin required
             return
         end
         local status, err = pcall(logger.write, logger, "DAAD",
-            'Obs,DstF,DstT,HdgB,Tfnd,TLat,TLng,TAlt,TFra,ObjT',
-            'BffffLLfBI',                   -- Formats (L for Lat/Lng, f for Alt)
-            '-mmmdDUm--',                   -- Units (D=lat deg, U=lng deg, m=meter)
-            '-----GG---',                   -- Multipliers (G=1e-7 for L types)
+            'Obs,DstF,DstB,DstT,HdgB,Tfnd,TLat,TLng,TAlt,TFra,ObjT',
+            'BfffffLLfBI',                  -- Formats (L for Lat/Lng, f for Alt)
+            '-mmmmdDUm--',                  -- Units (D=lat deg, U=lng deg, m=meter)
+            '------GG---',                  -- Multipliers (G=1e-7 for L types)
             (obstacle_found and 1 or 0),    -- Obs - Obstacle found true/false
-            distance_found_m,               -- DstF - Distance to found obstacle in meters
+            distance_found_m,               -- DstF - clearance of the WORST heading in the sweep
+            -- DstB - clearance of the heading we CHOSE (HdgB).  A heading that clears every
+            -- obstacle reports FLT_MAX, so clamp it to something a log viewer can scale.
+            math.max(math.min(best_distance_m, LOG_CLEARANCE_MAX_M), -LOG_CLEARANCE_MAX_M),
             distance_to_target_m,           -- DstT - Distance to proposed new target to avoid the obstacle
             wrap_360(best_bearing_deg),     -- HdgB - Best bearing found to avoid obstacles (0-360 deg)
             (target_loc ~= nil and 1 or 0), -- TFnd - Target found
@@ -1843,29 +1852,60 @@ local DAA = {
         return closest_distance_m, straight, closest_obstacle
     end
 
-    -- This method calculates the projected location in the desired direction taking account of airspeed, windspeed and the time it takes to turn
+    -- Where the vehicle will actually BE once it has turned onto course_deg.  A candidate
+    -- course is not flown from where we are now: getting onto it costs a turn, and the arc
+    -- of that turn carries the vehicle up to 2R towards whatever lies on the inside of it.
+    -- At 25 m/s and 60 deg of roll R is ~35 m, so a reversal displaces ~70 m - more than a
+    -- fence standoff - and a heading judged from the present position can read as clear and
+    -- still fly the vehicle through the fence.
+    --
+    -- Displacement around a circular arc of turn angle th is R*sin(th) along the current
+    -- ground course plus R*(1 - cos(th)) to the side of the turn.  R is derived from the arc
+    -- length the vehicle will actually cover (ground speed x turn time) rather than from
+    -- airspeed, so the wind-corrected ground speed carries through and a near-zero turn
+    -- degrades to "carry straight on".
     local function location_after_course_change(from_loc, course_deg, to_loc)
         local course_change_deg = wrap_180(course_deg - ground_course_deg)
-        local ground_speed_ms = effective_groundspeed(airspeed_ms, course_deg, wind_dir_rad, wind_speed) -- ground speed based on the new bearing (accounting for wind)
-        local rate_of_turn_dps = max_turn_rate_dps(airspeed_ms)
+        local ground_speed_ms   = effective_groundspeed(airspeed_ms, course_deg, wind_dir_rad, wind_speed)
+        local rate_of_turn_dps  = max_turn_rate_dps(airspeed_ms)
 
-        if math.abs(course_change_deg) > 170 or rate_of_turn_dps <= 0 then
-            -- Skip 180-degree turns as we can't predict the turn direction, and skip
-            -- the projection entirely when there is no usable airspeed to turn at.
-            return from_loc
+        if rate_of_turn_dps <= 0 or ground_speed_ms <= 0 then
+            return from_loc                 -- no usable speed to turn at
         end
-        -- Calculate how long it will take to change course
-        local turn_time_s = math.abs(course_change_deg / rate_of_turn_dps)
-        -- Approximate turn by flying forward for half of the turn time
-        local projected_loc = location_project(from_loc, ground_course_deg, ground_speed_ms * turn_time_s * 0.5, to_loc)
-        -- If turning more than 90 degrees, add sideways movement
-        if math.abs(course_change_deg) > 90 then
-            local direction = course_change_deg > 0 and (ground_course_deg + 90) or (ground_course_deg - 90)
-            local proportion = math.sin(math.rad(math.abs(course_change_deg) - 90))
-            projected_loc = location_project(projected_loc, direction, ground_speed_ms * proportion * turn_time_s * 0.5, to_loc)
+        local arc_length_m  = ground_speed_ms * (math.abs(course_change_deg) / rate_of_turn_dps)
+        local turn_rad      = math.rad(math.abs(course_change_deg))
+        if turn_rad < 1e-3 then
+            return location_project(from_loc, ground_course_deg, arc_length_m, to_loc)
         end
+        local radius_m      = arc_length_m / turn_rad
+        -- Which way we turn: a reversal has no short way round, so the side is whatever
+        -- wrap_180 gives it.  The sweep tries both sides of the target bearing, so the
+        -- opposite reversal is still costed - as its own candidate, with its own bulge.
+        local side_deg      = (course_change_deg >= 0) and (ground_course_deg + 90) or (ground_course_deg - 90)
 
-        return projected_loc
+        local projected_loc = location_project(from_loc, ground_course_deg, radius_m * math.sin(turn_rad), to_loc)
+        return location_project(projected_loc, side_deg, radius_m * (1.0 - math.cos(turn_rad)), to_loc)
+    end
+
+    -- The straight leg above starts where the turn ENDS, so on its own it never looks at the
+    -- ground the turn itself covers.  One extra probe along the chord from here to that point
+    -- closes the gap: against log 161's exclusion circles it caught every case that sampling
+    -- the arc in eight segments caught, and none were missed.  Only worth its cost once the
+    -- turn is big enough to bow away from the leg - below DAA_BR_ANGLE the chord lies along
+    -- it - which also skips it for the small-deflection candidates the sweep usually wins on.
+    local function probe_turn_arc(adjusted_loc, bearing_test_deg, distance_found_m, obstacle_found)
+        if math.abs(wrap_180(bearing_test_deg - ground_course_deg)) <= bendy_angle then
+            return distance_found_m, obstacle_found
+        end
+        if current_loc:get_distance(adjusted_loc) < MIN_TURN_CHORD_M then
+            return distance_found_m, obstacle_found  -- too short to have a meaningful bearing
+        end
+        local turn_distance_m, turn_obstacle =
+                find_closest_obstacle(current_loc, adjusted_loc, current_lookahead, wind_speed)
+        if turn_distance_m ~= nil and turn_distance_m < distance_found_m then
+            return turn_distance_m, turn_obstacle
+        end
+        return distance_found_m, obstacle_found
     end
 
     -- Core clearance probe for an explicit candidate course bearing_test_deg. Returns
@@ -1877,13 +1917,11 @@ local DAA = {
         local avoid_step2_m     = current_lookahead * 2.0
 
         -- Start the look-ahead from where we will actually be after turning onto this
-        -- candidate course. In wind this leads the carrot, so the search both penalises
-        -- headings that drift toward the obstacle and prefers wind-favourable escapes.
-        -- Gated on wind speed so calm-air behaviour (and the autotests) is unchanged.
-        local adjusted_loc      = current_loc
-        if wind_speed > wind_min_ms then
-            adjusted_loc = location_after_course_change(current_loc, bearing_test_deg, target_loc)
-        end
+        -- candidate course.  This used to be applied only in wind, as a way of leading the
+        -- carrot downwind; it is really a TURN lead and calm air needs it just as much.
+        -- Without it the probe assumes the vehicle is already on the candidate course, so a
+        -- heading that needs a reversal is judged against a path the turn never flies.
+        local adjusted_loc          = location_after_course_change(current_loc, bearing_test_deg, target_loc)
 
         -- Position after one step from where we think we will be after turning to bearing_test_deg
         local avoidance_distance_m  = calc_avoidance_distance(avoid_step1_m, full_distance)
@@ -1894,6 +1932,8 @@ local DAA = {
             gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. "closest returned NIL ")
             return FLT_MAX, bearing_deg, nil -- no avoidance required
         end
+        distance_found_m, obstacle_found = probe_turn_arc(adjusted_loc, bearing_test_deg,
+                                                         distance_found_m, obstacle_found)
         if distance_found_m > current_lookahead then
             -- This direction avoids all obstacles for one step. Check if it leads to a clear path for a longer distance.
             local distance2_m, straight2, obstacle2 = test_step2(test_loc, avoid_step2_m, target_loc)
@@ -2324,7 +2364,7 @@ local DAA = {
 
         local proj_distance = math.max(distance_to_target_m, current_lookahead)   -- fix bug 2
         local new_target_loc = location_project(current_loc, best_bearing_deg, proj_distance, target_loc)
-        log_detect_result(true, obstacle_avoiding.distance_m, distance_to_target_m,
+        log_detect_result(true, obstacle_avoiding.distance_m, best_distance_m, distance_to_target_m,
                           best_bearing_deg, new_target_loc, obstacle_avoiding.type)
         return new_target_loc
     end
