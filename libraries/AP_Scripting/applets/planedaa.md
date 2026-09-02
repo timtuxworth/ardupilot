@@ -163,7 +163,9 @@ Collision volumes, and the `FENCE_*` parameters for the altitude/geo fences.
 |-----------|---------|-------|-------------|
 | `DAA_ACT_FN` | 308 | | RC option / scripting function used to activate the DAA capability. |
 | `DAA_MARGIN_FENCE` | 0 | m | Avoidance margin kept clear of the geofence. `0` (default) uses `WP_LOITER_RAD`, so the standoff equals one loiter circle and fences don't thrash; set a non-zero value to override. |
-| `DAA_LKAHD` | 1000 | m | Avoidance lookahead distance — how far ahead candidate headings are probed for obstacles. It also floors how far out the commanded avoidance target is placed, which is not obvious and is deliberate — see _Where the commanded avoidance target is placed_. |
+| `DAA_LKAHD_M` | 1000 | m | How far along each candidate heading the bendy ruler probes for a clear path (the second leg probes a further 2×). |
+| `DAA_DETECT_M` | 1000 | m | How far ahead obstacles are detected at all, and the range beyond which one is not announced. Shortening this costs detection — at 250 m the drone-avoidance and fence-alert autotests stop firing. Crewed traffic is unaffected: `detect_aircraft()` uses `AVD_WCLR_XY + DAA_MARGIN_CA`. |
+| `DAA_PLAN_M` | 1000 | m | Minimum distance along the chosen bearing at which the commanded avoidance target is placed — see _Where the commanded avoidance target is placed_. Raise before lowering. |
 | `DAA_UPDATE_RATE` | 10 | Hz | Rate at which avoidance is processed. |
 | `DAA_MARGIN_CA` | 50 | m | Avoidance margin for crewed aircraft (fixed wing, helicopter, eVTOL), over and above the Well Clear margin `AVD_WCLR_XY`. |
 | `DAA_MARGIN_CA_Z` | 30 | m | Vertical avoidance margin for crewed aircraft, over and above the Well Clear vertical separation `AVD_WCLR_Z`. An aircraft triggers the loiter-to-altitude only while its altitude difference from the vehicle is below `AVD_WCLR_Z + DAA_MARGIN_CA_Z`. The vertical mirror of `DAA_MARGIN_CA`. |
@@ -243,14 +245,14 @@ radius `WP_LOITER_RAD` — one loiter circle, and never below the turn radius so
 fences don't thrash (the startup check warns if a non-zero margin is set below
 the turn radius). To override, size it from how far the aircraft travels while
 reacting — i.e. from airspeed — but keep it at least the turn radius. Size
-`DAA_LKAHD` the same way and keep it at least a few times the turn radius (the
+`DAA_LKAHD_M` the same way and keep it at least a few times the turn radius (the
 startup check warns below 3×R); a very long look-ahead (10×+) can over-commit
 the far-field path. In wind, `DAA_WIND_MARG` widens the fence standoff
 automatically.
 
 The look-ahead also explains why an `AVOIDING:` distance can be much larger than
 the obstacle's standoff. The bendy-ruler projects your path forward up to
-`DAA_LKAHD` (e.g. 1000 m) and starts deviating as soon as that projected path
+`DAA_DETECT_M` (e.g. 1000 m) and starts deviating as soon as that projected path
 would pass within the standoff of the obstacle (for a drone, `AVD_UAV_XY +
 DAA_MARGIN_UAV`; for a fence, `DAA_MARGIN_FENCE`). So with an obstacle sitting on
 or near your path, the aircraft begins avoiding — and the `AVOIDING:` message
@@ -261,12 +263,14 @@ at which avoidance begins.
 ### Where the commanded avoidance target is placed
 
 While avoiding, the applet replaces the vehicle's `next_WP_loc` with a target along the
-chosen bearing, at `max(distance_to_target, DAA_LKAHD)`.
+chosen bearing, at `max(distance_to_target, DAA_PLAN_M)`.
 
-Using a *look-ahead* as a *steering* distance looks like a mistake, and its origin was
-accidental — it came in as collateral while fixing an unrelated bug in
-`resist_bearing_change`. **It is load-bearing anyway, and shortening it makes things
-worse.**
+Until 4.8.0-080 that floor was `DAA_LKAHD`, so it could not be set independently of how
+far the sweep probed — one parameter was doing three jobs (probe length, detection
+horizon and this). They are now `DAA_LKAHD_M`, `DAA_DETECT_M` and `DAA_PLAN_M`, all
+defaulting to 1000 m so the split changes nothing on its own.
+
+**Do not shorten `DAA_PLAN_M` casually.**
 
 ArduPlane's past-the-waypoint test draws its finish line *through* `next_WP_loc`. A
 target a kilometre out puts that line out of reach. A near one puts it alongside the
@@ -330,7 +334,7 @@ Two consequences worth knowing:
 - The turn cost scales with `ROLL_LIMIT_DEG` and airspeed. A low roll limit makes
   every deflection more expensive and pushes the ruler towards shallower
   avoidance started further out, which is the correct trade — but it needs the
-  look-ahead (`DAA_LKAHD`) to be long enough to see the obstacle by then.
+  detection horizon (`DAA_DETECT_M`) to be long enough to see the obstacle by then.
 
 ### Moving obstacles and closest-approach
 
@@ -450,6 +454,47 @@ If `DAA_TRAP_ACT` would command the mode the aircraft is _already_ in (e.g.
 trapped mid-`RTL` with `DAA_TRAP_ACT=RTL`), commanding it again would do nothing,
 so it escalates to `DAA_TRAP_ESC_ACT` (default `QRTL`) to actually stop the
 aircraft. Set `DAA_TRAP_ESC_ACT` equal to `DAA_TRAP_ACT` to disable escalation.
+
+## Files, and what belongs where
+
+The applet is split so that **`planedaa.lua` holds avoidance _policy_ and the modules hold
+_mechanism_**. If you need behaviour these parameters do not cover — a different alert, a
+different action, your own failsafe — you should only have to edit `planedaa.lua`.
+
+| file | goes in `scripts/` or `scripts/modules/` | holds |
+|---|---|---|
+| `planedaa.lua` | `scripts/` | every parameter, all alerting, all commanding (target hijack, loiter, altitude clamp), the trapped/hung failsafe, the skipped-waypoint notice |
+| `daageo.lua` | `scripts/modules/` | `DAAgeometry` — angles, locations, turn radius and rate, wind-corrected ground speed |
+| `daaobs.lua` | `scripts/modules/` | `DAAobstacles` — the `OBSTACLE_TYPE` taxonomy, obstacle labelling, standoffs, `find_closest_obstacle` |
+| `mavlink_wrappers.lua` | `scripts/modules/` | MAVLink command helpers |
+
+**All four must be installed.** A missing module is a load failure, not a degraded mode.
+`@Param` documentation has to stay in `planedaa.lua`: the parameter metadata tool only
+scans `libraries/AP_Scripting/applets` and `drivers`, so a `@Param` block moved into a
+module silently disappears from the documentation.
+
+### Distinct names are a budget
+
+Lua's parser keeps one table of **every distinct identifier, string literal and number in a
+chunk**, and it is sized in powers of two. Crossing **1024 entries** doubles it from 32 KB
+to 64 KB *while parsing*, and because the collector does not run inside `luaL_loadfile`
+that lands straight on the peak. A large script that fits comfortably once loaded can fail
+to load with `Insufficent memory`.
+
+This is not hypothetical: v4.8.0-078 sat at **1020 entries — four names from the wall**.
+Adding two parameters took it to 1029 and it stopped loading.
+
+Things worth knowing before adding to this applet:
+
+- It is the **count** of distinct names, not their length. Shortening names does nothing;
+  reusing a name that already exists is free.
+- Comments are free — the lexer discards them without buffering. Do not trim comments for
+  memory; it was measured and recovers nothing.
+- Every parameter costs **two** entries: the global (`DAA_MARGIN_FENCE`) and the string
+  passed to `bind_add_param` (`'MARGIN_FENCE'`).
+- **Splitting into a module is the only real lever** — each chunk gets its own 1024.
+
+Current occupancy: `planedaa.lua` 899, `daaobs.lua` 186, `daageo.lua` 78.
 
 ## Logging
 
