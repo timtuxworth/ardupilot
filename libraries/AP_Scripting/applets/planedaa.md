@@ -9,6 +9,10 @@ the required data to Lua and then allows the Lua to implement most of the Alert 
 in order to allow for the maximum implementation flexibility in the face of varying regulatory
 environments across the globe.
 
+This means that it's quite likely that if you have policies you need to apply that don't fit this
+implementation with its _extensive_ set of parameters, you should be able to make most changes you
+might need by **changing the lua script** to fit your requirements.
+
 This script needs the `AP_OAScripting` bindings, which are **not in a default
 firmware build** on most boards. See _Firmware build_ below.
 
@@ -26,9 +30,8 @@ The applet talks to the `OAScripting` singleton, which the `AP_OAScripting`
 library in AC_Avoidance exposes to Lua. The script aborts at startup if that
 object is not present, so the firmware must contain it.
 
-DAA costs roughly **7.1 kB of flash** (measured on Durandal: 1,599,176 bytes
-without, 1,606,288 with), so it is deliberately **not** in a default build. It is
-compiled in by default only on targets with more than 2 MB of program space —
+DAA costs roughly **7 kB of flash**, so it is deliberately **not** in a default build. It is
+compiled in by default only on targets with more than 2 MB of program space. This includes
 SITL, Linux, and boards carrying external program flash such as CubeRedPrimary.
 On every other board, including ordinary 2 MB boards like QiotekZealotH743,
 CubeOrange+, Durandal, MatekH743 and the Pixhawk6X, you must ask for it:
@@ -47,7 +50,7 @@ To confirm a binary has it, `Tools/scripts/extract_features.py <binary>` lists
 | Parameter | Value | Notes |
 |-----------|-------|-------|
 | `SCR_ENABLE` | `1` | Enable Lua scripting (reboot required). |
-| `SCR_VM_I_COUNT` | `1000000` | **Increase from the default.** `planedaa.lua` is large and the per-loop instruction budget must be raised or the VM will fault. The applet warns at startup below `150000`. |
+| `SCR_VM_I_COUNT` | `250000` | **Increase from the default.** `planedaa.lua` is large and the per-loop instruction budget must be raised or the VM will fault. The applet warns at startup below `150000`. |
 
 Do not treat `SCR_VM_I_COUNT` as a value to trim. It is an _instruction_ budget,
 not a memory allocation — raising it costs no RAM. `1000000` is the top of the
@@ -160,7 +163,7 @@ Collision volumes, and the `FENCE_*` parameters for the altitude/geo fences.
 |-----------|---------|-------|-------------|
 | `DAA_ACT_FN` | 308 | | RC option / scripting function used to activate the DAA capability. |
 | `DAA_MARGIN_FENCE` | 0 | m | Avoidance margin kept clear of the geofence. `0` (default) uses `WP_LOITER_RAD`, so the standoff equals one loiter circle and fences don't thrash; set a non-zero value to override. |
-| `DAA_LKAHD` | 1000 | m | Avoidance lookahead distance. |
+| `DAA_LKAHD` | 1000 | m | Avoidance lookahead distance — how far ahead candidate headings are probed for obstacles. It also floors how far out the commanded avoidance target is placed, which is not obvious and is deliberate — see _Where the commanded avoidance target is placed_. |
 | `DAA_UPDATE_RATE` | 10 | Hz | Rate at which avoidance is processed. |
 | `DAA_MARGIN_CA` | 50 | m | Avoidance margin for crewed aircraft (fixed wing, helicopter, eVTOL), over and above the Well Clear margin `AVD_WCLR_XY`. |
 | `DAA_MARGIN_CA_Z` | 30 | m | Vertical avoidance margin for crewed aircraft, over and above the Well Clear vertical separation `AVD_WCLR_Z`. An aircraft triggers the loiter-to-altitude only while its altitude difference from the vehicle is below `AVD_WCLR_Z + DAA_MARGIN_CA_Z`. The vertical mirror of `DAA_MARGIN_CA`. |
@@ -254,6 +257,54 @@ or near your path, the aircraft begins avoiding — and the `AVOIDING:` message
 reports the true range — while the obstacle is still hundreds of metres ahead.
 The standoff is the _lateral_ clearance held around the obstacle, not the range
 at which avoidance begins.
+
+### Where the commanded avoidance target is placed
+
+While avoiding, the applet replaces the vehicle's `next_WP_loc` with a target along the
+chosen bearing, at `max(distance_to_target, DAA_LKAHD)`.
+
+Using a *look-ahead* as a *steering* distance looks like a mistake, and its origin was
+accidental — it came in as collateral while fixing an unrelated bug in
+`resist_bearing_change`. **It is load-bearing anyway, and shortening it makes things
+worse.**
+
+ArduPlane's past-the-waypoint test draws its finish line *through* `next_WP_loc`. A
+target a kilometre out puts that line out of reach. A near one puts it alongside the
+aircraft — and the moment the avoidance bearing has any component back towards the
+previous waypoint, the mission completes and moves on. It also costs clearance: replacing
+the floor with `max(WP_LOITER_RAD, 2 × WP_RADIUS)` was tried, and `PlaneDAAHungTrapFires`
+skipped its waypoint at 106 m and finished **7 m** off the fence instead of clearing it.
+
+Anything that shortens this has to beat two conditions, not one:
+
+- clear the waypoint acceptance distance (`WP_RADIUS` scaled by EAS2TAS², see
+  `AP_L1_Control::turn_distance`), or the target reads as *Reached waypoint*;
+- stay beyond the projection of the *previous* waypoint onto the avoidance bearing, or
+  the target reads as *Passed waypoint*.
+
+The visible cost of leaving it long is a wide excursion away from the route before the
+aircraft comes back to it, most pronounced at the 1000 m default on a short leg.
+
+### Avoidance can skip a waypoint, and says so
+
+Even with a long target, the finish line drawn through a laterally offset avoidance
+target can still be crossed early — observed at 100–177 m short on a real flight,
+reported by the vehicle as `Passed waypoint #n dist 140m`.
+
+**This is the correct outcome**: containment beats mission fidelity, and the aircraft
+should not fly back through a fence to tick off a waypoint. It is inherent to steering by
+target replacement and cannot be tuned away.
+
+What it should not be is silent, so the applet announces it:
+
+```
+pDAA WP3 skipped by 140m while avoiding
+```
+
+Sent when the mission index moves **forward** while an avoidance target is commanded and
+the aircraft is further from the waypoint it just left than `WP_RADIUS`. A backwards move
+is never reported — a GCS can `DO_JUMP` the mission while avoidance happens to be running,
+and that is not the applet's doing.
 
 ### Why a candidate heading is judged from where the turn ends
 
