@@ -77,13 +77,20 @@ end
 -- setup follow mode specific parameters
 assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 37), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
 
+-- Every parameter this applet binds lives in this one table rather than in a global each.
+-- The field name IS the string handed to bind_add_param, so the pair costs the parser a
+-- single distinct name instead of two - see planedaa.md, "Distinct names are a budget" -
+-- and it keeps 45 names out of _ENV.  The cached locals further down are what the code
+-- actually reads; these objects are only touched when parameters are refreshed.
+local PARAM = {}
+
 --[[
     // @Param: DAA_ACT_FN
     // @DisplayName: DAA Activation
     // @Description: Disable the DAA capability or turn it off (defaults to on)
     // @Range: 300 308
 --]]
-DAA_ACT_FN = bind_add_param("ACT_FN", 1, 308)
+PARAM.ACT_FN = bind_add_param("ACT_FN", 1, 308)
 
 --[[
   // @Param: DAA_MARGIN_FENCE
@@ -91,7 +98,7 @@ DAA_ACT_FN = bind_add_param("ACT_FN", 1, 308)
   // @Description: Avoidance margin (m) kept clear of fences. 0 (default) uses the turn radius WP_LOITER_RAD, so the standoff matches a single loiter circle and fences do not thrash.
   // @Units: m
 --]]
-DAA_MARGIN_FENCE = bind_add_param('MARGIN_FENCE', 2, 0)
+PARAM.MARGIN_FENCE = bind_add_param('MARGIN_FENCE', 2, 0)
 
 --[[
   // @Param: DAA_LKAHD_M
@@ -101,7 +108,7 @@ DAA_MARGIN_FENCE = bind_add_param('MARGIN_FENCE', 2, 0)
   // @Range: 50 2000
   // @User: Standard
 --]]
-DAA_LKAHD_M  = bind_add_param('LKAHD_M', 3, 1000)
+PARAM.LKAHD_M  = bind_add_param('LKAHD_M', 3, 1000)
 
 --[[
   // @Param: DAA_UPDATE_RATE
@@ -109,7 +116,7 @@ DAA_LKAHD_M  = bind_add_param('LKAHD_M', 3, 1000)
   // @Description: Avoidance processing rate
   // @Units: Hz
 --]]
-DAA_UPDATE_RATE  = bind_add_param('UPDATE_RATE', 4, 10.0)
+PARAM.UPDATE_RATE  = bind_add_param('UPDATE_RATE', 4, 10.0)
 
 --[[
   // @Param: DAA_MARGIN_CA
@@ -117,7 +124,7 @@ DAA_UPDATE_RATE  = bind_add_param('UPDATE_RATE', 4, 10.0)
   // @Description: Avoidance margin for crewed aircraft (fixed wing, helicopter, eVTOL) over and above the Well Clear margin AVD_WCLR_XY
   // @Units: m
 --]]
-DAA_MARGIN_CA  = bind_add_param('MARGIN_CA', 5, 50)
+PARAM.MARGIN_CA  = bind_add_param('MARGIN_CA', 5, 50)
 
 --[[
   // @Param: DAA_MARGIN_WTH
@@ -125,7 +132,7 @@ DAA_MARGIN_CA  = bind_add_param('MARGIN_CA', 5, 50)
   // @Description: Avoidance radius for Weather/Clouds/Rain
   // @Units: m
 --]]
-DAA_MARGIN_WTH  = bind_add_param('MARGIN_WTH', 6, 173)
+PARAM.MARGIN_WTH  = bind_add_param('MARGIN_WTH', 6, 173)
 
 --[[
   // @Param: DAA_MARGIN_BIRD
@@ -133,7 +140,7 @@ DAA_MARGIN_WTH  = bind_add_param('MARGIN_WTH', 6, 173)
   // @Description: Avoidance margin for Migratory Birds
   // @Units: m
 --]]
-DAA_MARGIN_BIRD  = bind_add_param('MARGIN_BIRD', 7, 100)
+PARAM.MARGIN_BIRD  = bind_add_param('MARGIN_BIRD', 7, 100)
 
 --[[
   // @Param: DAA_MARGIN_PREY
@@ -141,7 +148,7 @@ DAA_MARGIN_BIRD  = bind_add_param('MARGIN_BIRD', 7, 100)
   // @Description: Avoidance radius for Birds of Prey
   // @Units: m
 --]]
-DAA_MARGIN_PREY  = bind_add_param('MARGIN_PREY', 8, 200)
+PARAM.MARGIN_PREY  = bind_add_param('MARGIN_PREY', 8, 200)
 
 --[[
   // @Param: DAA_MARGIN_UAV
@@ -149,7 +156,7 @@ DAA_MARGIN_PREY  = bind_add_param('MARGIN_PREY', 8, 200)
   // @Description: Avoidance radius for UAV/drone (MAVLink sourced)
   // @Units: m
 --]]
-DAA_MARGIN_UAV  = bind_add_param('MARGIN_UAV', 9, 50)
+PARAM.MARGIN_UAV  = bind_add_param('MARGIN_UAV', 9, 50)
 
 --[[
   // @Param: DAA_MARGIN_AIS
@@ -157,7 +164,7 @@ DAA_MARGIN_UAV  = bind_add_param('MARGIN_UAV', 9, 50)
   // @Description: Avoidance radius for AIS (MAVLink sourced)
   // @Units: m
 --]]
-DAA_MARGIN_AIS  = bind_add_param('MARGIN_AIS', 10, 50)
+PARAM.MARGIN_AIS  = bind_add_param('MARGIN_AIS', 10, 50)
 
 --[[
   // @Param: DAA_MARGIN_PRX
@@ -165,7 +172,7 @@ DAA_MARGIN_AIS  = bind_add_param('MARGIN_AIS', 10, 50)
   // @Description: Avoidance radius for obstacles detected by proximity sensors. Typically pretty close
   // @Units: m
 --]]
-DAA_MARGIN_PRX  = bind_add_param('MARGIN_PRX', 11, 50)
+PARAM.MARGIN_PRX  = bind_add_param('MARGIN_PRX', 11, 50)
 
 --[[
     // @Param: DAA_BR_RATIO
@@ -175,7 +182,7 @@ DAA_MARGIN_PRX  = bind_add_param('MARGIN_PRX', 11, 50)
     // @Increment: 0.1
     // @User: Standard
 --]]
-DAA_BR_RATIO = bind_add_param('BR_RATIO', 12, 1.5)
+PARAM.BR_RATIO = bind_add_param('BR_RATIO', 12, 1.5)
 
 --[[
     // @Param: DAA_BR_ANGLE
@@ -185,7 +192,7 @@ DAA_BR_RATIO = bind_add_param('BR_RATIO', 12, 1.5)
     // @Increment: 5
     // @User: Standard
 --]]
-DAA_BR_ANGLE = bind_add_param('BR_ANGLE', 13, 45)
+PARAM.BR_ANGLE = bind_add_param('BR_ANGLE', 13, 45)
 
 --[[
     // @Param: DAA_AVD_ALT
@@ -195,7 +202,7 @@ DAA_BR_ANGLE = bind_add_param('BR_ANGLE', 13, 45)
     // @Increment: 5
     // @User: Standard
 --]]
-DAA_AVD_ALT = bind_add_param('AVD_ALT', 14, 50)
+PARAM.AVD_ALT = bind_add_param('AVD_ALT', 14, 50)
 
 --[[
     // @Param: DAA_AVD_ALT_TP
@@ -204,7 +211,7 @@ DAA_AVD_ALT = bind_add_param('AVD_ALT', 14, 50)
     // @Values: 0:Absolute,1:Above Home,2:Above Origin,3:Above Terrain
     // @User: Standard
 --]]
-DAA_AVD_ALT_TP = bind_add_param('AVD_ALT_TP', 15, 3)
+PARAM.AVD_ALT_TP = bind_add_param('AVD_ALT_TP', 15, 3)
 
 --[[
     // @Param: DAA_AVD_ALERT
@@ -213,7 +220,7 @@ DAA_AVD_ALT_TP = bind_add_param('AVD_ALT_TP', 15, 3)
     // @Values: 0: None, 1: Alert
     // @User: Standard
 --]]
-DAA_AVD_ALERT = bind_add_param('AVD_ALERT', 16, 1)
+PARAM.AVD_ALERT = bind_add_param('AVD_ALERT', 16, 1)
 
 --[[
     // @Param: DAA_AVD_ACTION
@@ -222,7 +229,7 @@ DAA_AVD_ALERT = bind_add_param('AVD_ALERT', 16, 1)
     // @Values: 0: None, 1: Avoid
     // @User: Standard
 --]]
-DAA_AVD_ACTION = bind_add_param('AVD_ACTION', 17, 1)
+PARAM.AVD_ACTION = bind_add_param('AVD_ACTION', 17, 1)
 
 --[[
     // @Param: DAA_MARGIN_ALT
@@ -233,7 +240,7 @@ DAA_AVD_ACTION = bind_add_param('AVD_ACTION', 17, 1)
     // @Increment: 1
     // @User: Standard
 --]]
-DAA_MARGIN_ALT = bind_add_param('MARGIN_ALT', 18, 20)
+PARAM.MARGIN_ALT = bind_add_param('MARGIN_ALT', 18, 20)
 
 --[[
     // @Param: DAA_ALT_HYST_M
@@ -244,7 +251,7 @@ DAA_MARGIN_ALT = bind_add_param('MARGIN_ALT', 18, 20)
     // @Increment: 1
     // @User: Standard
 --]]
-DAA_ALT_HYST_M = bind_add_param('ALT_HYST_M', 19, 10)
+PARAM.ALT_HYST_M = bind_add_param('ALT_HYST_M', 19, 10)
 
 --[[
     // @Param: DAA_ALT_COOL_S
@@ -255,7 +262,7 @@ DAA_ALT_HYST_M = bind_add_param('ALT_HYST_M', 19, 10)
     // @Increment: 1
     // @User: Standard
 --]]
-DAA_ALT_COOL_S = bind_add_param('ALT_COOL_S', 20, 15)
+PARAM.ALT_COOL_S = bind_add_param('ALT_COOL_S', 20, 15)
 
 --[[
     // @Param: DAA_HEADING_INC
@@ -267,7 +274,7 @@ DAA_ALT_COOL_S = bind_add_param('ALT_COOL_S', 20, 15)
     // @User: Advanced
 --]]
 DEFAULT_HEADING_INC_DEG = 1.5
-DAA_HEADING_INC = bind_add_param('HEADING_INC', 21, DEFAULT_HEADING_INC_DEG)
+PARAM.HEADING_INC = bind_add_param('HEADING_INC', 21, DEFAULT_HEADING_INC_DEG)
 
 --[[
     // @Param: DAA_WIND_MIN
@@ -278,7 +285,7 @@ DAA_HEADING_INC = bind_add_param('HEADING_INC', 21, DEFAULT_HEADING_INC_DEG)
     // @Increment: 0.5
     // @User: Advanced
 --]]
-DAA_WIND_MIN = bind_add_param('WIND_MIN', 22, 2.0)
+PARAM.WIND_MIN = bind_add_param('WIND_MIN', 22, 2.0)
 
 --[[
     // @Param: DAA_WIND_MARG
@@ -289,7 +296,7 @@ DAA_WIND_MIN = bind_add_param('WIND_MIN', 22, 2.0)
     // @Increment: 0.5
     // @User: Advanced
 --]]
-DAA_WIND_MARG = bind_add_param('WIND_MARG', 23, 5.0)
+PARAM.WIND_MARG = bind_add_param('WIND_MARG', 23, 5.0)
 
 --[[
     // @Param: DAA_SLEW_DPS
@@ -300,7 +307,7 @@ DAA_WIND_MARG = bind_add_param('WIND_MARG', 23, 5.0)
     // @Increment: 1
     // @User: Advanced
 --]]
-DAA_SLEW_DPS = bind_add_param('SLEW_DPS', 24, 20)
+PARAM.SLEW_DPS = bind_add_param('SLEW_DPS', 24, 20)
 
 --[[
     // @Param: DAA_SLEW_URG
@@ -311,7 +318,7 @@ DAA_SLEW_DPS = bind_add_param('SLEW_DPS', 24, 20)
     // @Increment: 0.5
     // @User: Advanced
 --]]
-DAA_SLEW_URG = bind_add_param('SLEW_URG', 25, 4)
+PARAM.SLEW_URG = bind_add_param('SLEW_URG', 25, 4)
 
 --[[
     // @Param: DAA_SIDE_HOLD
@@ -322,7 +329,7 @@ DAA_SLEW_URG = bind_add_param('SLEW_URG', 25, 4)
     // @Increment: 0.5
     // @User: Advanced
 --]]
-DAA_SIDE_HOLD = bind_add_param('SIDE_HOLD', 26, 3)
+PARAM.SIDE_HOLD = bind_add_param('SIDE_HOLD', 26, 3)
 
 --[[
     // @Param: DAA_CPA_MIN
@@ -333,7 +340,7 @@ DAA_SIDE_HOLD = bind_add_param('SIDE_HOLD', 26, 3)
     // @Increment: 0.5
     // @User: Advanced
 --]]
-DAA_CPA_MIN = bind_add_param('CPA_MIN', 27, 2)
+PARAM.CPA_MIN = bind_add_param('CPA_MIN', 27, 2)
 
 --[[
     // @Param: DAA_TRAP_ACT
@@ -342,7 +349,7 @@ DAA_CPA_MIN = bind_add_param('CPA_MIN', 27, 2)
     // @Values: 0:Disabled,1:RTL,2:QRTL,3:QLOITER,4:QLAND
     // @User: Standard
 --]]
-DAA_TRAP_ACT = bind_add_param('TRAP_ACT', 28, 0)
+PARAM.TRAP_ACT = bind_add_param('TRAP_ACT', 28, 0)
 
 --[[
     // @Param: DAA_TRAP_S
@@ -353,7 +360,7 @@ DAA_TRAP_ACT = bind_add_param('TRAP_ACT', 28, 0)
     // @Increment: 0.5
     // @User: Standard
 --]]
-DAA_TRAP_S = bind_add_param('TRAP_S', 29, 5)
+PARAM.TRAP_S = bind_add_param('TRAP_S', 29, 5)
 
 --[[
     // @Param: DAA_TRAP_CLR_S
@@ -364,7 +371,7 @@ DAA_TRAP_S = bind_add_param('TRAP_S', 29, 5)
     // @Increment: 1
     // @User: Standard
 --]]
-DAA_TRAP_CLR_S = bind_add_param('TRAP_CLR_S', 30, 4)
+PARAM.TRAP_CLR_S = bind_add_param('TRAP_CLR_S', 30, 4)
 
 --[[
     // @Param: DAA_TRAP_ESC_ACT
@@ -373,7 +380,7 @@ DAA_TRAP_CLR_S = bind_add_param('TRAP_CLR_S', 30, 4)
     // @Values: 1:RTL,2:QRTL,3:QLOITER,4:QLAND
     // @User: Standard
 --]]
-DAA_TRAP_ESC_ACT = bind_add_param('TRAP_ESC_ACT', 31, 2)
+PARAM.TRAP_ESC_ACT = bind_add_param('TRAP_ESC_ACT', 31, 2)
 
 --[[
     // @Param: DAA_STALE_S
@@ -383,7 +390,7 @@ DAA_TRAP_ESC_ACT = bind_add_param('TRAP_ESC_ACT', 31, 2)
     // @Range: 0 30
     // @User: Standard
 --]]
-DAA_STALE_S = bind_add_param('STALE_S', 32, 3)
+PARAM.STALE_S = bind_add_param('STALE_S', 32, 3)
 
 --[[
     // @Param: DAA_MARGIN_CA_Z
@@ -393,7 +400,7 @@ DAA_STALE_S = bind_add_param('STALE_S', 32, 3)
     // @Range: 0 200
     // @User: Standard
 --]]
-DAA_MARGIN_CA_Z = bind_add_param('MARGIN_CA_Z', 33, 30)
+PARAM.MARGIN_CA_Z = bind_add_param('MARGIN_CA_Z', 33, 30)
 
 --[[
     // @Param: DAA_LTR_COOL_S
@@ -403,7 +410,7 @@ DAA_MARGIN_CA_Z = bind_add_param('MARGIN_CA_Z', 33, 30)
     // @Range: 0 60
     // @User: Standard
 --]]
-DAA_LTR_COOL_S = bind_add_param('LTR_COOL_S', 34, 10)
+PARAM.LTR_COOL_S = bind_add_param('LTR_COOL_S', 34, 10)
 
 --[[
     // @Param: DAA_HUNG_ALRT_S
@@ -414,7 +421,7 @@ DAA_LTR_COOL_S = bind_add_param('LTR_COOL_S', 34, 10)
     // @Increment: 5
     // @User: Standard
 --]]
-DAA_HUNG_ALRT_S = bind_add_param('HUNG_ALRT_S', 35, 60)
+PARAM.HUNG_ALRT_S = bind_add_param('HUNG_ALRT_S', 35, 60)
 
 --[[
     // @Param: DAA_DETECT_M
@@ -424,7 +431,7 @@ DAA_HUNG_ALRT_S = bind_add_param('HUNG_ALRT_S', 35, 60)
     // @Range: 100 5000
     // @User: Standard
 --]]
-DAA_DETECT_M = bind_add_param('DETECT_M', 36, 1000)
+PARAM.DETECT_M = bind_add_param('DETECT_M', 36, 1000)
 
 --[[
     // @Param: DAA_PLAN_M
@@ -434,66 +441,66 @@ DAA_DETECT_M = bind_add_param('DETECT_M', 36, 1000)
     // @Range: 100 2000
     // @User: Standard
 --]]
-DAA_PLAN_M = bind_add_param('PLAN_M', 37, 1000)
+PARAM.PLAN_M = bind_add_param('PLAN_M', 37, 1000)
 
-AVD_ENABLE                  = bind_param("AVD_ENABLE")
-AVD_WCLR_XY                 = bind_param("AVD_WCLR_XY")
-AVD_WCLR_Z                  = bind_param("AVD_WCLR_Z")
-AVD_UAV_XY                  = bind_param("AVD_UAV_XY")
-AVD_NMAC_XY                 = bind_param("AVD_NMAC_XY")
-AVD_NMAC_Z                  = bind_param("AVD_NMAC_Z")
-ROLL_LIMIT_DEG              = bind_param("ROLL_LIMIT_DEG")
-WP_LOITER_RAD               = bind_param("WP_LOITER_RAD")
-WP_RADIUS                   = bind_param("WP_RADIUS")
+PARAM.AVD_ENABLE                  = bind_param("AVD_ENABLE")
+PARAM.AVD_WCLR_XY                 = bind_param("AVD_WCLR_XY")
+PARAM.AVD_WCLR_Z                  = bind_param("AVD_WCLR_Z")
+PARAM.AVD_UAV_XY                  = bind_param("AVD_UAV_XY")
+PARAM.AVD_NMAC_XY                 = bind_param("AVD_NMAC_XY")
+PARAM.AVD_NMAC_Z                  = bind_param("AVD_NMAC_Z")
+PARAM.ROLL_LIMIT_DEG              = bind_param("ROLL_LIMIT_DEG")
+PARAM.WP_LOITER_RAD               = bind_param("WP_LOITER_RAD")
+PARAM.WP_RADIUS                   = bind_param("WP_RADIUS")
 
-local roll_limit_deg        = ROLL_LIMIT_DEG:get()
-local lookahead_param_m     = DAA_LKAHD_M:get()
-local detect_m              = DAA_DETECT_M:get()
-local plan_m                = DAA_PLAN_M:get()
-local margin_fence_m        = DAA_MARGIN_FENCE:get()
-if margin_fence_m <= 0 then margin_fence_m = math.abs(WP_LOITER_RAD:get()) end   -- 0 => use the turn radius so the fence standoff = one loiter circle
-local margin_alt_m          = DAA_MARGIN_ALT:get()
-local alt_hyst_m            = DAA_ALT_HYST_M:get()
-local alt_cool_ms           = DAA_ALT_COOL_S:get() * 1000
-local loiter_cool_ms        = DAA_LTR_COOL_S:get() * 1000
-local margin_crewed_m       = DAA_MARGIN_CA:get()
-local margin_vertical_m     = DAA_MARGIN_CA_Z:get()
-local margin_bird_m         = DAA_MARGIN_BIRD:get()
-local margin_prey_m         = DAA_MARGIN_PREY:get()
-local margin_uav_m          = DAA_MARGIN_UAV:get()
-local margin_weather_m      = DAA_MARGIN_WTH:get()
-local margin_ais_m          = DAA_MARGIN_AIS:get()
-local margin_proximity_m    = DAA_MARGIN_PRX:get()
+local roll_limit_deg        = PARAM.ROLL_LIMIT_DEG:get()
+local lookahead_param_m     = PARAM.LKAHD_M:get()
+local detect_m              = PARAM.DETECT_M:get()
+local plan_m                = PARAM.PLAN_M:get()
+local margin_fence_m        = PARAM.MARGIN_FENCE:get()
+if margin_fence_m <= 0 then margin_fence_m = math.abs(PARAM.WP_LOITER_RAD:get()) end   -- 0 => use the turn radius so the fence standoff = one loiter circle
+local margin_alt_m          = PARAM.MARGIN_ALT:get()
+local alt_hyst_m            = PARAM.ALT_HYST_M:get()
+local alt_cool_ms           = PARAM.ALT_COOL_S:get() * 1000
+local loiter_cool_ms        = PARAM.LTR_COOL_S:get() * 1000
+local margin_crewed_m       = PARAM.MARGIN_CA:get()
+local margin_vertical_m     = PARAM.MARGIN_CA_Z:get()
+local margin_bird_m         = PARAM.MARGIN_BIRD:get()
+local margin_prey_m         = PARAM.MARGIN_PREY:get()
+local margin_uav_m          = PARAM.MARGIN_UAV:get()
+local margin_weather_m      = PARAM.MARGIN_WTH:get()
+local margin_ais_m          = PARAM.MARGIN_AIS:get()
+local margin_proximity_m    = PARAM.MARGIN_PRX:get()
 -- refresh_period_ms is the loop period in ms; DAA_UPDATE_RATE is in Hz (floored at 1 Hz to avoid /0)
-local refresh_period_ms     = 1000.0 / math.max(DAA_UPDATE_RATE:get(), 1.0)
-local bendy_ratio           = DAA_BR_RATIO:get()
-local bendy_angle           = DAA_BR_ANGLE:get()
+local refresh_period_ms     = 1000.0 / math.max(PARAM.UPDATE_RATE:get(), 1.0)
+local bendy_ratio           = PARAM.BR_RATIO:get()
+local bendy_angle           = PARAM.BR_ANGLE:get()
 -- WP_LOITER_RAD is signed: negative selects a counter-clockwise loiter.  Every use here
 -- wants the magnitude - as a distance, as a reposition radius, and as a turn-radius stand-in -
 -- and the loiter direction is carried separately, so take the sign out once, at the source.
-local wp_loiter_rad_m       = math.abs(WP_LOITER_RAD:get())
-local wp_radius_m           = math.abs(WP_RADIUS:get())
-local crewed_avoid_alt_m    = DAA_AVD_ALT:get()
-local crewed_avoid_alt_frame = DAA_AVD_ALT_TP:get()
-local daa_alert             = DAA_AVD_ALERT:get()
-local daa_action            = DAA_AVD_ACTION:get()
-local wind_min_ms           = DAA_WIND_MIN:get()
-local wind_margin_per_ms    = DAA_WIND_MARG:get()
-local well_clear_xy         = AVD_WCLR_XY:get()
-local well_clear_z          = AVD_WCLR_Z:get()
-local uav_clear_xy          = AVD_UAV_XY:get()
-local near_miss_xy          = AVD_NMAC_XY:get()
-local near_miss_z           = AVD_NMAC_Z:get()
-local slew_dps              = DAA_SLEW_DPS:get()
-local slew_urg_s            = DAA_SLEW_URG:get()
-local side_hold_s           = DAA_SIDE_HOLD:get()
-local cpa_min_ms            = DAA_CPA_MIN:get()
-local trap_act              = DAA_TRAP_ACT:get()
-local trap_s                = DAA_TRAP_S:get()
-local trap_clr_s            = DAA_TRAP_CLR_S:get()
-local trap_esc_act          = DAA_TRAP_ESC_ACT:get()
-local stale_s               = DAA_STALE_S:get()
-local hung_alrt_s           = DAA_HUNG_ALRT_S:get()
+local wp_loiter_rad_m       = math.abs(PARAM.WP_LOITER_RAD:get())
+local wp_radius_m           = math.abs(PARAM.WP_RADIUS:get())
+local crewed_avoid_alt_m    = PARAM.AVD_ALT:get()
+local crewed_avoid_alt_frame = PARAM.AVD_ALT_TP:get()
+local daa_alert             = PARAM.AVD_ALERT:get()
+local daa_action            = PARAM.AVD_ACTION:get()
+local wind_min_ms           = PARAM.WIND_MIN:get()
+local wind_margin_per_ms    = PARAM.WIND_MARG:get()
+local well_clear_xy         = PARAM.AVD_WCLR_XY:get()
+local well_clear_z          = PARAM.AVD_WCLR_Z:get()
+local uav_clear_xy          = PARAM.AVD_UAV_XY:get()
+local near_miss_xy          = PARAM.AVD_NMAC_XY:get()
+local near_miss_z           = PARAM.AVD_NMAC_Z:get()
+local slew_dps              = PARAM.SLEW_DPS:get()
+local slew_urg_s            = PARAM.SLEW_URG:get()
+local side_hold_s           = PARAM.SIDE_HOLD:get()
+local cpa_min_ms            = PARAM.CPA_MIN:get()
+local trap_act              = PARAM.TRAP_ACT:get()
+local trap_s                = PARAM.TRAP_S:get()
+local trap_clr_s            = PARAM.TRAP_CLR_S:get()
+local trap_esc_act          = PARAM.TRAP_ESC_ACT:get()
+local stale_s               = PARAM.STALE_S:get()
+local hung_alrt_s           = PARAM.HUNG_ALRT_S:get()
 
 GRAVITY_MSS = 9.80665
 -- A new closest approach to the navigation target has to beat the previous one by at least
@@ -540,15 +547,14 @@ end
 -- stays the one an integrator edits to change avoidance policy (see planedaa.md).  Each
 -- is aliased into a local below: every call site stays unchanged, and stays a fast upvalue
 -- call rather than a table index inside the candidate-heading sweep.
-local DAAobstacles = need("daaobs")
-local geometry     = need("daageo").new()
-local obstacles    = DAAobstacles.new(geometry)
+local geometry  = need("daageo").new()
+local obstacles = need("daaobs").new(geometry)
 
 -- The obstacle taxonomy belongs to the module that classifies obstacles, so it is defined
 -- there and read back here.  This file only names the four members it actually uses, which
 -- keeps the other twelve - and the whole twenty-member ADSB_EMITTER table - out of this
 -- chunk's parser budget.  See planedaa.md, "Distinct names are a budget".
-local OBSTACLE_TYPE = DAAobstacles.OBSTACLE_TYPE
+local OBSTACLE_TYPE = obstacles.OBSTACLE_TYPE
 
 local max_turn_rate_dps         = geometry.max_turn_rate_dps
 local turn_radius_m             = geometry.turn_radius_m
@@ -585,7 +591,7 @@ local function configure_modules()
 end
 configure_modules()
 
-local bearing_inc_deg = DAA_HEADING_INC:get() or DEFAULT_HEADING_INC_DEG
+local bearing_inc_deg = PARAM.HEADING_INC:get() or DEFAULT_HEADING_INC_DEG
 if bearing_inc_deg <= 0 then
     bearing_inc_deg = DEFAULT_HEADING_INC_DEG
 end
@@ -708,58 +714,58 @@ local function get_vehicle_state()
 
     -- refresh parameters every 5 seconds, its not that urgent we know about changs
     if (now_ms - now_params_ms) > 5000 then
-        roll_limit_deg        = ROLL_LIMIT_DEG:get()
-        lookahead_param_m     = DAA_LKAHD_M:get()
-        detect_m              = DAA_DETECT_M:get()
-        plan_m                = DAA_PLAN_M:get()
-        margin_fence_m        = DAA_MARGIN_FENCE:get()
-        if margin_fence_m <= 0 then margin_fence_m = math.abs(WP_LOITER_RAD:get()) end   -- 0 => use the turn radius
-        margin_alt_m          = DAA_MARGIN_ALT:get()
-        alt_hyst_m            = DAA_ALT_HYST_M:get()
-        alt_cool_ms           = DAA_ALT_COOL_S:get() * 1000
-        loiter_cool_ms        = DAA_LTR_COOL_S:get() * 1000
-        margin_crewed_m       = DAA_MARGIN_CA:get()
-        margin_vertical_m     = DAA_MARGIN_CA_Z:get()
-        margin_bird_m         = DAA_MARGIN_BIRD:get()
-        margin_prey_m         = DAA_MARGIN_PREY:get()
-        margin_uav_m          = DAA_MARGIN_UAV:get()
-        margin_weather_m      = DAA_MARGIN_WTH:get()
-        margin_ais_m          = DAA_MARGIN_AIS:get()
-        margin_proximity_m    = DAA_MARGIN_PRX:get()
-        refresh_period_ms     = 1000.0 / math.max(DAA_UPDATE_RATE:get(), 1.0)
-        bendy_ratio           = DAA_BR_RATIO:get()
-        bendy_angle           = DAA_BR_ANGLE:get()
-        wp_loiter_rad_m       = math.abs(WP_LOITER_RAD:get())
-        wp_radius_m           = math.abs(WP_RADIUS:get())
+        roll_limit_deg        = PARAM.ROLL_LIMIT_DEG:get()
+        lookahead_param_m     = PARAM.LKAHD_M:get()
+        detect_m              = PARAM.DETECT_M:get()
+        plan_m                = PARAM.PLAN_M:get()
+        margin_fence_m        = PARAM.MARGIN_FENCE:get()
+        if margin_fence_m <= 0 then margin_fence_m = math.abs(PARAM.WP_LOITER_RAD:get()) end   -- 0 => use the turn radius
+        margin_alt_m          = PARAM.MARGIN_ALT:get()
+        alt_hyst_m            = PARAM.ALT_HYST_M:get()
+        alt_cool_ms           = PARAM.ALT_COOL_S:get() * 1000
+        loiter_cool_ms        = PARAM.LTR_COOL_S:get() * 1000
+        margin_crewed_m       = PARAM.MARGIN_CA:get()
+        margin_vertical_m     = PARAM.MARGIN_CA_Z:get()
+        margin_bird_m         = PARAM.MARGIN_BIRD:get()
+        margin_prey_m         = PARAM.MARGIN_PREY:get()
+        margin_uav_m          = PARAM.MARGIN_UAV:get()
+        margin_weather_m      = PARAM.MARGIN_WTH:get()
+        margin_ais_m          = PARAM.MARGIN_AIS:get()
+        margin_proximity_m    = PARAM.MARGIN_PRX:get()
+        refresh_period_ms     = 1000.0 / math.max(PARAM.UPDATE_RATE:get(), 1.0)
+        bendy_ratio           = PARAM.BR_RATIO:get()
+        bendy_angle           = PARAM.BR_ANGLE:get()
+        wp_loiter_rad_m       = math.abs(PARAM.WP_LOITER_RAD:get())
+        wp_radius_m           = math.abs(PARAM.WP_RADIUS:get())
         -- the modules cache these too, so push the new values through
         configure_modules()
-        crewed_avoid_alt_m    = DAA_AVD_ALT:get()
-        crewed_avoid_alt_frame  = DAA_AVD_ALT_TP:get()
-        daa_alert             = DAA_AVD_ALERT:get()
-        daa_action            = DAA_AVD_ACTION:get()
-        wind_min_ms           = DAA_WIND_MIN:get()
-        wind_margin_per_ms    = DAA_WIND_MARG:get()
+        crewed_avoid_alt_m    = PARAM.AVD_ALT:get()
+        crewed_avoid_alt_frame  = PARAM.AVD_ALT_TP:get()
+        daa_alert             = PARAM.AVD_ALERT:get()
+        daa_action            = PARAM.AVD_ACTION:get()
+        wind_min_ms           = PARAM.WIND_MIN:get()
+        wind_margin_per_ms    = PARAM.WIND_MARG:get()
 
-        bearing_inc_deg       = DAA_HEADING_INC:get() or DEFAULT_HEADING_INC_DEG
+        bearing_inc_deg       = PARAM.HEADING_INC:get() or DEFAULT_HEADING_INC_DEG
         if bearing_inc_deg <= 0 then
             bearing_inc_deg   = DEFAULT_HEADING_INC_DEG
         end
 
-        well_clear_xy         = AVD_WCLR_XY:get()
-        well_clear_z          = AVD_WCLR_Z:get()
-        uav_clear_xy          = AVD_UAV_XY:get()
-        near_miss_xy          = AVD_NMAC_XY:get()
-        near_miss_z           = AVD_NMAC_Z:get()
-        slew_dps              = DAA_SLEW_DPS:get()
-        slew_urg_s            = DAA_SLEW_URG:get()
-        side_hold_s           = DAA_SIDE_HOLD:get()
-        cpa_min_ms            = DAA_CPA_MIN:get()
-        trap_act              = DAA_TRAP_ACT:get()
-        trap_s                = DAA_TRAP_S:get()
-        trap_clr_s            = DAA_TRAP_CLR_S:get()
-        trap_esc_act          = DAA_TRAP_ESC_ACT:get()
-        stale_s               = DAA_STALE_S:get()
-        hung_alrt_s           = DAA_HUNG_ALRT_S:get()
+        well_clear_xy         = PARAM.AVD_WCLR_XY:get()
+        well_clear_z          = PARAM.AVD_WCLR_Z:get()
+        uav_clear_xy          = PARAM.AVD_UAV_XY:get()
+        near_miss_xy          = PARAM.AVD_NMAC_XY:get()
+        near_miss_z           = PARAM.AVD_NMAC_Z:get()
+        slew_dps              = PARAM.SLEW_DPS:get()
+        slew_urg_s            = PARAM.SLEW_URG:get()
+        side_hold_s           = PARAM.SIDE_HOLD:get()
+        cpa_min_ms            = PARAM.CPA_MIN:get()
+        trap_act              = PARAM.TRAP_ACT:get()
+        trap_s                = PARAM.TRAP_S:get()
+        trap_clr_s            = PARAM.TRAP_CLR_S:get()
+        trap_esc_act          = PARAM.TRAP_ESC_ACT:get()
+        stale_s               = PARAM.STALE_S:get()
+        hung_alrt_s           = PARAM.HUNG_ALRT_S:get()
 
         now_params_ms         = now_ms
     end
@@ -1124,7 +1130,7 @@ local DAA = {
                 warn(I, string.format("SLEW_DPS %.0f > turn rate %.0f: no effect", slew_dps, turn_rate)) end
         end
         -- disabled features
-        if (AVD_ENABLE:get() or 0) ~= 1 then
+        if (PARAM.AVD_ENABLE:get() or 0) ~= 1 then
             warn(W, "AVD_ENABLE != 1: traffic avoidance OFF")
         elseif adsb_type == 0 then
             warn(W, "ADSB_TYPE = 0: no traffic source")
@@ -2684,7 +2690,7 @@ local function update()
     get_vehicle_state()
 
 
-    local switch_function = DAA_ACT_FN:get()
+    local switch_function = PARAM.ACT_FN:get()
     if switch_function == nil then
         if not no_DAA_displayed then
             gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " no DAA function")
