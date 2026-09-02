@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-075"
+SCRIPT_VERSION      = "4.8.0-076"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -152,7 +152,7 @@ function bind_add_param(name, idx, default_value)
 end
 
 -- setup follow mode specific parameters
-assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 34), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
+assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 35), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
 
 --[[
     // @Param: DAA_ACT_FN
@@ -413,7 +413,7 @@ DAA_CPA_MIN = bind_add_param('CPA_MIN', 27, 2)
 --[[
     // @Param: DAA_TRAP_ACT
     // @DisplayName: Trapped-failsafe action
-    // @Description: What to do when the vehicle has been compromised continuously for DAA_TRAP_S - a fence breach, or a crewed aircraft inside the AVD_NMAC_XY/Z near-miss volume. (Detecting that the bendy ruler is boxed in - no clear heading at all - is not implemented yet, so being boxed in without a breach does not fire the failsafe.) 0 disables the trapped-failsafe entirely (avoidance just keeps trying). For a VTOL, QLOITER stops forward flight and hovers (zero turn radius) - the safest way out of a tight space. If the aircraft has no VTOL (Q_ENABLE=0) the VTOL options fall back to RTL. Trapped by a fixed obstacle (fence) is sticky (held until the pilot changes mode); trapped by a moving obstacle (a crewed aircraft) recovers to the previous mode after DAA_TRAP_CLR_S. NOTE: the fence branch of the trap stands down when the core fence library will refuse a scripted mode change - i.e. FENCE_ACTION is non-zero AND FENCE_OPTIONS bit0 (DISABLE_MODE_CHANGE) is set - because in that case the core already handles the breach and the trap's mode change would only be denied. The aircraft near-miss branch (AVD_NMAC_XY/Z) is unaffected.
+    // @Description: What to do when the vehicle has been compromised continuously for DAA_TRAP_S - a fence breach, or a crewed aircraft inside the AVD_NMAC_XY/Z near-miss volume. A hung avoidance - running but making no progress toward the navigation target for DAA_HUNG_ALRT_S - is also a compromise, and unlike the fence branch it is never stood down. (Detecting that the bendy ruler is boxed in - no clear heading at all - is a different condition and is not implemented yet.) 0 disables the trapped-failsafe entirely (avoidance just keeps trying). For a VTOL, QLOITER stops forward flight and hovers (zero turn radius) - the safest way out of a tight space. If the aircraft has no VTOL (Q_ENABLE=0) the VTOL options fall back to RTL. Trapped by a fixed obstacle (fence) is sticky (held until the pilot changes mode); trapped by a moving obstacle (a crewed aircraft) recovers to the previous mode after DAA_TRAP_CLR_S. NOTE: the fence branch of the trap stands down when the core fence library will refuse a scripted mode change - i.e. FENCE_ACTION is non-zero AND FENCE_OPTIONS bit0 (DISABLE_MODE_CHANGE) is set - because in that case the core already handles the breach and the trap's mode change would only be denied. The aircraft near-miss branch (AVD_NMAC_XY/Z) is unaffected.
     // @Values: 0:Disabled,1:RTL,2:QRTL,3:QLOITER,4:QLAND
     // @User: Standard
 --]]
@@ -480,6 +480,17 @@ DAA_MARGIN_CA_Z = bind_add_param('MARGIN_CA_Z', 33, 30)
 --]]
 DAA_LTR_COOL_S = bind_add_param('LTR_COOL_S', 34, 10)
 
+--[[
+    // @Param: DAA_HUNG_ALRT_S
+    // @DisplayName: Hung-avoidance alert time
+    // @Description: Avoidance is "hung" when it has been running continuously for this long without the vehicle getting any closer to its navigation target. The classic case is a waypoint inside an exclusion-fence standoff: it cannot be reached while avoiding, so the mission pull and the fence push never reconcile and the vehicle orbits indefinitely without ever breaching anything. A hung avoidance raises a GCS alert and then counts as a compromise for the DAA_TRAP_ACT failsafe after the usual DAA_TRAP_S dwell, so with DAA_TRAP_ACT=0 (the default) this is alert-only. Unlike the fence branch it is never stood down by FENCE_ACTION/FENCE_OPTIONS, because a hung vehicle never breaches and so the core fence library never acts. A hung trap is released when the mission moves on (the pilot advancing it, or a new mission), or when the pilot changes mode. Set 0 to disable hung detection. NOTE: this detects lack of PROGRESS; detecting that the bendy ruler is boxed in - no clear heading at all - is a separate condition and is not implemented yet.
+    // @Units: s
+    // @Range: 0 300
+    // @Increment: 5
+    // @User: Standard
+--]]
+DAA_HUNG_ALRT_S = bind_add_param('HUNG_ALRT_S', 35, 60)
+
 WARN_DIST_XY                = bind_param("AVD_W_DIST_XY")
 WARN_ACTION                 = bind_param("AVD_W_ACTION")
 AVD_ENABLE                  = bind_param("AVD_ENABLE")
@@ -535,8 +546,13 @@ local trap_s                = DAA_TRAP_S:get()
 local trap_clr_s            = DAA_TRAP_CLR_S:get()
 local trap_esc_act          = DAA_TRAP_ESC_ACT:get()
 local stale_s               = DAA_STALE_S:get()
+local hung_alrt_s           = DAA_HUNG_ALRT_S:get()
 
 GRAVITY_MSS = 9.80665
+-- A new closest approach to the navigation target has to beat the previous one by at least
+-- this much to count as progress, when the turn radius is not usable (no airspeed yet).
+-- It only has to be larger than position noise: real progress closes hundreds of metres.
+MIN_HUNG_PROGRESS_M = 10.0
 -- minimum length of the bendy-ruler second-leg probe, so a plane sitting almost on top
 -- of its waypoint still tests a sane segment (mirrors OA_BENDYRULER_LOOKAHEAD_STEP2_MIN)
 MIN_STEP2_M = 2.0
@@ -733,6 +749,7 @@ local function get_vehicle_state()
         trap_clr_s            = DAA_TRAP_CLR_S:get()
         trap_esc_act          = DAA_TRAP_ESC_ACT:get()
         stale_s               = DAA_STALE_S:get()
+        hung_alrt_s           = DAA_HUNG_ALRT_S:get()
 
         now_params_ms         = now_ms
     end
@@ -1228,6 +1245,12 @@ local DAA = {
     local trap_dynamic          = false         -- trap from a moving obstacle (recoverable) vs a fence (sticky)
     local trap_prev_mode        = -1            -- mode to restore on recovery
     local trap_fs_mode          = -1            -- the failsafe mode we commanded
+    local trap_hung             = false         -- trap from a hung avoidance (released when the mission moves on)
+    local hung_active           = false         -- avoidance has made no progress for DAA_HUNG_ALRT_S
+    local hung_best_m           = nil           -- closest we have been to the navigation target this episode
+    local hung_since_ms         = uint32_t(0)   -- when that closest approach last improved
+    local hung_target_loc       = nil           -- the navigation target the progress is measured against
+    local hung_nav_index        = -1            -- mission index when a hung trap fired (release when it changes)
     local previous_label        = ""
     local avoiding_label        = ""
     -- laggy/dropped traffic-feed watchdog (network-fed moving obstacles carry an update
@@ -1331,10 +1354,10 @@ local DAA = {
         -- radius over the same window (airspeed / turn rate, or ATT.Roll).  That is the open
         -- question behind using the roll limit rather than WP_LOITER_RAD for the standoffs.
         local status, err = pcall(logger.write, logger, "DAAV",
-            'DstO,TLat,TLng,TAlt,TFra,DstH,DstZ,ObjT,Age,TrR',
-            'fLLfBffBff',                       -- Formats (L for Lat/Lng, f for Alt)
-            'mDUm-mm-sm',                       -- Units (D=lat deg, U=lng deg, m=meter, s=second)
-            '-GG-------',                       -- Multipliers (G=1e-7 for L types)
+            'DstO,TLat,TLng,TAlt,TFra,DstH,DstZ,ObjT,Age,TrR,Hung',
+            'fLLfBffBffB',                      -- Formats (L for Lat/Lng, f for Alt)
+            'mDUm-mm-sm-',                      -- Units (D=lat deg, U=lng deg, m=meter, s=second)
+            '-GG--------',                      -- Multipliers (G=1e-7 for L types)
             obstacle.distance_m,                -- DstO - Distance to found obstacle in meters
             target_loc:lat(),                   -- TLat - Latitude of DAA target in degrees
             target_loc:lng(),                   -- TLng - Longitude of DAA target in degrees
@@ -1344,7 +1367,8 @@ local DAA = {
             obstacle.distance_z,                -- DstZ - Vertical distance to the aircraft (+ve is up),
             obstacle.type,                      -- ObjT - the type of the obstacle as an OBSTACLE_TYPE
             obstacle.timestamp_ms and ((now_ms:tofloat() - obstacle.timestamp_ms) * 0.001) or 0,  -- Age - obstacle position age in s (0 = fresh/on-board)
-            turn_radius_m(airspeed_ms)          -- TrR - achievable turn radius at ROLL_LIMIT_DEG and the current airspeed (0 = no usable airspeed)
+            turn_radius_m(airspeed_ms),         -- TrR - achievable turn radius at ROLL_LIMIT_DEG and the current airspeed (0 = no usable airspeed)
+            hung_active and 1 or 0              -- Hung - avoidance has made no progress toward the navigation target for DAA_HUNG_ALRT_S
         )
         if not status then
             gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " log avoid:" .. tostring(err) )
@@ -1431,7 +1455,7 @@ local DAA = {
         -- (FENCE_ACTION ~= 0) AND FENCE_OPTIONS bit0 (DISABLE_MODE_CHANGE) is on. Only that pair
         -- pre-empts the fence-trap (a fence action alone, with mode changes allowed, does not).
         if trap_act ~= 0 and fence_act ~= 0 and (math.floor(fence_opts) % 2) == 1 then
-            warn(I, string.format("fence-trap off: FENCE_OPTS bit0 + FA %.0f", fence_act)) end
+            warn(I, string.format("fence-trap off (hung on): FOPTS b0 + FA %.0f", fence_act)) end
         if trap_act ~= 0 and trap_esc_act == trap_act then
             warn(I, "TRAP_ESC_ACT = TRAP_ACT: no escalation") end
         -- slew limit that can never bind (exceeds the achievable turn rate)
@@ -2696,6 +2720,59 @@ local DAA = {
         return mode
     end
 
+    -- Drop the progress tracker.  Called whenever measuring progress is meaningless: not
+    -- avoiding, not in forward flight, deliberately loitering, or the navigation target
+    -- moved - a waypoint advancing IS progress, so the measurement starts again.
+    local function hung_reset()
+        if hung_active then
+            gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. ": HUNG clear")
+            gcs:send_named_string("DAA-AVOID", "")
+        end
+        hung_active     = false
+        hung_best_m     = nil
+        hung_since_ms   = uint32_t(0)
+        hung_target_loc = nil
+    end
+
+    -- Avoidance is "hung" when it is running but the vehicle is not closing on its navigation
+    -- target.  This is neither a breach nor a boxed-in sweep: the bendy ruler keeps finding
+    -- headings and the plane keeps flying them, it simply never arrives.  The observed case is
+    -- a waypoint inside an exclusion-fence standoff, where the mission pull and the fence push
+    -- are irreconcilable, so the vehicle orbits until fuel or some other failsafe ends it.
+    -- Progress is a new CLOSEST approach to the target, not a shrinking range: a legitimate
+    -- detour flies away from the waypoint for a while and must not read as no progress.  The
+    -- new best has to beat the old by a turn radius - the distance scale the avoidance geometry
+    -- itself works at - so position noise cannot keep resetting the timer.
+    -- daa_target_loc is the "we are avoiding" test rather than current_state, because
+    -- avoid_obstacle() drops current_state back to monitoring on its "done" branch while
+    -- avoidance is still commanded.
+    local function hung_update()
+        if hung_alrt_s <= 0 or not in_fw_flight
+            or daa_target_loc == nil or navigation_target_loc == nil or current_loc == nil
+            or current_state == STATE.loitering or current_state == STATE.loitering_avoiding then
+            hung_reset()
+            return
+        end
+        if not locations_equal(hung_target_loc, navigation_target_loc) then
+            hung_reset()
+            hung_target_loc = navigation_target_loc:copy()
+        end
+        local range_m    = current_loc:get_distance(navigation_target_loc)
+        local progress_m = math.max(turn_radius_m(airspeed_ms), MIN_HUNG_PROGRESS_M)
+        if hung_best_m == nil or range_m < (hung_best_m - progress_m) then
+            hung_best_m   = range_m
+            hung_since_ms = now_ms
+            return
+        end
+        if hung_active or (now_ms - hung_since_ms) < (hung_alrt_s * 1000) then
+            return
+        end
+        hung_active = true
+        gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(
+            " HUNG: no progress %.0fs, %.0fm to go", hung_alrt_s, range_m))
+        gcs:send_named_string("DAA-AVOID", "HUNG")
+    end
+
     -- A "compromise" = the aircraft has penetrated an obstacle's inner danger line, which is
     -- tighter than planedaa's avoidance standoff (so normal close-skirting avoidance never
     -- reaches it, hence no false-trigger):
@@ -2706,9 +2783,12 @@ local DAA = {
     --                 proximity, AIS and birds are avoided but do not trip the trap here.
     -- Sustained (DAA_TRAP_S) this is a genuine trap. Altitude fences are vertical
     -- (clamp-and-continue) and are covered by get_breaches, not the aircraft near-miss check.
-    -- Returns (compromised, dynamic).  "dynamic" describes the CAUSE: a real aircraft inside
-    -- NMAC can move out of the way, a fence breach cannot, and that is what decides whether
-    -- the trap auto-clears after DAA_TRAP_CLR_S or is held until the pilot intervenes.  The
+    --   * hung     -> avoidance running with no progress toward the navigation target for
+    --                 DAA_HUNG_ALRT_S (see hung_update).  Nothing has been penetrated at all -
+    --                 that is the point: this is the failure the other two cannot see.
+    -- Returns (compromised, cause).  The cause decides recovery: a real aircraft inside NMAC
+    -- can move out of the way, a fence breach cannot, and a hung avoidance is released only
+    -- when the mission it could not fly moves on.  The
     -- cause must be reported from here because it cannot be recovered afterwards: the trap
     -- used to classify itself from obstacle_avoiding, the bendy ruler's current closest
     -- threat, which need not be what caused the compromise.  With simultaneous threats that
@@ -2727,24 +2807,36 @@ local DAA = {
             local fence_act  = param:get('FENCE_ACTION') or 0
             local fence_opts = param:get('FENCE_OPTIONS') or 0
             if not (fence_act ~= 0 and (math.floor(fence_opts) % 2) == 1) then
-                return true, false      -- a fence will not move out of the way: static trap
+                return true, "fence"    -- a fence will not move out of the way: static trap
             end
         end
         if aircraft_avoiding ~= nil
             and aircraft_avoiding.distance_xy ~= nil
             and aircraft_avoiding.distance_xy < near_miss_xy
             and aircraft_avoiding.distance_z < near_miss_z then
-            return true, true           -- a real aircraft can move away: recoverable trap
+            return true, "moving"       -- a real aircraft can move away: recoverable trap
         end
-        return false, false
+        -- A hung avoidance is deliberately NOT stood down by the FENCE_ACTION/FENCE_OPTIONS
+        -- pairing above: it never breaches, so the core fence library never acts and there is
+        -- nothing to defer to.  That pairing is exactly what left the aircraft with no escape.
+        if hung_active then
+            return true, "hung"
+        end
+        return false, nil
     end
 
     -- Arm the trapped failsafe: latch the cause, commit the mode change, announce it.
     -- Returns true if the failsafe took control, false if the mode change was refused.
-    local function trap_engage(mode_now, cause_is_dynamic)
+    local function trap_engage(mode_now, cause)
         -- classify from the cause the compromise check reported, not from
         -- whatever the bendy ruler happens to be closest to right now
-        trap_dynamic    = cause_is_dynamic
+        trap_dynamic    = (cause == "moving")
+        trap_hung       = (cause == "hung")
+        if trap_hung then
+            -- the mission index at the moment we gave up on it: any change means the geometry
+            -- that hung us is no longer what the vehicle is being asked to fly
+            hung_nav_index = mission:get_current_nav_index()
+        end
         trap_prev_mode  = mode_now
         trap_fs_mode    = resolve_trap_mode(mode_now)
         trap_trigger_ms = now_ms
@@ -2760,14 +2852,33 @@ local DAA = {
         end
         trap_active     = true
         gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(
-            ": TRAPPED (%s) -> %s", trap_dynamic and "moving" or "fence", get_mode_string(trap_fs_mode)))
+            ": TRAPPED (%s) -> %s", cause, get_mode_string(trap_fs_mode)))
         gcs:send_named_string("DAA-AVOID", "TRAPPED")
         return true
+    end
+
+    -- Hand control back to the mode the trap interrupted.  Shared by the moving-obstacle
+    -- auto-clear and the hung release, so both report and reset identically.
+    local function trap_release(reason)
+        local resumed = (trap_prev_mode >= 0) and vehicle:set_mode(trap_prev_mode)
+        if resumed then
+            gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(
+                ": trap clear (%s) -> resume %s", reason, get_mode_string(trap_prev_mode)))
+        else
+            gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(
+                ": trap clear but resume %s REFUSED", get_mode_string(trap_prev_mode)))
+        end
+        gcs:send_named_string("DAA-AVOID", "")
+        trap_active   = false
+        trap_since_ms = uint32_t(0)
     end
 
     -- Trapped-failsafe state machine. Returns true while the failsafe is controlling the
     -- vehicle (so update() skips normal avoidance). See DAA_TRAP_ACT/S/CLR_S.
     function DAA.trap_update()
+        -- track progress even when the failsafe action is disabled: DAA_TRAP_ACT=0 with
+        -- DAA_HUNG_ALRT_S set is the alert-only configuration, and it is the default
+        hung_update()
         if trap_act == 0 then
             trap_active = false
             trap_since_ms = uint32_t(0)
@@ -2776,7 +2887,7 @@ local DAA = {
         local mode_now = vehicle:get_mode()
 
         if not trap_active then
-            local compromised, cause_is_dynamic = daa_compromised_now()
+            local compromised, cause = daa_compromised_now()
             if not compromised then
                 trap_since_ms = uint32_t(0)
                 return false
@@ -2785,7 +2896,7 @@ local DAA = {
             if (now_ms - trap_since_ms) < (trap_s * 1000) then
                 return false        -- still inside the DAA_TRAP_S dwell
             end
-            return trap_engage(mode_now, cause_is_dynamic)
+            return trap_engage(mode_now, cause)
         end
 
         -- failsafe active
@@ -2799,17 +2910,17 @@ local DAA = {
         if trap_dynamic and (now_ms - trap_trigger_ms) >= (trap_clr_s * 1000) then
             -- transient moving-obstacle squeeze: resume the mission; if the obstacle is
             -- still there, forward flight will simply re-trigger the failsafe
-            local resumed = (trap_prev_mode >= 0) and vehicle:set_mode(trap_prev_mode)
-            if resumed then
-                gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(
-                    ": trap clear -> resume %s", get_mode_string(trap_prev_mode)))
-            else
-                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(
-                    ": trap clear but resume %s REFUSED", get_mode_string(trap_prev_mode)))
-            end
-            gcs:send_named_string("DAA-AVOID", "")
-            trap_active = false
-            trap_since_ms = uint32_t(0)
+            trap_release("moving")
+            return false
+        end
+        -- A hung trap is released when the mission moves on - the pilot advancing it, or a new
+        -- mission - because that is the only thing that changes the geometry we could not fly.
+        -- Progress toward the target cannot be the release test: the trap's own action retargets
+        -- the vehicle (RTL goes to home), which would read as instant progress and drop us
+        -- straight back into the stall.
+        if trap_hung and mission:get_current_nav_index() ~= hung_nav_index then
+            trap_release("mission moved")
+            hung_reset()
             return false
         end
         -- fence (static) trap: hold the failsafe mode until the pilot intervenes
