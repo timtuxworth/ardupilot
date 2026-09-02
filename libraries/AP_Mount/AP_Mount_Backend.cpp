@@ -9,7 +9,6 @@
 #include <AP_Logger/AP_Logger.h>
 #include <AP_Terrain/AP_Terrain.h>
 #include <AP_Vehicle/AP_Vehicle.h>
-#include <AP_Follow/AP_Follow.h>
 
 extern const AP_HAL::HAL& hal;
 
@@ -18,6 +17,7 @@ extern const AP_HAL::HAL& hal;
 #define AP_MOUNT_POI_RESULT_TIMEOUT_MS  3000    // POI calculations valid for 3 seconds
 #define AP_MOUNT_POI_DIST_M_MAX         10000   // POI calculations limit of 10,000m (10km)
 #define AP_MOUNT_SYSID_TIMEOUT_MS       3000    // sysid target location considered stale if not updated within this many ms (matches AP_Follow's own default FOLL_TIMEOUT)
+#define AP_MOUNT_SYSID_KINEMATIC_ACTIVE_TIMEOUT_MS 500  // an external kinematic estimator (eg AP_Follow) is considered to have stopped tracking our sysid if it hasn't reported in for this many ms; comfortably longer than one vehicle-loop period, much shorter than AP_MOUNT_SYSID_TIMEOUT_MS
 
 // Default init function for every mount
 void AP_Mount_Backend::init()
@@ -403,6 +403,9 @@ void AP_Mount_Backend::set_target_sysid(uint8_t sysid)
         // reported as the new target's (still-fresh) position
         _target_sysid_location.zero();
         _target_sysid_update_ms = 0;
+        _target_sysid_kinematic_active_ms = 0;
+        _target_sysid_kinematic_location.zero();
+        _target_sysid_kinematic_update_ms = 0;
     }
     _target_sysid = sysid;
 
@@ -413,6 +416,27 @@ void AP_Mount_Backend::set_target_sysid(uint8_t sysid)
     if (option_set(Options::RCTARGETING_LOCK_FROM_PREVMODE)) {
         set_yaw_lock(true);
     }
+}
+
+// called by vehicle code once per loop when an external kinematic estimator
+// (eg AP_Follow) is actively tracking the same sysid as our SYSID_TARGET
+void AP_Mount_Backend::set_target_sysid_kinematic_active(uint8_t sysid)
+{
+    if (sysid != _target_sysid) {
+        return;
+    }
+    _target_sysid_kinematic_active_ms = AP_HAL::millis();
+}
+
+// called by vehicle code with a fresh location estimate from that same
+// external kinematic estimator, whenever one is available
+void AP_Mount_Backend::set_target_sysid_kinematic_estimate(uint8_t sysid, const Location &loc)
+{
+    if (sysid != _target_sysid) {
+        return;
+    }
+    _target_sysid_kinematic_location = loc;
+    _target_sysid_kinematic_update_ms = AP_HAL::millis();
 }
 
 #if HAL_GCS_ENABLED
@@ -1232,51 +1256,42 @@ bool AP_Mount_Backend::get_angle_target_to_sysid(MountAngleTarget& angle_rad) co
         return false;
     }
 
-#if AP_FOLLOW_ENABLED
-    // if AP_Follow is tracking the same vehicle we are, prefer its
+    // if an external kinematic estimator (eg AP_Follow, pushed to us by
+    // vehicle code - see set_target_sysid_kinematic_active/_estimate) is
+    // actively tracking the same vehicle we are, prefer its
     // kinematically-extrapolated estimate: it copes with a target that is
     // genuinely slow-moving (rather than just lagging) far better than the
     // bare timeout below
-    AP_Follow *follow = AP_Follow::get_singleton();
-    if (follow != nullptr &&
-        follow->enabled() &&
-        follow->get_target_sysid() == (uint32_t)_target_sysid) {
-        // use the raw NED-relative-to-origin estimate rather than
-        // get_target_location_and_velocity(), which re-expresses the
-        // altitude in FOLL_ALT_TYPE's frame; for ABOVE_HOME (Copter's
-        // default) AP_Follow bakes the *target's* own home-relative
-        // altitude into its internal NED estimate as if it were relative
-        // to the *follower's* home, at ingestion time - wrong whenever the
-        // two vehicles don't share a home, and not something a different
-        // getter can avoid since the contamination happens before any
-        // getter runs. Override with our own independently-tracked
-        // absolute altitude below, which has no such ambiguity.
-        Vector3p follow_pos_ned_m;
-        Vector3f follow_vel_ned_ms, follow_accel_ned_mss;
-        if (follow->get_target_pos_vel_accel_NED_m(follow_pos_ned_m, follow_vel_ned_ms, follow_accel_ned_mss)) {
-            Location follow_loc;
-            if (AP::ahrs().get_location_from_origin_offset_NED(follow_loc, follow_pos_ned_m)) {
-                if (_target_sysid_location.initialised()) {
-                    follow_loc.set_alt_cm(_target_sysid_location.alt, Location::AltFrame::ABSOLUTE);
-                }
-                if (get_angle_target_to_location(follow_loc, angle_rad)) {
-                    return true;
-                }
+    if (_target_sysid_kinematic_active_ms != 0 &&
+        AP_HAL::millis() - _target_sysid_kinematic_active_ms <= AP_MOUNT_SYSID_KINEMATIC_ACTIVE_TIMEOUT_MS) {
+        if (_target_sysid_kinematic_update_ms != 0 &&
+            AP_HAL::millis() - _target_sysid_kinematic_update_ms <= AP_MOUNT_SYSID_TIMEOUT_MS) {
+            // the estimator's location may be expressed in a home-relative
+            // altitude frame that doesn't match our own home (eg AP_Follow's
+            // ABOVE_HOME handling assumes a shared home with the target,
+            // which isn't guaranteed) - override with our own
+            // independently-tracked absolute altitude, which has no such
+            // ambiguity, whenever we have one
+            Location loc = _target_sysid_kinematic_location;
+            if (_target_sysid_location.initialised()) {
+                loc.set_alt_cm(_target_sysid_location.alt, Location::AltFrame::ABSOLUTE);
             }
-            // AP_Follow has a usable estimate but we couldn't turn it into
-            // an angle (eg terrain data unavailable); fall through to the
-            // timeout-based path below rather than just failing outright
+            if (get_angle_target_to_location(loc, angle_rad)) {
+                return true;
+            }
+            // the estimator has a usable estimate but we couldn't turn it
+            // into an angle (eg terrain data unavailable); fall through to
+            // the timeout-based path below rather than just failing outright
         } else {
-            // we're relying on AP_Follow for this target and it currently
-            // has no estimate (eg its own FOLL_TIMEOUT elapsed, which may
-            // be shorter than AP_MOUNT_SYSID_TIMEOUT_MS) - hold the last
+            // we're relying on this estimator for the target and it
+            // currently has no estimate (eg its own timeout elapsed, which
+            // may be shorter than AP_MOUNT_SYSID_TIMEOUT_MS) - hold the last
             // commanded angle rather than falling back to the raw,
             // differently-timed location below, which would cause a
             // visible snap back to a less current position
             return false;
         }
     }
-#endif
 
     // exit immediately if no location available
     if (!_target_sysid_location.initialised()) {

@@ -319,6 +319,24 @@ void Rover::ahrs_update()
     
 #if AP_FOLLOW_ENABLED
     g2.follow.update_estimates();
+#if HAL_MOUNT_ENABLED
+    // let the mount use AP_Follow's kinematic estimate for SYSID_TARGET
+    // tracking if it's following the same vehicle; pushed here (rather than
+    // AP_Mount reaching into AP_Follow directly) to avoid a library-to-
+    // library dependency - see PR #34237 review discussion
+    if (g2.follow.enabled()) {
+        const uint8_t follow_sysid = (uint8_t)g2.follow.get_target_sysid();
+        camera_mount.set_target_sysid_kinematic_active(follow_sysid);
+        Vector3p pos_ned_m;
+        Vector3f vel_ned_ms, accel_ned_mss;
+        if (g2.follow.get_target_pos_vel_accel_NED_m(pos_ned_m, vel_ned_ms, accel_ned_mss)) {
+            Location loc;
+            if (AP::ahrs().get_location_from_origin_offset_NED(loc, pos_ned_m)) {
+                camera_mount.set_target_sysid_kinematic_estimate(follow_sysid, loc);
+            }
+        }
+    }
+#endif  // HAL_MOUNT_ENABLED
 #endif
 
 #if HAL_LOGGING_ENABLED
