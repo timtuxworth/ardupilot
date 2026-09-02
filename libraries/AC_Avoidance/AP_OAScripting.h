@@ -50,19 +50,16 @@ public:
         // fix the type. An ADS-B contact with a UAV emitter is a drone (MAV_SYSID above),
         // so "ADSB" would span two ObstacleTypes. This one is specifically crewed aircraft.
         CREWED_AIRCRAFT             = 2,
-        WEATHER                     = 3,
-        BIRD_MIGRATORY              = 4,
-        BIRD_OF_PREY                = 5,
-        FENCE_HOME                  = 6,
-        FENCE_CIRCLE_INCLUSION      = 7,
-        FENCE_CIRCLE_EXCLUSION      = 8,
-        FENCE_POLYGON_INCLUSION     = 9,
-        FENCE_POLYGON_EXCLUSION     = 10,
-        FENCE_LUA                   = 11,
-        PROXIMITY                   = 12,
-        AIS                         = 13,
-        FENCE_ALT_MAX               = 14,   // max altitude fence (AC_FENCE_TYPE_ALT_MAX, FENCE_TYPE bit 0)
-        FENCE_ALT_MIN               = 15,   // min altitude fence (AC_FENCE_TYPE_ALT_MIN, FENCE_TYPE bit 3)
+        FENCE_HOME                  = 3,
+        FENCE_CIRCLE_INCLUSION      = 4,
+        FENCE_CIRCLE_EXCLUSION      = 5,
+        FENCE_POLYGON_INCLUSION     = 6,
+        FENCE_POLYGON_EXCLUSION     = 7,
+        FENCE_LUA                   = 8,
+        PROXIMITY                   = 9,
+        AIS                         = 10,
+        FENCE_ALT_MAX               = 11,   // max altitude fence (AC_FENCE_TYPE_ALT_MAX, FENCE_TYPE bit 0)
+        FENCE_ALT_MIN               = 12,   // min altitude fence (AC_FENCE_TYPE_ALT_MIN, FENCE_TYPE bit 3)
     };
 
 

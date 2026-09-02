@@ -169,9 +169,6 @@ Collision volumes, and the `FENCE_*` parameters for the altitude/geo fences.
 | `DAA_UPDATE_RATE` | 10 | Hz | Rate at which avoidance is processed. |
 | `DAA_MARGIN_CA` | 50 | m | Avoidance margin for crewed aircraft (fixed wing, helicopter, eVTOL), over and above the Well Clear margin `AVD_WCLR_XY`. |
 | `DAA_MARGIN_CA_Z` | 30 | m | Vertical avoidance margin for crewed aircraft, over and above the Well Clear vertical separation `AVD_WCLR_Z`. An aircraft triggers the loiter-to-altitude only while its altitude difference from the vehicle is below `AVD_WCLR_Z + DAA_MARGIN_CA_Z`. The vertical mirror of `DAA_MARGIN_CA`. |
-| `DAA_MARGIN_WTH` | 173 | m | Avoidance radius for weather/clouds/rain. |
-| `DAA_MARGIN_BIRD` | 100 | m | Avoidance margin for migratory birds. |
-| `DAA_MARGIN_PREY` | 200 | m | Avoidance radius for birds of prey. |
 | `DAA_MARGIN_UAV` | 50 | m | Avoidance radius for UAVs/drones (MAVLink sourced). |
 | `DAA_MARGIN_AIS` | 50 | m | Avoidance radius for AIS ship contacts. **Not active by default — see "Proximity and AIS obstacles" below.** |
 | `DAA_MARGIN_PRX` | 50 | m | Avoidance radius for obstacles detected by proximity sensors. **Not active by default — see "Proximity and AIS obstacles" below.** |
@@ -338,7 +335,7 @@ Two consequences worth knowing:
 
 ### Moving obstacles and closest-approach
 
-Moving obstacles (drones, birds, AIS) are gated by a closest-point-of-approach
+Moving obstacles (drones, AIS) are gated by a closest-point-of-approach
 (CPA) test as well as position: one that is opening range and whose predicted
 miss stays beyond its keep-out radius (for a drone, `AVD_UAV_XY`) is treated as
 _leaving_ and is not avoided — this is what stops the aircraft from manoeuvring
@@ -616,19 +613,16 @@ The `ObjT` field uses the following `OBSTACLE_TYPE` enumeration:
 | 0  | GENERAL | Generic obstacle of unknown type |
 | 1  | MAV_SYSID | Another MAVLink drone with a MAV_SYSID |
 | 2  | CREWED_AIRCRAFT | Crewed aircraft, usually with an ICAO ADSB identifier |
-| 3  | WEATHER | Weather |
-| 4  | BIRD_MIGRATORY | Migratory bird(s), e.g. Canada Geese |
-| 5  | BIRD_OF_PREY | A bird that might attack the vehicle |
-| 6  | FENCE_HOME | All fixed/unmovable fences |
-| 7  | FENCE_CIRCLE_INCLUSION | Circular inclusion fence |
-| 8  | FENCE_CIRCLE_EXCLUSION | Circular exclusion fence |
-| 9  | FENCE_POLYGON_INCLUSION | Polygon inclusion fence |
-| 10 | FENCE_POLYGON_EXCLUSION | Polygon exclusion fence |
-| 11 | FENCE_LUA | Fence defined in Lua |
-| 12 | PROXIMITY | Detected by a proximity sensor, typically close (not active by default) |
-| 13 | AIS | AIS-tracked maritime (ship) vehicle (not active by default) |
-| 14 | FENCE_ALT_MAX | Max altitude fence (FENCE_TYPE bit 0) |
-| 15 | FENCE_ALT_MIN | Min altitude fence (FENCE_TYPE bit 3) |
+| 3  | FENCE_HOME | All fixed/unmovable fences |
+| 4  | FENCE_CIRCLE_INCLUSION | Circular inclusion fence |
+| 5  | FENCE_CIRCLE_EXCLUSION | Circular exclusion fence |
+| 6  | FENCE_POLYGON_INCLUSION | Polygon inclusion fence |
+| 7  | FENCE_POLYGON_EXCLUSION | Polygon exclusion fence |
+| 8  | FENCE_LUA | Fence defined in Lua |
+| 9  | PROXIMITY | Detected by a proximity sensor, typically close (not active by default) |
+| 10 | AIS | AIS-tracked maritime (ship) vehicle (not active by default) |
+| 11 | FENCE_ALT_MAX | Max altitude fence (FENCE_TYPE bit 0) |
+| 12 | FENCE_ALT_MIN | Min altitude fence (FENCE_TYPE bit 3) |
 
 ## Proximity and AIS obstacles
 
