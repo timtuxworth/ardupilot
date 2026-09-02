@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-078"
+SCRIPT_VERSION      = "4.8.0-081"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -52,87 +52,10 @@ MAV_DO_REPOSITION_FLAGS = {CHANGE_MODE = 1}
 ALT_FRAME           = {GLOBAL = 0, RELATIVE = 1, ORIGIN = 2, TERRAIN = 3}
 
 MAV_SEVERITY        = {EMERGENCY=0, ALERT=1, CRITICAL=2, ERROR=3, WARNING=4, NOTICE=5, INFO=6, DEBUG=7}
-MAV_CMD_INT         = {DO_SET_MODE = 176, DO_CHANGE_SPEED = 178, DO_REPOSITION = 192,
-                        GUIDED_CHANGE_SPEED = 43000, GUIDED_CHANGE_ALTITUDE = 43001, GUIDED_CHANGE_HEADING = 43002}
-MAV_SPEED_TYPE      = {AIRSPEED = 0, GROUNDSPEED = 1, CLIMB_SPEED = 2, DESCENT_SPEED = 3}
-MAV_HEADING_TYPE    = {COG = 0, HEADING = 1} -- COG = Course over Ground, i.e. where you want to go, HEADING = which way the vehicle points
+ -- COG = Course over Ground, i.e. where you want to go, HEADING = which way the vehicle points
 
-
--- MAV_COLLISION_THREAT_LEVEL
-MAV_COLLISION_THREAT_LEVEL = {
-    NONE                        = 0,    -- Not a threat
-    LOW                         = 1,    -- Mild concern about this threat
-    HIGH                        = 2,    -- Craft is panicking and may take action to avoid
-    ENUM_END                    = 3     -- End of enum
-}
--- MAV_COLLISION_SRC
-MAV_COLLISION_SRC = {
-    ADSB                        = 0,    -- Source is ADSB_VEHICLE packets
-    MAVLINK_GPS_GLOBAL_INT      = 1,    -- Source is MAVLink GPS_GLOBAL_INT
-    ENUM_END                    = 2     -- End of enum
-}
-
-MAV_COLLISION_ACTION = {
-    NONE                        = 0,    -- Ignore any potential collisions
-    REPORT                      = 1,    -- Report potential collision
-    ASCEND_OR_DESCEND           = 2,    -- Ascend or Descend to avoid threat
-    MOVE_HORIZONTALLY           = 3,    -- Move horizontally to avoid threat
-    MOVE_PERPENDICULAR          = 4,    -- Aircraft to move perpendicular to the collision's velocity vector
-    RTL                         = 5,    -- Aircraft to fly directly back to its launch point
-    HOVER                       = 6,    -- Aircraft to stop in place
-    LOITERTURN                  = 7,    -- Aircraft to do a loiter turn left or right to lose altitude
-}
-
-OBSTACLE_TYPE = {
-    GENERAL                     = 0,    -- generic obstacle, we don't really know what it is
-    MAV_SYSID                   = 1,    -- another MAVLINK drone with a MAV_SYSID
-    CREWED_AIRCRAFT             = 2,    -- crewed aircraft, usually with an ICAO ADSB identifier
-    WEATHER                     = 3,
-    BIRD_MIGRATORY              = 4,    -- typically one or more Canada Geese
-    BIRD_OF_PREY                = 5,    -- a bird that might attack the vehicle
-    FENCE_HOME                  = 6,    -- all fixed/unmovable fences
-    FENCE_CIRCLE_INCLUSION      = 7,
-    FENCE_CIRCLE_EXCLUSION      = 8,
-    FENCE_POLYGON_INCLUSION     = 9,
-    FENCE_POLYGON_EXCLUSION     = 10,
-    FENCE_LUA                   = 11,
-    PROXIMITY                   = 12,   -- detected by a proximty sensor, typically quite close
-    AIS                         = 13,   -- Automatic Identification System for ship (maritime) vehicles
-    FENCE_ALT_MAX               = 14,   -- max altitude fence (AC_FENCE_TYPE_ALT_MAX, FENCE_TYPE bit 0)
-    FENCE_ALT_MIN               = 15,   -- min altitude fence (AC_FENCE_TYPE_ALT_MIN, FENCE_TYPE bit 3)
-}
 
 -- ADSB Emitter types
-ADSB_EMITTER = {
-    NO_INFO                     = 0,
-    LIGHT                       = 1,
-    SMALL                       = 2,
-    LARGE                       = 3,
-    HIGH_VORTEX_LARGE           = 4,
-    HEAVY                       = 5,
-    HIGHLY_MANUV                = 6,
-    ROTOCRAFT                   = 7,    -- this is Helicopter not a drone
-    -- 8 Unassigned
-    GLIDER                      = 9,
-    LIGHTER_AIR                 = 10,
-    PARACHUTE                   = 11,
-    ULTRA_LIGHT                 = 12,
-    AIRCRAFT_HIGH               = 13,
-    UAV                         = 14,   -- this is drones
-    SPACE                       = 15,   -- this is rockets
-    --16 Unassigned
-
-    -- Surface types
-    EMERGENCY_SURFACE           = 17,
-    SERVICE_SURFACE             = 18,
-
-    -- Obstacle types
-    POINT_OBSTACLE              = 19,
-    CLUSTER_OBSTACLE            = 20,
-    LINE_OBSTACLE               = 21,
-    -- 22 - 39 Reserved
-
-}
 
 -- luacheck: ignore DAA_active
 local DAA_active = true;
@@ -152,7 +75,7 @@ function bind_add_param(name, idx, default_value)
 end
 
 -- setup follow mode specific parameters
-assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 35), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
+assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 37), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
 
 --[[
     // @Param: DAA_ACT_FN
@@ -171,12 +94,14 @@ DAA_ACT_FN = bind_add_param("ACT_FN", 1, 308)
 DAA_MARGIN_FENCE = bind_add_param('MARGIN_FENCE', 2, 0)
 
 --[[
-  // @Param: DAA_LKAHD
-  // @DisplayName: avoidance lookahead distance
-  // @Description: Avoidance lookahead distance
+  // @Param: DAA_LKAHD_M
+  // @DisplayName: avoidance probe distance
+  // @Description: How far along each candidate heading the bendy ruler probes for a clear path; the second leg probes a further 2x. Not the detection range (DAA_DETECT_M) nor the commanded target distance (DAA_PLAN_M). Keep it at least 3x the turn radius.
   // @Units: m
+  // @Range: 50 2000
+  // @User: Standard
 --]]
-DAA_LKAHD  = bind_add_param('LKAHD', 3, 1000)
+DAA_LKAHD_M  = bind_add_param('LKAHD_M', 3, 1000)
 
 --[[
   // @Param: DAA_UPDATE_RATE
@@ -483,7 +408,7 @@ DAA_LTR_COOL_S = bind_add_param('LTR_COOL_S', 34, 10)
 --[[
     // @Param: DAA_HUNG_ALRT_S
     // @DisplayName: Hung-avoidance alert time
-    // @Description: Avoidance is "hung" when it has been running continuously for this long without the vehicle getting any closer to its navigation target. The classic case is a waypoint inside an exclusion-fence standoff: it cannot be reached while avoiding, so the mission pull and the fence push never reconcile and the vehicle orbits indefinitely without ever breaching anything. A hung avoidance raises a GCS alert and then counts as a compromise for the DAA_TRAP_ACT failsafe after the usual DAA_TRAP_S dwell, so with DAA_TRAP_ACT=0 (the default) this is alert-only. Unlike the fence branch it is never stood down by FENCE_ACTION/FENCE_OPTIONS, because a hung vehicle never breaches and so the core fence library never acts. A hung trap is released when the mission moves on (the pilot advancing it, or a new mission), or when the pilot changes mode. Set 0 to disable hung detection. NOTE: this detects lack of PROGRESS; detecting that the bendy ruler is boxed in - no clear heading at all - is a separate condition and is not implemented yet.
+    // @Description: Avoidance is "hung" when it has run this long without the vehicle getting closer to its navigation target, e.g. a waypoint inside an exclusion-fence standoff that can never be reached while avoiding. Raises a GCS alert, then counts as a compromise for DAA_TRAP_ACT after the DAA_TRAP_S dwell, so with DAA_TRAP_ACT=0 it is alert-only. Never stood down by FENCE_ACTION/FENCE_OPTIONS. Released when the mission moves on or the pilot changes mode. 0 disables. Detects lack of PROGRESS, not being boxed in.
     // @Units: s
     // @Range: 0 300
     // @Increment: 5
@@ -491,8 +416,26 @@ DAA_LTR_COOL_S = bind_add_param('LTR_COOL_S', 34, 10)
 --]]
 DAA_HUNG_ALRT_S = bind_add_param('HUNG_ALRT_S', 35, 60)
 
-WARN_DIST_XY                = bind_param("AVD_W_DIST_XY")
-WARN_ACTION                 = bind_param("AVD_W_ACTION")
+--[[
+    // @Param: DAA_DETECT_M
+    // @DisplayName: Obstacle detection horizon
+    // @Description: Range within which obstacles are detected and announced. Shortening it costs detection of fences and drones. Crewed traffic is unaffected (AVD_WCLR_XY + DAA_MARGIN_CA). Also sets the altitude-fence anticipation horizon.
+    // @Units: m
+    // @Range: 100 5000
+    // @User: Standard
+--]]
+DAA_DETECT_M = bind_add_param('DETECT_M', 36, 1000)
+
+--[[
+    // @Param: DAA_PLAN_M
+    // @DisplayName: Commanded avoidance target distance
+    // @Description: Minimum distance along the chosen bearing at which the commanded avoidance target is placed. It replaces next_WP_loc, which the mission also uses to decide it has reached or passed the waypoint, so shortening it makes the mission skip waypoints and costs fence clearance. Raise before lowering - see planedaa.md.
+    // @Units: m
+    // @Range: 100 2000
+    // @User: Standard
+--]]
+DAA_PLAN_M = bind_add_param('PLAN_M', 37, 1000)
+
 AVD_ENABLE                  = bind_param("AVD_ENABLE")
 AVD_WCLR_XY                 = bind_param("AVD_WCLR_XY")
 AVD_WCLR_Z                  = bind_param("AVD_WCLR_Z")
@@ -504,7 +447,9 @@ WP_LOITER_RAD               = bind_param("WP_LOITER_RAD")
 WP_RADIUS                   = bind_param("WP_RADIUS")
 
 local roll_limit_deg        = ROLL_LIMIT_DEG:get()
-local lookahead_param_m     = DAA_LKAHD:get()
+local lookahead_param_m     = DAA_LKAHD_M:get()
+local detect_m              = DAA_DETECT_M:get()
+local plan_m                = DAA_PLAN_M:get()
 local margin_fence_m        = DAA_MARGIN_FENCE:get()
 if margin_fence_m <= 0 then margin_fence_m = math.abs(WP_LOITER_RAD:get()) end   -- 0 => use the turn radius so the fence standoff = one loiter circle
 local margin_alt_m          = DAA_MARGIN_ALT:get()
@@ -561,33 +506,84 @@ MIN_STEP2_M = 2.0
 -- Shortest turn chord worth its own obstacle probe.  Below this the post-turn point is on
 -- top of us and the bearing to it is noise, so probe_turn_arc() declines.
 MIN_TURN_CHORD_M = 5.0
+-- How long after an avoidance target is dropped a waypoint completion is still credited to
+-- it.  The vehicle finishes the waypoint on the NEXT navigation tick after we hand the
+-- target back, so requiring avoidance to still be live missed 3 of 4 real skips.
+SKIP_AVOID_GRACE_MS = 2000
 -- Clamp for the clearances written to DAAD: "no obstacle at all" is FLT_MAX internally and
 -- would wreck the autoscaling of any plot it shares an axis with.
 LOG_CLEARANCE_MAX_M = 9999.0
 
--- Maximum achievable rate of turn (deg/s) in a level banked turn at the configured
--- roll limit: omega = g * tan(phi) / V.  Both the startup sanity checks and the
--- course-change projection call this, so the two can never disagree.  Returns 0 when
--- there is no usable speed, and the caller decides what that means.
-local function max_turn_rate_dps(speed_ms)
-    if speed_ms == nil or speed_ms < 1.0 or roll_limit_deg <= 0 then
-        return 0.0
+
+-- Load a module, reporting a failure in a form that survives the 64-character cap on a
+-- logged STATUSTEXT.  Lua's own message is "./scripts/modules/daaobs.lua:12: <text>" and
+-- the path alone eats the whole budget before any of the text arrives, so re-order it to
+-- line number, then file, then message.  This can only ever cover the MODULES: a syntax
+-- error in this file is raised before a line of it runs, and nothing here can catch that.
+local function need(name)
+    local ok, mod = pcall(require, name)
+    if ok then
+        return mod
     end
-    return math.deg(GRAVITY_MSS * math.tan(math.rad(roll_limit_deg)) / speed_ms)
+    local msg  = tostring(mod)
+    local file, line, rest = msg:match("([^/\\]+%.lua):(%d+):%s*(.*)")
+    if file ~= nil then
+        gcs:send_text(MAV_SEVERITY.CRITICAL, string.format("%s %s %s", line, file, rest))
+    else
+        -- no file:line in it at all - almost always "module not found"
+        gcs:send_text(MAV_SEVERITY.CRITICAL, string.format("%s.lua missing", name))
+    end
+    error(name .. " load failed", 0)
 end
 
--- Radius of the tightest level turn available at the configured roll limit:
--- R = V^2 / (g * tan(phi)).  This is what the aircraft can actually fly, and so what
--- decides whether it can turn away from something in time.  WP_LOITER_RAD is a commanded
--- loiter setting, not a capability: ArduPlane's own documentation notes that the achieved
--- loiter radius is determined by ROLL_LIMIT_DEG when WP_LOITER_RAD is small.  Returns 0
--- when there is no usable speed, and the caller decides what that means.
-local function turn_radius_m(speed_ms)
-    if speed_ms == nil or speed_ms < 1.0 or roll_limit_deg <= 0 then
-        return 0.0
-    end
-    return (speed_ms * speed_ms) / (GRAVITY_MSS * math.tan(math.rad(roll_limit_deg)))
+-- Geometry, airframe capability and obstacle lookup live in modules, so that THIS file
+-- stays the one an integrator edits to change avoidance policy (see planedaa.md).  Each
+-- is aliased into a local below: every call site stays unchanged, and stays a fast upvalue
+-- call rather than a table index inside the candidate-heading sweep.
+local DAAobstacles = need("daaobs")
+local geometry     = need("daageo").new()
+local obstacles    = DAAobstacles.new(geometry)
+
+-- The obstacle taxonomy belongs to the module that classifies obstacles, so it is defined
+-- there and read back here.  This file only names the four members it actually uses, which
+-- keeps the other twelve - and the whole twenty-member ADSB_EMITTER table - out of this
+-- chunk's parser budget.  See planedaa.md, "Distinct names are a budget".
+local OBSTACLE_TYPE = DAAobstacles.OBSTACLE_TYPE
+
+local max_turn_rate_dps         = geometry.max_turn_rate_dps
+local turn_radius_m             = geometry.turn_radius_m
+local wrap_360                  = geometry.wrap_360
+local wrap_180                  = geometry.wrap_180
+local locations_equal           = geometry.locations_equal
+local location_project          = geometry.location_project
+local effective_groundspeed     = geometry.effective_groundspeed
+local find_closest_obstacle     = obstacles.find_closest_obstacle
+local pretty_obstacle_type      = obstacles.pretty_obstacle_type
+local populate_obstacle         = obstacles.populate_obstacle
+local obstacle_report_distance  = obstacles.obstacle_report_distance
+local get_standoff              = obstacles.get_standoff
+
+-- Push the cached parameter values into the modules.  Called at startup and from the 5 s
+-- parameter refresh, so an operator changing a margin in flight reaches the modules
+-- exactly as it reaches the rest of the applet.
+local function configure_modules()
+    geometry.configure({ roll_limit_deg = roll_limit_deg })
+    obstacles.configure({
+        margin_fence_m      = margin_fence_m,
+        margin_crewed_m     = margin_crewed_m,
+        margin_uav_m        = margin_uav_m,
+        margin_ais_m        = margin_ais_m,
+        margin_proximity_m  = margin_proximity_m,
+        margin_bird_m       = margin_bird_m,
+        margin_prey_m       = margin_prey_m,
+        margin_weather_m    = margin_weather_m,
+        well_clear_xy       = well_clear_xy,
+        uav_clear_xy        = uav_clear_xy,
+        wind_min_ms         = wind_min_ms,
+        wind_margin_per_ms  = wind_margin_per_ms,
+    })
 end
+configure_modules()
 
 local bearing_inc_deg = DAA_HEADING_INC:get() or DEFAULT_HEADING_INC_DEG
 if bearing_inc_deg <= 0 then
@@ -607,7 +603,6 @@ COARSE_SWEEP_MULT = 4
 -- safety-relevant setting, not a tuning one. See planedaa.md for the recommended value.
 MIN_VM_I_COUNT = 150000
 
-COLLISION_DETECTED = false
 
 FLT_MAX = 3.402823466e+38
 
@@ -695,6 +690,8 @@ local quadplane_enabled = quadplane ~= nil and (param:get('Q_ENABLE') or 0) > 0
 local function get_vehicle_state()
 
     current_loc         = ahrs:get_position()
+    -- the obstacle module reports ranges from the aircraft, so it needs where we are
+    obstacles.update_state(current_loc)
     current_mode        = vehicle:get_mode()
     if quadplane_enabled then
         -- avoid only in clean fixed-wing forward flight: NOT a VTOL mode and NOT under
@@ -712,7 +709,9 @@ local function get_vehicle_state()
     -- refresh parameters every 5 seconds, its not that urgent we know about changs
     if (now_ms - now_params_ms) > 5000 then
         roll_limit_deg        = ROLL_LIMIT_DEG:get()
-        lookahead_param_m     = DAA_LKAHD:get()
+        lookahead_param_m     = DAA_LKAHD_M:get()
+        detect_m              = DAA_DETECT_M:get()
+        plan_m                = DAA_PLAN_M:get()
         margin_fence_m        = DAA_MARGIN_FENCE:get()
         if margin_fence_m <= 0 then margin_fence_m = math.abs(WP_LOITER_RAD:get()) end   -- 0 => use the turn radius
         margin_alt_m          = DAA_MARGIN_ALT:get()
@@ -732,6 +731,8 @@ local function get_vehicle_state()
         bendy_angle           = DAA_BR_ANGLE:get()
         wp_loiter_rad_m       = math.abs(WP_LOITER_RAD:get())
         wp_radius_m           = math.abs(WP_RADIUS:get())
+        -- the modules cache these too, so push the new values through
+        configure_modules()
         crewed_avoid_alt_m    = DAA_AVD_ALT:get()
         crewed_avoid_alt_frame  = DAA_AVD_ALT_TP:get()
         daa_alert             = DAA_AVD_ALERT:get()
@@ -764,358 +765,8 @@ local function get_vehicle_state()
     end
 end
 
------Auxiliary functions
-local function wrap_360(angle)
-    local res = math.fmod(angle, 360.0)
-     if res < 0 then
-         res = res + 360.0
-     end
-     return res
-end
 
-local function wrap_180(angle)
-    local res = wrap_360(angle)
-    if res > 180 then
-       res = res - 360
-    end
-    return res
-end
 
---[[
-    return true if two locations are identical
---]]
-local function locations_equal(loc1, loc2)
-    if loc1 == nil and loc2 == nil then
-        return true
-    end
-    if (loc1 == nil and loc2 ~= nil) or (loc1 ~= nil and loc2 == nil) then
-        return false
-    end
-    return (loc1:lat() == loc2:lat()) and (loc1:lng() == loc2:lng())
-            and (loc1:alt() == loc2:alt())
-            and (loc1:get_alt_frame() == loc2:get_alt_frame())
-end
-
--- copy the altitude (value and frame) from src into dest. A small Lua helper on top of
--- the existing get_alt_m/set_alt_m bindings, so we don't carry a Location:copy_alt_from()
--- binding just for this (no C++ flash cost). Reading in src's own frame needs no conversion.
-local function copy_alt_from(dest, src)
-    local frame = src:get_alt_frame()
-    -- get_alt_m returns the altitude in `frame` (or nil if it can't convert, e.g. no terrain).
-    -- Reading in src's own frame needs no conversion, so this normally succeeds.
-    local alt_m = src:get_alt_m(frame)
-    if alt_m ~= nil then
-        dest:set_alt_m(alt_m, frame)
-    end
-end
-
--- Project forward from loc1 to a newlocation in the direction bearing_deg and distance m
--- the altitude of the new projected location should be based on alt_target_loc, including frame
-local function location_project(loc1, bearing_deg, distance, alt_target_loc)
-    -- Create a copy of the location projected distance meters in bearing_deg direction
-    -- the projection should be in the frame project_in_frame
-    local loc2 = loc1:copy()
-    loc2:offset_bearing(bearing_deg, distance)
-    copy_alt_from(loc2, alt_target_loc)
-
-    return loc2
-end
-
--- make obstacle labels a bit more meaningful for user especially for crewed aircraft and MAVLink vehicles
-local function pretty_label(script_obstacle)
-    local obstacle_type = script_obstacle:obstacle_type()
-    local emitter_type  = script_obstacle:emitter_type()
-
-    -- a MAVLink drone (GLOBAL_POSITION_INT/FOLLOW_TARGET) carries a small MAV system id in
-    -- src_id; an ADSB-sourced drone (emitter 14) carries a 24-bit ICAO address there instead,
-    -- so show that in hex rather than a meaningless decimal "SYSID" (0xBFFF matches the C++ split)
-    if emitter_type == ADSB_EMITTER.UAV then
-        if script_obstacle:src_id() > 0xBFFF then
-            return string.format("Drone:%06X", script_obstacle:icao_code())
-        end
-        return string.format("SYSID:%d", script_obstacle:src_id())
-
-    -- this will have arrived as an ADSB_VEHICLE
-    elseif obstacle_type == OBSTACLE_TYPE.CREWED_AIRCRAFT or emitter_type == 100 then
-        return string.format("%06X", script_obstacle:icao_code())
-
-    -- fake generated obstacles from mavproxy_genobstacles have these special case "emitters" for SITL/testing
-    elseif emitter_type == 99 then
-        return "Obstacle"
-    elseif emitter_type == 101 then
-        return "Drone"
-    elseif emitter_type == 102 then
-        return "Weather"
-    elseif emitter_type == 103 then
-        return "Migratory Bird"
-    elseif emitter_type == 104 then
-        return "Bird of Prey"
-
-    -- these obstacle types are returned by AP_OAScripting for fences
-    elseif obstacle_type == OBSTACLE_TYPE.FENCE_CIRCLE_EXCLUSION then
-        return "Excl. Circle"
-    elseif obstacle_type == OBSTACLE_TYPE.FENCE_CIRCLE_INCLUSION then
-        return "Incl. Circle"
-    elseif obstacle_type == OBSTACLE_TYPE.FENCE_POLYGON_EXCLUSION then
-        return "Excl. Polygon"
-    elseif obstacle_type == OBSTACLE_TYPE.FENCE_POLYGON_INCLUSION then
-        return "Incl. Polygon"
-    elseif obstacle_type == OBSTACLE_TYPE.FENCE_HOME then
-        return "Tin Can"
-    elseif obstacle_type == OBSTACLE_TYPE.FENCE_LUA then
-        return "Lua Fence"
-    elseif obstacle_type == OBSTACLE_TYPE.FENCE_ALT_MAX then
-        return "Alt Max Fence"
-    elseif obstacle_type == OBSTACLE_TYPE.FENCE_ALT_MIN then
-        return "Alt Min Fence"
-    end
-    return "Unknown"
-end
-
-local function pretty_obstacle_type(type, src_id)
-    if type == OBSTACLE_TYPE.GENERAL then
-        return "general"
-    end
-    if type == OBSTACLE_TYPE.MAV_SYSID then
-        -- a small src_id is a real MAVLink drone; a 24-bit ICAO (>0xBFFF) is an
-        -- ADS-B drone (matches the label split in pretty_label)
-        if src_id ~= nil and src_id > 0xBFFF then
-            return "adsbdrone"
-        end
-        return "mavdrone"
-    end
-    if type == OBSTACLE_TYPE.CREWED_AIRCRAFT then
-        return "aircraft"
-    end
-    if type == OBSTACLE_TYPE.WEATHER then
-        return "weather"
-    end
-    if type == OBSTACLE_TYPE.BIRD_MIGRATORY then
-        return "bird"
-    end
-    if type == OBSTACLE_TYPE.BIRD_OF_PREY then
-        return "predator"
-    end
-    if type == OBSTACLE_TYPE.FENCE_HOME then
-        return "fence:home"
-    end
-    if type == OBSTACLE_TYPE.FENCE_CIRCLE_INCLUSION then
-        return "fence:circle-inc"
-    end
-    if type == OBSTACLE_TYPE.FENCE_CIRCLE_EXCLUSION then
-        return "fence:circle-exc"
-    end
-    if type == OBSTACLE_TYPE.FENCE_POLYGON_INCLUSION then
-        return "fence:poly-inc"
-    end
-    if type == OBSTACLE_TYPE.FENCE_POLYGON_EXCLUSION then
-        return "fence:poly-exc"
-    end
-    if type == OBSTACLE_TYPE.FENCE_LUA then
-        return "fence:lua"
-    end
-    if type == OBSTACLE_TYPE.FENCE_ALT_MAX then
-        return "fence:alt-max"
-    end
-    if type == OBSTACLE_TYPE.FENCE_ALT_MIN then
-        return "fence:alt-min"
-    end
-    if type == OBSTACLE_TYPE.PROXIMITY then
-        return "proximity"
-    end
-    if type == OBSTACLE_TYPE.AIS then
-        return "ship"
-    end
-    return "unknown"
-end
-
--- true for the horizontal fence obstacle types.  A fence is a boundary rather than a
--- point, so it carries no usable location and its real range has to come from
--- OAScripting:fence_distance().  The altitude fences (FENCE_ALT_MAX/MIN) are handled
--- separately and are deliberately not in this list.
-local function is_fence_obstacle(obstacle_type)
-    return obstacle_type == OBSTACLE_TYPE.FENCE_HOME
-        or obstacle_type == OBSTACLE_TYPE.FENCE_CIRCLE_INCLUSION
-        or obstacle_type == OBSTACLE_TYPE.FENCE_CIRCLE_EXCLUSION
-        or obstacle_type == OBSTACLE_TYPE.FENCE_POLYGON_INCLUSION
-        or obstacle_type == OBSTACLE_TYPE.FENCE_POLYGON_EXCLUSION
-        or obstacle_type == OBSTACLE_TYPE.FENCE_LUA
-end
-
-local function populate_obstacle(distance_m, any_obstacle)
-    local obstacle = {}
-    obstacle.distance_m   = distance_m                      -- this is the Projected distance based on lookahead
-    obstacle.sysid        = any_obstacle:src_id()
-    obstacle.icao_code    = any_obstacle:icao_code()
-    obstacle.type         = any_obstacle:obstacle_type()
-    obstacle.timestamp_ms = any_obstacle:timestamp_ms()    -- last update time (millis); stale = laggy feed
-    obstacle.label        = pretty_label(any_obstacle)
-    obstacle.location     = any_obstacle:location()
-    obstacle.pos_NED_m    = any_obstacle:position_NED_m()
-    obstacle.vel_NED_ms   = any_obstacle:velocity_NED_ms()
-    -- these are the actual distances based on current location with no lookahead.
-    -- A fence is a boundary, not a point: C++ leaves its location un-set, and the binding
-    -- hands back a Location userdata regardless (never nil), so a range computed from it
-    -- would be a range to lat/lng 0,0.  Fall back to the bendy-ruler distance for every
-    -- fence type; obstacle_report_distance() asks C++ for the real edge distance when a
-    -- fence has to be reported to the pilot.
-    if obstacle.location == nil or is_fence_obstacle(obstacle.type) then
-        obstacle.distance_xy = obstacle.distance_m
-        obstacle.distance_z  = 0
-    else
-        obstacle.distance_xy  = obstacle.location:get_distance(current_loc)
-        obstacle.distance_z   = math.abs(obstacle.location:get_distance_NED(current_loc):z())
-    end
-
-    return obstacle
-end
-
--- Real current horizontal distance (m) to the physical obstacle, for the AVOIDING message.
--- distance_m is the bendy-ruler PROJECTED distance (along the lookahead ray), not a real range.
--- Returns nil when we can't determine it simply (Lua fence, alt fence, no location) so the
--- message omits the distance rather than mislead.  Called ONLY at announce time (not in the
--- bendy-ruler sweep) so the per-call fence_distance loop stays out of the hot path.
-local function obstacle_report_distance(obstacle)
-    if current_loc == nil then return nil end
-    local t = obstacle.type
-    if is_fence_obstacle(t) then
-        -- horizontal fences carry no single usable "location"; ask C++ for the real edge distance
-        -- to a fence of THIS type (so an "Excl. Circle" label reports the nearest exclusion
-        -- circle, not a nearer polygon).  Returns the distance in metres, or nil if none.
-        return OAScripting:fence_distance(current_loc, t)
-    elseif t ~= OBSTACLE_TYPE.FENCE_ALT_MAX and t ~= OBSTACLE_TYPE.FENCE_ALT_MIN
-            and obstacle.location ~= nil then
-        -- point/traffic obstacle (aircraft/drone/bird/AIS/proximity): location is a real position
-        return obstacle.location:get_distance(current_loc)
-    end
-    return nil
-end
-
--- Keep-out ("well clear") radius (m) for the CPA conflict test, per obstacle type. This is the
--- miss distance below which a moving obstacle is treated as a conflict; because the range check in
--- assess_obstacle_motion uses the same value, it is also the range inside which avoidance is
--- unconditional (the conservative "safer is better" floor). Distinct from the detection margin in
--- find_closest_obstacle, which adds a look-ahead buffer on top so obstacles are picked up earlier.
--- Aircraft/drone/plane share one CPA calculation; only this standoff differs.
-local function get_standoff(obstacle_type)
-    if obstacle_type == OBSTACLE_TYPE.MAV_SYSID then
-        return uav_clear_xy                 -- drone/UAV: AVD_UAV_XY
-    elseif obstacle_type == OBSTACLE_TYPE.BIRD_MIGRATORY then
-        return margin_bird_m
-    elseif obstacle_type == OBSTACLE_TYPE.BIRD_OF_PREY then
-        return margin_prey_m
-    elseif obstacle_type == OBSTACLE_TYPE.WEATHER then
-        return margin_weather_m
-    elseif obstacle_type == OBSTACLE_TYPE.PROXIMITY then
-        return margin_proximity_m
-    end
-    -- AIRCRAFT, AIS and anything else: the aircraft well-clear radius (AVD_WCLR_XY)
-    return well_clear_xy
-end
-
-local function find_closest_obstacle(loc1, loc2, lookahead_m, wind_ms)
-    -- By projecting 1m along the line we avoid a problem with the
-    -- exclusion avoidance being happy to skirt along a line parallel
-    -- to an exclusion zone
-    local bearing_deg   = math.deg(loc1:get_bearing(loc2))
-    local loc1_shifted  = location_project(loc1, bearing_deg, 1, loc2)
-    local obstacle
-
-    local distance_m, any_obstacle =
-            OAScripting:find_threats(loc1_shifted, loc2, lookahead_m)
-
-    if distance_m == nil then
-        return FLT_MAX, nil
-    end
-
-    if any_obstacle == nil then
-        return FLT_MAX, nil
-    end
-
-    local obstacle_type_val = any_obstacle:obstacle_type()
-
-    local obstacle_margin = 0;
-    -- What distance_m already accounts for differs by where the obstacle came from, so the
-    -- margin added here does too:
-    --  * AP_Avoidance contacts (crewed aircraft, drones) - distance_to_obstacle() has ALREADY
-    --    subtracted the protected radius for that emitter type (AVD_WCLR_XY / AVD_UAV_XY), so
-    --    distance_m is clearance to the edge of the protected volume and only the extra margin
-    --    belongs here.  Adding the radius back made the real trigger 2 x radius + margin: 1269 m
-    --    for a crewed aircraft on defaults against the 660 m this file and planedaa.md document,
-    --    and it disagreed with find_aircraft() below, which passes the full standoff against a
-    --    raw centre distance.
-    --  * AP_OADatabase objects (AIS, proximity) - _distance_to_object() subtracts the object's
-    --    own PHYSICAL radius, so a standoff still has to be added on top here.
-    if obstacle_type_val == OBSTACLE_TYPE.CREWED_AIRCRAFT then
-        obstacle_margin = margin_crewed_m
-    elseif obstacle_type_val == OBSTACLE_TYPE.MAV_SYSID then
-        -- drone/UAV (ADSB emitter 14, and MAVLink vehicles, which AP_Avoidance tags UAV):
-        -- AVD_UAV_XY is the radius already removed, so only DAA_MARGIN_UAV is added
-        obstacle_margin = margin_uav_m
-    elseif obstacle_type_val == OBSTACLE_TYPE.AIS then
-        obstacle_margin = well_clear_xy + margin_ais_m
-    elseif obstacle_type_val == OBSTACLE_TYPE.PROXIMITY then
-        obstacle_margin = margin_proximity_m
-    elseif obstacle_type_val == OBSTACLE_TYPE.FENCE_CIRCLE_EXCLUSION
-        or obstacle_type_val == OBSTACLE_TYPE.FENCE_CIRCLE_INCLUSION
-        or obstacle_type_val == OBSTACLE_TYPE.FENCE_POLYGON_INCLUSION
-        or obstacle_type_val == OBSTACLE_TYPE.FENCE_POLYGON_EXCLUSION
-        or obstacle_type_val == OBSTACLE_TYPE.FENCE_HOME
-        or obstacle_type_val == OBSTACLE_TYPE.FENCE_LUA
-        then
-        obstacle_margin = margin_fence_m
-        -- widen the standoff in wind so the controller has buffer to absorb cross-track
-        -- drift and is less likely to be blown across the fence (DAA_WIND_MARG = 0 disables)
-        if wind_ms ~= nil and wind_ms > wind_min_ms then
-            obstacle_margin = obstacle_margin + wind_margin_per_ms * (wind_ms - wind_min_ms)
-        end
-    end
-
-    if distance_m > obstacle_margin then
-        -- we are further away from the obstacle than we care about
-        return FLT_MAX, nil
-    end
-
-    -- NOTE: a breached fence is not dropped here.  OAScripting:find_threats() already
-    -- leaves the breached fence categories out of its search, because a breached fence
-    -- reports a large negative clearance and would otherwise mask every other obstacle -
-    -- including traffic - for as long as the breach lasted.
-
-    obstacle = populate_obstacle(distance_m, any_obstacle)
-    return distance_m, obstacle
-end
-
---[[
-    calculate what our ground speed would be in a given direction, using wind estimate
---]]
-local function effective_groundspeed(airspeed, bearing_deg, wind_dir_rad, wind_speed)
-    -- Ensure airspeed is at least 1.0
-    airspeed = math.max(airspeed, 1.0)
-    -- Convert bearing to radians
-    local bearing_rad = math.rad(bearing_deg)
-    -- Calculate the angle between wind direction and bearing
-    local temp = math.pi - (wind_dir_rad - bearing_rad)
-    local dangle = wind_speed * math.sin(temp) / airspeed
-    -- If dangle is out of valid range, return 0
-    if dangle > 1.0 or dangle < -1.0 then
-        return 0
-    end
-    -- Calculate the angle alpha using arcsine
-    local alpha = math.asin(dangle)
-    -- Calculate yaw
-    local yaw = bearing_rad - alpha
-    -- Calculate beta, the angle between wind direction and yaw
-    local beta = math.pi - (wind_dir_rad - yaw)
-    -- Calculate ground speed squared (gs2)
-    local gs2 = airspeed^2 + wind_speed^2 - 2 * airspeed * wind_speed * math.cos(beta)
-    -- If gs2 is negative or zero, return 0
-    if gs2 <= 0 then
-        return 0
-    end
-    -- Calculate the final ground speed
-    local gs = math.sqrt(gs2)
-    return gs
-end
 
 -------------------------------------------------------------------------------
 -- LOITER ALTITUDE - Loiter right or left to (usually) lose altitude to avoid an obstacle (usually a crewed aircraft)
@@ -1262,6 +913,7 @@ local DAA = {
     local hung_nav_index        = -1            -- mission index when a hung trap fired (release when it changes)
     local skip_nav_index        = -1            -- mission index last cycle, to notice the mission moving on
     local skip_target_loc       = nil           -- navigation target last cycle, to measure how short we left it
+    local skip_avoid_ms         = uint32_t(0)   -- last time an avoidance target was commanded
     local previous_label        = ""
     local avoiding_label        = ""
     -- laggy/dropped traffic-feed watchdog (network-fed moving obstacles carry an update
@@ -1284,7 +936,7 @@ local DAA = {
 
     -- the distance we look ahead is adjusted dynamically based on avoidance results
     local current_lookahead = lookahead_param_m
-    -- last DAA_LKAHD we seeded current_lookahead from, so an operator changing the
+    -- last DAA_LKAHD_M we seeded current_lookahead from, so an operator changing the
     -- parameter in flight takes effect on the next cycle instead of at the next reboot
     local lookahead_set_m   = lookahead_param_m
 
@@ -1435,8 +1087,6 @@ local DAA = {
         local I = MAV_SEVERITY.NOTICE
         local function vtol_act(a) return a == 2 or a == 3 or a == 4 end
         local have_vtol   = (param:get('Q_ENABLE') or 0) > 0
-        local fence_act   = param:get('FENCE_ACTION') or 0
-        local fence_opts  = param:get('FENCE_OPTIONS') or 0
         local adsb_type   = param:get('ADSB_TYPE') or 0
         local cruise_ms   = param:get('AIRSPEED_CRUISE') or 0
 
@@ -1459,17 +1109,12 @@ local DAA = {
             warn(W, "NMAC_Z >= WCLR_Z: vert nearmiss>wellclr") end
         -- lookahead must give room to react
         if turn_r > 0 and lookahead_param_m < 3 * turn_r then
-            warn(W, string.format("LKAHD %.0f < 3x turn %.0f: reacts late", lookahead_param_m, turn_r)) end
+            warn(W, string.format("LKAHD_M %.0f < 3x turn %.0f: reacts late", lookahead_param_m, turn_r)) end
         if bendy_ratio > 1.8 then
             warn(W, string.format("BR_RATIO %.1f > 1.8: fence-follow unstable", bendy_ratio)) end
         -- trapped-failsafe consistency
         if trap_act ~= 0 and not have_vtol and (vtol_act(trap_act) or vtol_act(trap_esc_act)) then
             warn(W, "trap VTOL action but Q_ENABLE=0 -> RTL") end
-        -- fence-trap stands down when the core will refuse its mode change: a fence action is set
-        -- (FENCE_ACTION ~= 0) AND FENCE_OPTIONS bit0 (DISABLE_MODE_CHANGE) is on. Only that pair
-        -- pre-empts the fence-trap (a fence action alone, with mode changes allowed, does not).
-        if trap_act ~= 0 and fence_act ~= 0 and (math.floor(fence_opts) % 2) == 1 then
-            warn(I, string.format("fence-trap off (hung on): FOPTS b0 + FA %.0f", fence_act)) end
         if trap_act ~= 0 and trap_esc_act == trap_act then
             warn(I, "TRAP_ESC_ACT = TRAP_ACT: no escalation") end
         -- slew limit that can never bind (exceeds the achievable turn rate)
@@ -1521,7 +1166,7 @@ local DAA = {
         active      = true;
         current_loc = ahrs:get_position()
 
-        -- get_vehicle_state() re-reads DAA_LKAHD into lookahead_param_m every 5 s, but
+        -- get_vehicle_state() re-reads DAA_LKAHD_M into lookahead_param_m every 5 s, but
         -- current_lookahead is the working value the sweep actually uses.  Re-seed it when
         -- the operator changes the parameter; testing for a change rather than assigning
         -- every cycle leaves room for the dynamic adjustment the comment above promises.
@@ -1529,7 +1174,7 @@ local DAA = {
             lookahead_set_m     = lookahead_param_m
             current_lookahead   = lookahead_param_m
             gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(
-                ": lookahead now %.0f m", current_lookahead))
+                ": probe distance now %.0f m", current_lookahead))
         end
 
         if OAScripting == nil then
@@ -1839,9 +1484,9 @@ local DAA = {
             local bearing_test  = wrap_180(bearing_to_dest_deg + delta)
             local loc_test2     = location_project(loc_test, bearing_test, distance2_m, destination_loc)
 
-            local distance_m, obstacle = find_closest_obstacle(loc_test, loc_test2, current_lookahead, wind_speed)
+            local distance_m, obstacle = find_closest_obstacle(loc_test, loc_test2, detect_m, wind_speed)
 
-            if distance_m > current_lookahead then
+            if distance_m > detect_m then
                 -- return immediately - no obstacles in this direction
                 return distance_m, (delta == 0), nil
             end
@@ -1906,7 +1551,7 @@ local DAA = {
             return distance_found_m, obstacle_found  -- too short to have a meaningful bearing
         end
         local turn_distance_m, turn_obstacle =
-                find_closest_obstacle(current_loc, adjusted_loc, current_lookahead, wind_speed)
+                find_closest_obstacle(current_loc, adjusted_loc, detect_m, wind_speed)
         if turn_distance_m ~= nil and turn_distance_m < distance_found_m then
             return turn_distance_m, turn_obstacle
         end
@@ -1932,17 +1577,17 @@ local DAA = {
         local avoidance_distance_m  = calc_avoidance_distance(avoid_step1_m, full_distance)
         local test_loc              = location_project(adjusted_loc, bearing_test_deg, avoidance_distance_m, target_loc)
 
-        local distance_found_m, obstacle_found = find_closest_obstacle(adjusted_loc, test_loc, current_lookahead, wind_speed)
+        local distance_found_m, obstacle_found = find_closest_obstacle(adjusted_loc, test_loc, detect_m, wind_speed)
         if distance_found_m == nil then
             gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. "closest returned NIL ")
             return FLT_MAX, bearing_deg, nil -- no avoidance required
         end
         distance_found_m, obstacle_found = probe_turn_arc(adjusted_loc, bearing_test_deg,
                                                          distance_found_m, obstacle_found)
-        if distance_found_m > current_lookahead then
+        if distance_found_m > detect_m then
             -- This direction avoids all obstacles for one step. Check if it leads to a clear path for a longer distance.
             local distance2_m, straight2, obstacle2 = test_step2(test_loc, avoid_step2_m, target_loc)
-            if distance2_m >= current_lookahead then
+            if distance2_m >= detect_m then
                 if allow_straight and straight2 then
                     -- means we have a direct unobstructed path for step1 and step2
                     return FLT_MAX, bearing_deg, nil -- no avoidance required
@@ -2069,7 +1714,7 @@ local DAA = {
             climb_rate_ms = -vel_ned:z()
         end
         -- project over the time to fly the lookahead distance, capped to a sensible vertical horizon
-        local horizon_s = lookahead_param_m / math.max(groundspeed_ms, 1.0)
+        local horizon_s = detect_m / math.max(groundspeed_ms, 1.0)
         horizon_s = math.min(math.max(horizon_s, 1.0), 20.0)
 
         -- pick whichever enabled altitude fence currently needs (or is already taking) action.
@@ -2367,23 +2012,17 @@ local DAA = {
             last_avoid_bearing_deg  = best_bearing_deg
         end
 
-        -- Where to put the commanded target along the bearing we picked.  The current_lookahead
-        -- floor arrived as collateral in 07c8194261 (the real fix there was that
-        -- resist_bearing_change() had been returning its clearance in place of the distance),
-        -- and it looks wrong - DAA_LKAHD is a LOOK-AHEAD, not a steering distance, and at the
-        -- 1000 m default it throws the commanded target a kilometre out along a mission leg a
-        -- couple of hundred metres long.
-        --
-        -- It is nevertheless load-bearing, so leave it alone.  This location REPLACES
-        -- next_WP_loc, and ArduPlane's past-the-waypoint test draws its finish line THROUGH
-        -- next_WP_loc: a distant target puts that line out of reach, while a near one puts it
-        -- alongside the aircraft, and the moment the avoidance bearing has any component back
-        -- towards the previous waypoint the mission completes and moves on.  Replacing this
-        -- with max(WP_LOITER_RAD, 2 x WP_RADIUS) was tried and measurably worse -
+        -- Where to put the commanded target along the bearing we picked - DAA_PLAN_M, which
+        -- until 4.8.0-080 was DAA_LKAHD and so could not be set independently of how far the
+        -- sweep probed.  Do not shorten it casually.  This location REPLACES next_WP_loc, and
+        -- ArduPlane draws its past-the-waypoint finish line THROUGH next_WP_loc: a distant
+        -- target puts that line out of reach, while a near one puts it alongside the aircraft,
+        -- and the moment the avoidance bearing has any component back towards the previous
+        -- waypoint the mission completes and moves on.  Shortening it to
+        -- max(WP_LOITER_RAD, 2 x WP_RADIUS) was tried and measurably worse -
         -- PlaneDAAHungTrapFires skipped its waypoint at 106 m and finished 7 m off the fence
-        -- instead of clearing it.  See target_projection_floor_m() for what the floor has to
-        -- beat before it can be shortened.
-        local proj_distance = math.max(distance_to_target_m, current_lookahead)
+        -- instead of clearing it.
+        local proj_distance = math.max(distance_to_target_m, plan_m)
         local new_target_loc = location_project(current_loc, best_bearing_deg, proj_distance, target_loc)
         log_detect_result(true, obstacle_avoiding.distance_m, best_distance_m, distance_to_target_m,
                           best_bearing_deg, new_target_loc, obstacle_avoiding.type)
@@ -2407,7 +2046,7 @@ local DAA = {
         -- obstacle_report_distance() asks C++ for the true edge distance instead.  This is
         -- announce-time only, so the per-call fence search stays out of the sweep.
         local report_m = obstacle_report_distance(obstacle_avoiding) or obstacle_avoiding.distance_xy
-        if report_m > lookahead_param_m then
+        if report_m > detect_m then
             previous_label = ""
             return
         end
@@ -2949,8 +2588,18 @@ local DAA = {
         skip_nav_index  = mission:get_current_nav_index()
         skip_target_loc = (navigation_target_loc ~= nil) and navigation_target_loc:copy() or nil
 
-        if daa_target_loc == nil or current_loc == nil or was_loc == nil then
-            return                              -- not avoiding, or nothing to compare against
+        if daa_target_loc ~= nil then
+            skip_avoid_ms = now_ms
+        end
+        if current_loc == nil or was_loc == nil then
+            return                              -- nothing to compare against
+        end
+        -- Recently avoiding, not necessarily still avoiding.  The mission completes the
+        -- waypoint on the tick AFTER the target is handed back, so "AVOIDING ... done"
+        -- lands about 0.1 s ahead of it: testing daa_target_loc directly reported 1 of the
+        -- 4 skips in a 404 s flight and which one it caught was a race.
+        if skip_avoid_ms == uint32_t(0) or (now_ms - skip_avoid_ms) > SKIP_AVOID_GRACE_MS then
+            return
         end
         if was_index < 0 or skip_nav_index <= was_index then
             return                              -- no move, or a jump backwards
