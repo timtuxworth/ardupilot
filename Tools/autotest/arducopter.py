@@ -8180,7 +8180,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
                     int(self.get_sim_time_cached() * 1000), # time boot ms
                     int(cur_lat * 1e7),
                     int(cur_lon * 1e7),
-                    int((start.alt + 10) * 1000), # mm alt amsl (approx; unused by AP_Follow)
+                    int((start.get_alt_m(AltFrame.ABSOLUTE) + 10) * 1000), # mm alt amsl (approx; unused by AP_Follow)
                     follow_target_relalt_m * 1000, # mm above home
                     0, # vx
                     int(follow_target_vel_east_ms * 100), # vy (cm/s)
@@ -8212,7 +8212,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             self.progress("Testing mount uses absolute altitude, not AP_Follow's home-relative one")
             # a stationary target at a modest, non-saturating elevation
             (alt_test_lat, alt_test_lon) = mavextra.gps_offset(start.lat, start.lng, 0, 30)
-            alt_test_abs_alt_m = start.alt + 20  # true, unambiguous AMSL altitude
+            alt_test_abs_alt_m = start.get_alt_m(AltFrame.ABSOLUTE) + 20  # true, unambiguous AMSL altitude
             # establish a ground-truth pitch using the non-AP_Follow (bare
             # timeout) path, which always uses the packet's absolute
             # altitude and so cannot be affected by this bug
@@ -8235,7 +8235,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             # against *our* home instead, putting the target 50m higher
             # than it really is and producing a visibly different pitch
             self.set_parameters({"FOLL_ENABLE": 1})
-            relalt_if_target_home_50m_lower_m = alt_test_abs_alt_m - (start.alt - 30 - 50)
+            relalt_if_target_home_50m_lower_m = alt_test_abs_alt_m - (start.get_alt_m(AltFrame.ABSOLUTE) - 30 - 50)
             tstart = self.get_sim_time()
             while self.get_sim_time_cached() - tstart < 1:
                 self.mav.mav.global_position_int_send(
