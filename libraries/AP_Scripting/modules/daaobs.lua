@@ -365,6 +365,11 @@ function DAAobstacles.new(geo)
         return distance_m, obstacle
     end
 
+    -- the taxonomy is exposed on the instance as well as the class, so a caller that has
+    -- an instance never needs a second handle on the class just to name an obstacle type
+    self.OBSTACLE_TYPE            = DAAobstacles.OBSTACLE_TYPE
+    self.ADSB_EMITTER             = DAAobstacles.ADSB_EMITTER
+
     self.configure                = configure
     self.update_state             = update_state
     self.pretty_obstacle_type     = pretty_obstacle_type
