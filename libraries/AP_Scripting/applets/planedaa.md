@@ -465,13 +465,52 @@ different action, your own failsafe — you should only have to edit `planedaa.l
 |---|---|---|
 | `planedaa.lua` | `scripts/` | every parameter, all alerting, all commanding (target hijack, loiter, altitude clamp), the trapped/hung failsafe, the skipped-waypoint notice |
 | `daageo.lua` | `scripts/modules/` | `DAAgeometry` — angles, locations, turn radius and rate, wind-corrected ground speed |
+| `daacore.lua` | `scripts/modules/` | `DAAcore` — the avoidance **mechanism**: the bendy-ruler sweep and its turn lead, closest-point-of-approach assessment, aircraft and altitude-fence detection, and the `DAAD`/`DAAS`/`DAAG` logging |
 | `daaobs.lua` | `scripts/modules/` | `DAAobstacles` — the `OBSTACLE_TYPE` taxonomy, obstacle labelling, standoffs, `find_closest_obstacle` |
+| `daaltr.lua` | `scripts/modules/` | `DAAloiter` — one implementation of the altitude-loiter policy (see below) |
 | `mavlink_wrappers.lua` | `scripts/modules/` | MAVLink command helpers |
 
 **All four must be installed.** A missing module is a load failure, not a degraded mode.
 `@Param` documentation has to stay in `planedaa.lua`: the parameter metadata tool only
 scans `libraries/AP_Scripting/applets` and `drivers`, so a `@Param` block moved into a
 module silently disappears from the documentation.
+
+### Replacing a policy: the loiter as the pattern
+
+`daaltr.lua` is deliberately not privileged. The applet talks to it through five members
+and nothing else:
+
+| member | |
+|---|---|
+| `.active` | true while the loiter is running |
+| `start(alt_m, frame, right, speed)` | begin; returns true if a loiter is running after the call |
+| `stop(force)` | end it; returns false if it declined (the cool-down is still running) |
+| `update()` | call regularly while active; notices the pilot leaving GUIDED |
+| `aircraft_seen()` | refresh the cool-down timer |
+
+So a different policy is a different module providing those five. Write `daaltr2.lua`,
+change one line in `planedaa.lua`:
+
+```lua
+loiteralt = need("daaltr2").new({ ... })
+```
+
+and nothing else moves. Your module decides what "loiter" means — orbit the other way,
+descend instead of hold, refuse below a height, hand back to a different mode — while the
+applet keeps deciding *when* a loiter is called for. That is the seam: **the applet owns
+which policy applies and when; the module owns how it is carried out.**
+
+The same shape is available for the mechanism. `daacore.lua` is reached through
+`configure()`, `update_state()`, `detect()`, `clamp_alt_to_fence()` and
+`assess_obstacle_motion()`, and `detect()` hands back a report rather than setting shared
+state:
+
+```lua
+{ target_loc, obstacle, aircraft }
+```
+
+Replacing that is a much larger undertaking than replacing a loiter, but the seam is the
+same one.
 
 ### Distinct names are a budget
 
