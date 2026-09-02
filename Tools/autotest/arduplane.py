@@ -7922,7 +7922,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         mode, so they are installed together and this is the single place to add another.
         """
         self.install_applet_script_context("planedaa.lua")
-        for module in ("mavlink_wrappers.lua", "daageo.lua", "daaobs.lua"):
+        for module in ("mavlink_wrappers.lua", "daageo.lua", "daaobs.lua", "daaltr.lua", "daacore.lua"):
             self.install_script_module_context(
                 self.script_modules_source_path(module),
                 module,
