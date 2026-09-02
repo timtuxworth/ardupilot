@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-074"
+SCRIPT_VERSION      = "4.8.0-075"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -2378,7 +2378,7 @@ local DAA = {
             return
         end
         gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(" ALERT AIRCRAFT: %s Well Clear", LoWC_label) )
-        gcs:send_named_string("DAA-LOWC", "aircraft")
+        gcs:send_named_string("DAA-LOWCOK", "aircraft")
         LoWC_active = false
         LoWC_label  = ""
     end
@@ -2389,25 +2389,48 @@ local DAA = {
         gcs:send_named_float("DAA-DISTZ", aircraft_obstacle.distance_z)
     end
 
+    -- is the contact inside one of the two nested alert volumes?  Both axes have to be
+    -- inside: an aircraft directly overhead but 1000 m above is neither a near miss nor a
+    -- loss of well clear.
+    local function aircraft_inside(aircraft_obstacle, limit_xy, limit_z)
+        return aircraft_obstacle.distance_xy < limit_xy and aircraft_obstacle.distance_z < limit_z
+    end
+
     local function alert_aircraft()
         if aircraft_avoiding == nil then
             NMAC_cleared()
             LoWC_cleared()
             return
         end
-        if (now_ms - now_aircraft_ms) > 5000 then
-            if aircraft_avoiding.distance_xy < near_miss_xy and aircraft_avoiding.distance_z < near_miss_z then
-                NMAC_triggered(aircraft_avoiding)
-            elseif aircraft_avoiding.distance_xy < well_clear_xy and aircraft_avoiding.distance_z < well_clear_z then
-                LoWC_triggered(aircraft_avoiding)
-            else
-                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" ALERT AIRCRAFT: %s %.0f m",
-                                aircraft_avoiding.label, aircraft_avoiding.distance_xy ))
-                gcs:send_named_string("DAA-ALERT", "aircraft")
-            end
-            notify_aircraft_nearby(aircraft_avoiding)
-            now_aircraft_ms = now_ms
+
+        local in_nmac = aircraft_inside(aircraft_avoiding, near_miss_xy, near_miss_z)
+        local in_lowc = aircraft_inside(aircraft_avoiding, well_clear_xy, well_clear_z)
+
+        -- each state clears on its OWN boundary, the moment the contact leaves it - not only
+        -- when the contact disappears from the feed altogether.  Clearing sits outside the 5 s
+        -- alert throttle below because it is an edge, not a repeat: leaving the pilot looking
+        -- at a near miss that is already over is worse than one extra message.
+        if not in_nmac then
+            NMAC_cleared()
         end
+        if not in_lowc then
+            LoWC_cleared()
+        end
+
+        if (now_ms - now_aircraft_ms) <= 5000 then
+            return
+        end
+        if in_nmac then
+            NMAC_triggered(aircraft_avoiding)
+        elseif in_lowc then
+            LoWC_triggered(aircraft_avoiding)
+        else
+            gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" ALERT AIRCRAFT: %s %.0f m",
+                            aircraft_avoiding.label, aircraft_avoiding.distance_xy ))
+            gcs:send_named_string("DAA-ALERT", "aircraft")
+        end
+        notify_aircraft_nearby(aircraft_avoiding)
+        now_aircraft_ms = now_ms
     end
 
     -- alert the pilot about any obstacles found, alert_target_loc is the suggested new target location (if applicable)
