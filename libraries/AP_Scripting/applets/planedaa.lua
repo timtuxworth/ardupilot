@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-077"
+SCRIPT_VERSION      = "4.8.0-078"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -501,6 +501,7 @@ AVD_NMAC_XY                 = bind_param("AVD_NMAC_XY")
 AVD_NMAC_Z                  = bind_param("AVD_NMAC_Z")
 ROLL_LIMIT_DEG              = bind_param("ROLL_LIMIT_DEG")
 WP_LOITER_RAD               = bind_param("WP_LOITER_RAD")
+WP_RADIUS                   = bind_param("WP_RADIUS")
 
 local roll_limit_deg        = ROLL_LIMIT_DEG:get()
 local lookahead_param_m     = DAA_LKAHD:get()
@@ -526,6 +527,7 @@ local bendy_angle           = DAA_BR_ANGLE:get()
 -- wants the magnitude - as a distance, as a reposition radius, and as a turn-radius stand-in -
 -- and the loiter direction is carried separately, so take the sign out once, at the source.
 local wp_loiter_rad_m       = math.abs(WP_LOITER_RAD:get())
+local wp_radius_m           = math.abs(WP_RADIUS:get())
 local crewed_avoid_alt_m    = DAA_AVD_ALT:get()
 local crewed_avoid_alt_frame = DAA_AVD_ALT_TP:get()
 local daa_alert             = DAA_AVD_ALERT:get()
@@ -729,6 +731,7 @@ local function get_vehicle_state()
         bendy_ratio           = DAA_BR_RATIO:get()
         bendy_angle           = DAA_BR_ANGLE:get()
         wp_loiter_rad_m       = math.abs(WP_LOITER_RAD:get())
+        wp_radius_m           = math.abs(WP_RADIUS:get())
         crewed_avoid_alt_m    = DAA_AVD_ALT:get()
         crewed_avoid_alt_frame  = DAA_AVD_ALT_TP:get()
         daa_alert             = DAA_AVD_ALERT:get()
@@ -1257,6 +1260,8 @@ local DAA = {
     local hung_since_ms         = uint32_t(0)   -- when that closest approach last improved
     local hung_target_loc       = nil           -- the navigation target the progress is measured against
     local hung_nav_index        = -1            -- mission index when a hung trap fired (release when it changes)
+    local skip_nav_index        = -1            -- mission index last cycle, to notice the mission moving on
+    local skip_target_loc       = nil           -- navigation target last cycle, to measure how short we left it
     local previous_label        = ""
     local avoiding_label        = ""
     -- laggy/dropped traffic-feed watchdog (network-fed moving obstacles carry an update
@@ -2362,7 +2367,23 @@ local DAA = {
             last_avoid_bearing_deg  = best_bearing_deg
         end
 
-        local proj_distance = math.max(distance_to_target_m, current_lookahead)   -- fix bug 2
+        -- Where to put the commanded target along the bearing we picked.  The current_lookahead
+        -- floor arrived as collateral in 07c8194261 (the real fix there was that
+        -- resist_bearing_change() had been returning its clearance in place of the distance),
+        -- and it looks wrong - DAA_LKAHD is a LOOK-AHEAD, not a steering distance, and at the
+        -- 1000 m default it throws the commanded target a kilometre out along a mission leg a
+        -- couple of hundred metres long.
+        --
+        -- It is nevertheless load-bearing, so leave it alone.  This location REPLACES
+        -- next_WP_loc, and ArduPlane's past-the-waypoint test draws its finish line THROUGH
+        -- next_WP_loc: a distant target puts that line out of reach, while a near one puts it
+        -- alongside the aircraft, and the moment the avoidance bearing has any component back
+        -- towards the previous waypoint the mission completes and moves on.  Replacing this
+        -- with max(WP_LOITER_RAD, 2 x WP_RADIUS) was tried and measurably worse -
+        -- PlaneDAAHungTrapFires skipped its waypoint at 106 m and finished 7 m off the fence
+        -- instead of clearing it.  See target_projection_floor_m() for what the floor has to
+        -- beat before it can be shortened.
+        local proj_distance = math.max(distance_to_target_m, current_lookahead)
         local new_target_loc = location_project(current_loc, best_bearing_deg, proj_distance, target_loc)
         log_detect_result(true, obstacle_avoiding.distance_m, best_distance_m, distance_to_target_m,
                           best_bearing_deg, new_target_loc, obstacle_avoiding.type)
@@ -2913,12 +2934,47 @@ local DAA = {
         trap_since_ms = uint32_t(0)
     end
 
+    -- Tell the pilot when the mission has moved on from a waypoint the vehicle never
+    -- reached.  Skipping one is the right outcome - containment beats mission fidelity -
+    -- but it is otherwise silent, and the pilot is owed the fact: ArduPlane's
+    -- past-the-waypoint test is taken against next_WP_loc, which we have replaced with the
+    -- avoidance target, so a laterally offset target rotates that finish line and the
+    -- waypoint completes early (measured at 100-177 m short on a real flight).
+    --
+    -- Only a FORWARD move counts.  A GCS can DO_JUMP the mission backwards while we happen
+    -- to be avoiding, and that is not ours to report.
+    local function mission_skip_update()
+        local was_index = skip_nav_index
+        local was_loc   = skip_target_loc
+        skip_nav_index  = mission:get_current_nav_index()
+        skip_target_loc = (navigation_target_loc ~= nil) and navigation_target_loc:copy() or nil
+
+        if daa_target_loc == nil or current_loc == nil or was_loc == nil then
+            return                              -- not avoiding, or nothing to compare against
+        end
+        if was_index < 0 or skip_nav_index <= was_index then
+            return                              -- no move, or a jump backwards
+        end
+        -- WP_RADIUS is the arrival test the vehicle itself used, near enough: its acceptance
+        -- distance is WP_RADIUS scaled by EAS2TAS squared and capped at the L1 distance, so
+        -- this can miss a skip by a few metres at altitude.  Erring that way is right - a
+        -- false "skipped" on a genuine arrival is the more misleading of the two.
+        local short_m = current_loc:get_distance(was_loc)
+        if short_m <= wp_radius_m then
+            return                              -- close enough that this was a real arrival
+        end
+        gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(
+            " WP%d skipped by %.0fm while avoiding", was_index, short_m))
+        gcs:send_named_string("DAA-AVOID", "WPSKIP")
+    end
+
     -- Trapped-failsafe state machine. Returns true while the failsafe is controlling the
     -- vehicle (so update() skips normal avoidance). See DAA_TRAP_ACT/S/CLR_S.
     function DAA.trap_update()
         -- track progress even when the failsafe action is disabled: DAA_TRAP_ACT=0 with
         -- DAA_HUNG_ALRT_S set is the alert-only configuration, and it is the default
         hung_update()
+        mission_skip_update()
         if trap_act == 0 then
             trap_active = false
             trap_since_ms = uint32_t(0)
