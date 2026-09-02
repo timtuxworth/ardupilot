@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-083"
+SCRIPT_VERSION      = "4.8.0-084"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -510,8 +510,10 @@ local function need(name)
     if file ~= nil then
         gcs:send_text(MAV_SEVERITY.CRITICAL, string.format("%s %s %s", line, file, rest))
     else
-        -- no file:line in it at all - almost always "module not found"
-        gcs:send_text(MAV_SEVERITY.CRITICAL, string.format("%s.lua missing", name))
+        -- no file:line in it: a module that was not found, or one that would not fit.
+        -- Report what Lua actually said rather than guessing - "not enough memory" and
+        -- "module not found" need completely different answers from the operator.
+        gcs:send_text(MAV_SEVERITY.CRITICAL, string.format("%s: %s", name, msg:sub(1, 40)))
     end
     error(name .. " load failed", 0)
 end
