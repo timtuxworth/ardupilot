@@ -8160,7 +8160,34 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
                 "FOLL_ENABLE": 1,
                 "FOLL_SYSID": self.mav.source_system,
                 "FOLL_ALT_TYPE": 1,  # ABOVE_HOME - pin explicitly rather than relying on Copter's default
+                "FOLL_DIST_MAX": 1,
             })
+            self.progress("Testing raw SYSID target fallback before AP_Follow's first estimate")
+            # Give AP_Mount a valid raw target while FOLL_DIST_MAX prevents
+            # AP_Follow from producing its first estimate.  There is no
+            # kinematic angle to hold yet, so the mount must fall through to
+            # the raw GLOBAL_POSITION_INT target rather than remain frozen at
+            # the angle commanded by the preceding subtest.
+            (acquisition_lat, acquisition_lon) = mavextra.gps_offset(start.lat, start.lng, 0, 20)
+            acquisition_abs_alt_m = start.get_alt_m(AltFrame.ABSOLUTE) + 10
+            acquisition_pitch_deg = math.degrees(math.atan2(10, 20))
+            self.mav.mav.global_position_int_send(
+                int(self.get_sim_time_cached() * 1000), # time boot ms
+                int(acquisition_lat * 1e7),
+                int(acquisition_lon * 1e7),
+                int(acquisition_abs_alt_m * 1000), # mm alt amsl
+                40 * 1000, # mm above home
+                0, 0, 0, 0,
+            )
+            self.test_mount_pitch(
+                acquisition_pitch_deg,
+                3,
+                mavutil.mavlink.MAV_MOUNT_MODE_SYSID_TARGET,
+                hold=1,
+                constrained=constrain_sysid_target,
+            )
+            self.set_parameter("FOLL_DIST_MAX", 0)
+
             # use a target with a modest elevation angle, comfortably inside
             # the mount's pitch limits (MNT1_PITCH_MAX=45 in this test): the
             # earlier sysid-target tests deliberately use a target so steep
