@@ -510,6 +510,7 @@ private:
     uint32_t _target_sysid_kinematic_active_ms;  // system time (ms) an external kinematic estimator (eg AP_Follow) last reported it is tracking _target_sysid
     Location _target_sysid_kinematic_location;   // last kinematic estimate for _target_sysid received from that estimator
     uint32_t _target_sysid_kinematic_update_ms;  // system time (ms) _target_sysid_kinematic_location was last updated
+    bool _target_sysid_kinematic_had_estimate;   // true once the estimator has supplied at least one usable estimate for _target_sysid; distinguishes "had one, lost it" (hold) from "never had one yet" (fall through to the raw location, which may already be usable)
 
     uint32_t _last_warning_ms;      // system time of last warning sent to GCS
 

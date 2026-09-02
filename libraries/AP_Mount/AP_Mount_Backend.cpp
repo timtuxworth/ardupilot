@@ -406,6 +406,7 @@ void AP_Mount_Backend::set_target_sysid(uint8_t sysid)
         _target_sysid_kinematic_active_ms = 0;
         _target_sysid_kinematic_location.zero();
         _target_sysid_kinematic_update_ms = 0;
+        _target_sysid_kinematic_had_estimate = false;
     }
     _target_sysid = sysid;
 
@@ -437,6 +438,7 @@ void AP_Mount_Backend::set_target_sysid_kinematic_estimate(uint8_t sysid, const 
     }
     _target_sysid_kinematic_location = loc;
     _target_sysid_kinematic_update_ms = AP_HAL::millis();
+    _target_sysid_kinematic_had_estimate = true;
 }
 
 // called by vehicle code the moment that same external kinematic estimator
@@ -1308,14 +1310,19 @@ bool AP_Mount_Backend::get_angle_target_to_sysid(MountAngleTarget& angle_rad) co
                 // to prevent, so hold rather than risk it
                 return false;
             }
-        } else {
-            // we're relying on this estimator for the target and it
-            // currently has no estimate - hold the last commanded angle
-            // rather than falling back to the raw, differently-timed
-            // location below, which would cause a visible snap back to a
-            // less current position
+        } else if (_target_sysid_kinematic_had_estimate) {
+            // the estimator gave us a usable estimate before but doesn't
+            // currently have one - hold the last commanded angle rather
+            // than falling back to the raw, differently-timed location
+            // below, which would cause a visible snap back to a less
+            // current position
             return false;
         }
+        // else: the estimator is configured and enabled for this sysid but
+        // has never yet supplied a usable estimate (eg it's still
+        // acquiring, or its own validity checks are rejecting the data) -
+        // there is nothing to hold or snap back from, so fall through to
+        // the raw-location path below rather than refusing to point at all
     }
 
     // exit immediately if no location available
