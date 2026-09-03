@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-001"
+DAAcore.SCRIPT_VERSION = "4.8.0-002"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -33,11 +33,17 @@ DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 -- unlike that shared table, so a private literal here carries no drift risk of its own.
 local BANNER_SEVERITY = 6
 
+-- daageo is stateless (every function is a pure function of its arguments, see that file),
+-- so it is required directly rather than injected as a constructed/configured collaborator -
+-- there is no shared state to keep consistent between callers.  roll_limit_deg, the one real
+-- input its turn-radius functions need, is this module's own cached parameter instead (see
+-- configure() below), passed as an explicit argument each call.
+local geometry = require("daageo")
+
 function DAAcore.new(deps)
     local self = {}
 
     -- collaborators and constants, fixed for the life of the instance
-    local geometry              = deps.geometry
     local obstacles             = deps.obstacles
     local OBSTACLE_TYPE         = deps.OBSTACLE_TYPE
     local MAV_SEVERITY          = deps.MAV_SEVERITY
@@ -64,6 +70,7 @@ function DAAcore.new(deps)
     local alt_cool_ms, alt_hyst_m, bearing_inc_deg, bendy_angle
     local bendy_ratio, cpa_min_ms, detect_m, margin_alt_m
     local margin_crewed_m, margin_fence_m, margin_vertical_m, plan_m
+    local roll_limit_deg
     local side_hold_s, slew_dps, slew_urg_s, well_clear_xy
     local well_clear_z, wp_loiter_rad_m, lookahead_param_m
 
@@ -97,6 +104,7 @@ function DAAcore.new(deps)
         margin_fence_m         = settings.margin_fence_m
         margin_vertical_m      = settings.margin_vertical_m
         plan_m                 = settings.plan_m
+        roll_limit_deg         = settings.roll_limit_deg
         side_hold_s            = settings.side_hold_s
         slew_dps               = settings.slew_dps
         slew_urg_s             = settings.slew_urg_s
@@ -544,7 +552,7 @@ function DAAcore.new(deps)
     local function location_after_course_change(from_loc, course_deg, to_loc)
         local course_change_deg = wrap_180(course_deg - ground_course_deg)
         local ground_speed_ms   = effective_groundspeed(airspeed_ms, course_deg, wind_dir_rad, wind_speed)
-        local rate_of_turn_dps  = max_turn_rate_dps(airspeed_ms)
+        local rate_of_turn_dps  = max_turn_rate_dps(airspeed_ms, roll_limit_deg)
 
         if rate_of_turn_dps <= 0 or ground_speed_ms <= 0 then
             return from_loc                 -- no usable speed to turn at
