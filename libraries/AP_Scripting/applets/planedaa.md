@@ -530,7 +530,8 @@ Things worth knowing before adding to this applet:
   passed to `bind_add_param` (`'MARGIN_FENCE'`).
 - **Splitting into a module is the only real lever** — each chunk gets its own 1024.
 
-Current occupancy: `planedaa.lua` 899, `daaobs.lua` 186, `daageo.lua` 78.
+Current occupancy: `planedaa.lua` 607, `daacore.lua` 383, `daaobs.lua` 171, `daaltr.lua` 102,
+`daageo.lua` 78.
 
 ## Logging
 
@@ -556,7 +557,7 @@ target to dodge it has been computed.
 |-------|-------------|
 | `Obs`  | Obstacle found (1/0) |
 | `DstF` | Clearance of the **worst** heading in the sweep (m) — the closest any candidate came to an obstacle, which is what names the obstacle being avoided. It is normal for this to be very negative: some candidate heading usually points straight at the obstacle. **It is not the clearance of the path being flown** — read `DstB` for that. |
-| `DstB` | Clearance of the heading actually **chosen**, `HdgB` (m). Negative means no heading cleared and the best available one still breaches — the genuine boxed-in signal. Clamped to ±9999; a heading that clears everything reports the clamp. |
+| `DstB` | Clearance of the heading actually **chosen**, `HdgB` (m). Negative means no heading cleared and the best available one still breaches — the genuine boxed-in signal. Clamped to ±9999; a heading that clears everything reports the clamp. For a fence this is exact. For a moving obstacle it is the clearance at the point the clearance-hysteresis check ran; the side-commitment and slew-rate smoothing that can still adjust `HdgB` afterwards do not re-measure, so treat it as the best available figure rather than an exact one in that case. |
 | `DstT` | Distance to the proposed new target that avoids the obstacle (m) |
 | `HdgB` | Best bearing found to avoid the obstacle (deg) |
 | `Tfnd` | Avoidance target found (1/0) |
