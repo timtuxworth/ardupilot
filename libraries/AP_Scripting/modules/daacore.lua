@@ -445,8 +445,10 @@ function DAAcore.new(deps)
     -- Returns the clearance found and whether the probe that produced it was the straight
     -- one (delta == 0); the caller needs that to decide "no avoidance required" without
     -- comparing recomputed bearings for equality.
+    -- Reuse these offsets: test_step2() may run for many candidate headings in one
+    -- update, so building this table in the function adds repeated heap churn.
+    local test_bearings = { 0, 45, -45 }
     local function test_step2(loc_test, avoid_step2_m, destination_loc)
-        local test_bearings         = { 0, 45, -45 }
         local bearing_to_dest_deg   = math.deg(loc_test:get_bearing(destination_loc))
         local distance2_m           = math.max(math.min(avoid_step2_m,
                                                        loc_test:get_distance(destination_loc)), MIN_STEP2_M)
