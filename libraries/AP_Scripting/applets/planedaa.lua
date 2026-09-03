@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-094"
+SCRIPT_VERSION      = "4.8.0-095"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -433,8 +433,13 @@ PARAM.WP_RADIUS                   = bind_param("WP_RADIUS")
 -- configure_modules() below, and project_planedaa_param_cache_cleanup in memory.
 local lookahead_param_m     = PARAM.LKAHD_M:get()
 local detect_m              = PARAM.DETECT_M:get()
--- Fallback ("0 => use the turn radius") is resolved further down, once geometry/
--- turn_radius_m exist - see fence_margin_fallback_m() and its call right after.
+-- daageo's turn_radius_m()/max_turn_rate_dps() are stateless and take this directly (see
+-- fence_margin_fallback_m() below, DAA.warnings(), hung_update(), and DAAV.TrR logging) -
+-- no longer module-only now that this file is a direct consumer too, not just a forwarder
+-- to a geometry.configure() call.
+local roll_limit_deg        = PARAM.ROLL_LIMIT_DEG:get()
+-- Fallback ("0 => use the turn radius") is resolved further down, once turn_radius_m
+-- exists - see fence_margin_fallback_m() and its call right after.
 local margin_fence_m        = PARAM.MARGIN_FENCE:get()
 -- refresh_period_ms is the loop period in ms; DAA_UPDATE_RATE is in Hz (floored at 1 Hz to avoid /0)
 local refresh_period_ms     = 1000.0 / math.max(PARAM.UPDATE_RATE:get(), 1.0)
@@ -515,8 +520,11 @@ end
 local loiteralt
 local core
 
-local geometry  = need("daageo").new()
-local obstacles = need("daaobs").new(geometry)
+-- daageo is stateless (every function is a pure function of its arguments, see that file),
+-- so it is required directly rather than instantiated - there is no shared state to keep
+-- consistent between this file, daacore and daaobs.
+local geometry  = need("daageo")
+local obstacles = need("daaobs").new()
 
 -- The obstacle taxonomy belongs to the module that classifies obstacles, so it is defined
 -- there and read back here.  This file only names the four members it actually uses, which
@@ -526,7 +534,6 @@ local OBSTACLE_TYPE = obstacles.OBSTACLE_TYPE
 
 local max_turn_rate_dps         = geometry.max_turn_rate_dps
 local turn_radius_m             = geometry.turn_radius_m
-local wrap_360                  = geometry.wrap_360
 local wrap_180                  = geometry.wrap_180
 local locations_equal           = geometry.locations_equal
 local pretty_obstacle_type      = obstacles.pretty_obstacle_type
@@ -543,7 +550,7 @@ local obstacle_report_distance  = obstacles.obstacle_report_distance
 -- initial value below, the 5 s parameter refresh, and DAA.warnings()'s own turn-radius
 -- sanity checks - one formula, not three copies of it.
 local function fence_margin_fallback_m()
-    local achievable_turn_radius_m = turn_radius_m(param:get('AIRSPEED_CRUISE') or 0)
+    local achievable_turn_radius_m = turn_radius_m(param:get('AIRSPEED_CRUISE') or 0, roll_limit_deg)
     if achievable_turn_radius_m <= 0 then achievable_turn_radius_m = wp_loiter_rad_m end
     return achievable_turn_radius_m
 end
@@ -564,7 +571,6 @@ end
 -- never per-cycle or per-probe, so the runtime cost is immaterial).  See
 -- project_planedaa_param_cache_cleanup in memory.
 local function configure_modules()
-    geometry.configure({ roll_limit_deg = PARAM.ROLL_LIMIT_DEG:get() })
     obstacles.configure({
         margin_fence_m      = margin_fence_m,
         margin_crewed_m     = margin_crewed_m,
@@ -583,6 +589,7 @@ local function configure_modules()
         detect_m          = detect_m,           margin_alt_m      = PARAM.MARGIN_ALT:get(),
         margin_crewed_m   = margin_crewed_m,    margin_fence_m    = margin_fence_m,
         margin_vertical_m = PARAM.MARGIN_CA_Z:get(), plan_m       = PARAM.PLAN_M:get(),
+        roll_limit_deg    = roll_limit_deg,
         side_hold_s       = side_hold_s,        slew_dps          = slew_dps,
         slew_urg_s        = PARAM.SLEW_URG:get(), well_clear_xy   = well_clear_xy,
         well_clear_z      = well_clear_z,       wp_loiter_rad_m   = wp_loiter_rad_m,
@@ -701,6 +708,7 @@ local function get_vehicle_state()
     if (now_ms - now_params_ms) > 5000 then
         lookahead_param_m     = PARAM.LKAHD_M:get()
         detect_m              = PARAM.DETECT_M:get()
+        roll_limit_deg        = PARAM.ROLL_LIMIT_DEG:get()
         margin_fence_m        = PARAM.MARGIN_FENCE:get()
         refresh_period_ms     = 1000.0 / math.max(PARAM.UPDATE_RATE:get(), 1.0)
         bendy_ratio           = PARAM.BR_RATIO:get()
@@ -774,7 +782,6 @@ loiteralt = need("daaltr").new({
     MAV_DO_REPOSITION_FLAGS = MAV_DO_REPOSITION_FLAGS,
     MAV_SEVERITY            = MAV_SEVERITY,
     get_mode_string         = get_mode_string,
-    wrap_360                = wrap_360,
     mavlink_wrappers        = mavlink_wrappers,
 })
 
@@ -891,7 +898,7 @@ local DAA = {
             obstacle.distance_z,                -- DstZ - Vertical distance to the aircraft (+ve is up),
             obstacle.type,                      -- ObjT - the type of the obstacle as an OBSTACLE_TYPE
             obstacle.timestamp_ms and ((now_ms:tofloat() - obstacle.timestamp_ms) * 0.001) or 0,  -- Age - obstacle position age in s (0 = fresh/on-board)
-            turn_radius_m(airspeed_ms),         -- TrR - achievable turn radius at ROLL_LIMIT_DEG and the current airspeed (0 = no usable airspeed)
+            turn_radius_m(airspeed_ms, roll_limit_deg), -- TrR - achievable turn radius at ROLL_LIMIT_DEG and the current airspeed (0 = no usable airspeed)
             hung_active and 1 or 0              -- Hung - avoidance has made no progress toward the navigation target for DAA_HUNG_ALRT_S
         )
         if not status then
@@ -955,7 +962,7 @@ local DAA = {
             warn(I, "TRAP_ESC_ACT = TRAP_ACT: no escalation") end
         -- slew limit that can never bind (exceeds the achievable turn rate)
         if cruise_ms > 1 and slew_dps > 0 then
-            local turn_rate = max_turn_rate_dps(cruise_ms)
+            local turn_rate = max_turn_rate_dps(cruise_ms, roll_limit_deg)
             if turn_rate > 0 and slew_dps > turn_rate * 1.5 then
                 warn(I, string.format("SLEW_DPS %.0f > turn rate %.0f: no effect", slew_dps, turn_rate)) end
         end
@@ -1509,7 +1516,7 @@ local DAA = {
             hung_target_loc = navigation_target_loc:copy()
         end
         local range_m    = current_loc:get_distance(navigation_target_loc)
-        local progress_m = math.max(turn_radius_m(airspeed_ms), MIN_HUNG_PROGRESS_M)
+        local progress_m = math.max(turn_radius_m(airspeed_ms, roll_limit_deg), MIN_HUNG_PROGRESS_M)
         if hung_best_m == nil or range_m < (hung_best_m - progress_m) then
             hung_best_m   = range_m
             hung_since_ms = now_ms
