@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-002"
+DAAcore.SCRIPT_VERSION = "4.8.0-003"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -45,7 +45,10 @@ function DAAcore.new(deps)
 
     -- collaborators and constants, fixed for the life of the instance
     local obstacles             = deps.obstacles
-    local OBSTACLE_TYPE         = deps.OBSTACLE_TYPE
+    -- obstacles already owns this taxonomy (it is the code that classifies obstacles into
+    -- it) - reading it back through obstacles rather than a second injected copy means
+    -- there is exactly one OBSTACLE_TYPE table, not two that could disagree.
+    local OBSTACLE_TYPE         = obstacles.OBSTACLE_TYPE
     local MAV_SEVERITY          = deps.MAV_SEVERITY
     local SCRIPT_NAME_SHORT     = DAAcore.SCRIPT_NAME_SHORT
     local FLT_MAX               = deps.FLT_MAX
