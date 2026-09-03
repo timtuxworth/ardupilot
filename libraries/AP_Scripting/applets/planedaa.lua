@@ -1039,13 +1039,24 @@ local DAA = {
         end
 
         -- if we got here we have a current location (AHRS active) and a current navigation target
-        update_target_location_save_loc = current_target_loc:copy()
+        -- No :copy() here: current_target_loc is a fresh Location this vehicle:get_target_location()
+        -- call built for us, nothing else this cycle holds a reference to it, and
+        -- update_target_location_save_loc is only ever READ (:get_alt_frame(), passed as the
+        -- "current" argument into vehicle:update_target_location()) - it is never the object that
+        -- gets change_alt_frame()'d in place, so aliasing it costs nothing.  Contrast
+        -- navigation_target_loc below: that copy IS load-bearing, see its own comment.
+        update_target_location_save_loc = current_target_loc
 
         -- if the navigation target has changed to some other target not the DAA target, it must be vehicle navigation
         if navigation_target_loc == nil or
             (not locations_equal(navigation_target_loc, current_target_loc) and
                 not locations_equal(daa_target_loc, current_target_loc)) then
             -- the vehicle navigation code has changed it's target
+            -- :copy() IS needed here (unlike update_target_location_save_loc above):
+            -- navigation_target_loc persists across many cycles, and set_avoid_location()'s
+            -- revert path calls update_target_location(navigation_target_loc), which mutates
+            -- whatever object is passed in via :change_alt_frame() - so navigation_target_loc
+            -- must be its own private object, not an alias shared with anything else.
             navigation_target_loc = current_target_loc:copy()
         end
 
