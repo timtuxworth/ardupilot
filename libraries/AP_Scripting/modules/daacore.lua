@@ -974,6 +974,55 @@ function DAAcore.new(deps)
         return best_distance_m, best_bearing_deg
     end
 
+    -- The two obstacle-response resolvers below mirror detect_aircraft()/detect_altitude_fence()'s
+    -- shape - each answers one question about obstacle_avoiding (already chosen by the sweep) and
+    -- reports back via upvalues, the same style everything else in this closure already uses.
+    -- They are what "choose" means in detect_impl()'s gather -> choose -> project -> log shape.
+
+    -- Fences are fixed and containment is safety-critical: a heading slew limit or a committed
+    -- side could delay/deflect the turn at a hard boundary and breach it, so this is hysteresis
+    -- only (resist_bearing_change), no smoothing, no CPA - the responsive bendy-ruler behaviour.
+    -- Returns the (possibly resisted) bearing/distance to fly; best_distance_m is reassigned to
+    -- the clearance of whichever bearing comes back - not the discarded candidate's - so
+    -- DAAD.DstB reflects what is actually flown, including on the "stay the course" path.
+    local function resolve_fence_bearing(target_loc, best_bearing_deg, best_distance_m)
+        best_bearing_deg, best_distance_m = resist_bearing_change(
+            last_avoid_bearing_deg, best_bearing_deg, best_distance_m, target_loc)
+        last_avoid_bearing_deg  = best_bearing_deg
+        committed_side_sign     = 0
+        side_flip_pending       = false
+        return best_bearing_deg, best_distance_m
+    end
+
+    -- Non-fixed obstacles (aircraft, drones, birds, AIS, ...): velocity-aware smoothing.
+    -- First decides whether the obstacle is actually a conflict: one that is opening range and
+    -- whose predicted closest approach stays beyond well-clear is leaving, so avoidance should
+    -- resume nav (obstacle_gone = true tells the caller to return nil immediately, same as the
+    -- early return this branch used to make inline). Otherwise commits a side and slew-limits
+    -- the heading so we track a smooth path instead of wiggling as the obstacle (and the
+    -- instantaneous geometry) moves; refine_avoidance_bearing() also logs the DAAS smoothing
+    -- trace each cycle.
+    local function resolve_moving_bearing(bearing_deg, target_loc, best_bearing_deg, best_distance_m)
+        local motion = assess_obstacle_motion(obstacle_avoiding)
+        if not motion.is_conflict then
+            -- the obstacle is leaving (opening range, predicted miss beyond its keep-out
+            -- radius): drop it so avoid_obstacle() does not steer or announce for it. Any
+            -- avoidance already in progress reverts cleanly (avoid_obstacle(nil)). This is
+            -- re-decided every cycle from current geometry (no hold) so a manoeuvring obstacle
+            -- is always tracked on fresh data; near a marginal crossing that can cost a few
+            -- extra (slew-limited) heading reversals, which is the safe trade.
+            obstacle_avoiding       = nil
+            last_avoid_bearing_deg  = nil
+            committed_side_sign     = 0
+            side_flip_pending       = false
+            return best_bearing_deg, best_distance_m, true
+        end
+        best_bearing_deg, best_distance_m = refine_avoidance_bearing(
+            bearing_deg, best_bearing_deg, best_distance_m, motion, obstacle_avoiding, target_loc)
+        last_avoid_bearing_deg  = best_bearing_deg
+        return best_bearing_deg, best_distance_m, false
+    end
+
     -- detect flying objects or fences when flying towards navigation_target_loc
     local function detect_impl()
         -- TODO be smarter about re-populating this
@@ -1029,41 +1078,15 @@ function DAAcore.new(deps)
             or obstacle_type == OBSTACLE_TYPE.FENCE_ALT_MIN)
 
         if is_fence then
-            -- Fences are fixed and containment is safety-critical: a heading slew limit or a
-            -- committed side could delay/deflect the turn at a hard boundary and breach it.
-            -- Keep the responsive bendy-ruler behaviour (clearance hysteresis only).
-            -- best_distance_m is reassigned here too, to the clearance of whichever bearing
-            -- comes back - not the discarded candidate's - so DAAD.DstB reflects what is
-            -- actually flown, including on the "stay the course" path.
-            best_bearing_deg, best_distance_m = resist_bearing_change(
-                last_avoid_bearing_deg, best_bearing_deg, best_distance_m, target_loc)
-            last_avoid_bearing_deg  = best_bearing_deg
-            committed_side_sign     = 0
-            side_flip_pending       = false
+            best_bearing_deg, best_distance_m =
+                    resolve_fence_bearing(target_loc, best_bearing_deg, best_distance_m)
         else
-            -- Non-fixed obstacles (aircraft, drones, birds, AIS, ...): velocity-aware smoothing.
-            -- First decide whether the obstacle is actually a conflict: one that is opening range
-            -- and whose predicted closest approach stays beyond well-clear is leaving, resume nav.
-            local motion = assess_obstacle_motion(obstacle_avoiding)
-            if not motion.is_conflict then
-                -- the obstacle is leaving (opening range, predicted miss beyond its keep-out
-                -- radius): drop it so avoid_obstacle() does not steer or announce for it. Any
-                -- avoidance already in progress reverts cleanly (avoid_obstacle(nil)). This is
-                -- re-decided every cycle from current geometry (no hold) so a manoeuvring obstacle
-                -- is always tracked on fresh data; near a marginal crossing that can cost a few
-                -- extra (slew-limited) heading reversals, which is the safe trade.
-                obstacle_avoiding       = nil
-                last_avoid_bearing_deg  = nil
-                committed_side_sign     = 0
-                side_flip_pending       = false
+            local obstacle_gone
+            best_bearing_deg, best_distance_m, obstacle_gone =
+                    resolve_moving_bearing(bearing_deg, target_loc, best_bearing_deg, best_distance_m)
+            if obstacle_gone then
                 return nil
             end
-            -- Otherwise commit a side and slew-limit the heading so we track a smooth path
-            -- instead of wiggling as the obstacle (and the instantaneous geometry) moves.
-            -- refine_avoidance_bearing() also logs the DAAS smoothing trace each cycle.
-            best_bearing_deg, best_distance_m = refine_avoidance_bearing(
-                bearing_deg, best_bearing_deg, best_distance_m, motion, obstacle_avoiding, target_loc)
-            last_avoid_bearing_deg  = best_bearing_deg
         end
 
         -- Where to put the commanded target along the bearing we picked - DAA_PLAN_M, which
