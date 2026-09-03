@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-092"
+SCRIPT_VERSION      = "4.8.0-093"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -433,8 +433,9 @@ PARAM.WP_RADIUS                   = bind_param("WP_RADIUS")
 -- configure_modules() below, and project_planedaa_param_cache_cleanup in memory.
 local lookahead_param_m     = PARAM.LKAHD_M:get()
 local detect_m              = PARAM.DETECT_M:get()
+-- Fallback ("0 => use the turn radius") is resolved further down, once geometry/
+-- turn_radius_m exist - see fence_margin_fallback_m() and its call right after.
 local margin_fence_m        = PARAM.MARGIN_FENCE:get()
-if margin_fence_m <= 0 then margin_fence_m = math.abs(PARAM.WP_LOITER_RAD:get()) end   -- 0 => use the turn radius so the fence standoff = one loiter circle
 -- refresh_period_ms is the loop period in ms; DAA_UPDATE_RATE is in Hz (floored at 1 Hz to avoid /0)
 local refresh_period_ms     = 1000.0 / math.max(PARAM.UPDATE_RATE:get(), 1.0)
 local bendy_ratio           = PARAM.BR_RATIO:get()
@@ -530,6 +531,23 @@ local wrap_180                  = geometry.wrap_180
 local locations_equal           = geometry.locations_equal
 local pretty_obstacle_type      = obstacles.pretty_obstacle_type
 local obstacle_report_distance  = obstacles.obstacle_report_distance
+
+-- Real achievable turn radius at ROLL_LIMIT_DEG and AIRSPEED_CRUISE - the physical margin
+-- "DAA_MARGIN_FENCE = 0" promises ("use the turn radius so the fence standoff = one turn").
+-- WP_LOITER_RAD was used for this until 2026-09-03: it is a loiter-geometry setting, not an
+-- avoidance one, and can be far larger than the achievable turn radius (measured 150 m vs a
+-- real turn radius under 50 m on one aircraft) - large enough to silently swallow a waypoint
+-- placed well outside any margin the operator actually intended, with no warning at all.
+-- Falls back to wp_loiter_rad_m only when no cruise speed is configured yet (turn_radius_m
+-- returns 0 for airspeed <= 0), so the standoff is never literally zero.  Shared by the
+-- initial value below, the 5 s parameter refresh, and DAA.warnings()'s own turn-radius
+-- sanity checks - one formula, not three copies of it.
+local function fence_margin_fallback_m()
+    local achievable_turn_radius_m = turn_radius_m(param:get('AIRSPEED_CRUISE') or 0)
+    if achievable_turn_radius_m <= 0 then achievable_turn_radius_m = wp_loiter_rad_m end
+    return achievable_turn_radius_m
+end
+if margin_fence_m <= 0 then margin_fence_m = fence_margin_fallback_m() end
 
 local bearing_inc_deg = PARAM.HEADING_INC:get() or DEFAULT_HEADING_INC_DEG
 if bearing_inc_deg <= 0 then
@@ -684,11 +702,12 @@ local function get_vehicle_state()
         lookahead_param_m     = PARAM.LKAHD_M:get()
         detect_m              = PARAM.DETECT_M:get()
         margin_fence_m        = PARAM.MARGIN_FENCE:get()
-        if margin_fence_m <= 0 then margin_fence_m = math.abs(PARAM.WP_LOITER_RAD:get()) end   -- 0 => use the turn radius
         refresh_period_ms     = 1000.0 / math.max(PARAM.UPDATE_RATE:get(), 1.0)
         bendy_ratio           = PARAM.BR_RATIO:get()
         wp_loiter_rad_m       = math.abs(PARAM.WP_LOITER_RAD:get())
         wp_radius_m           = math.abs(PARAM.WP_RADIUS:get())
+        -- after wp_loiter_rad_m above, since the fallback's own secondary fallback reads it
+        if margin_fence_m <= 0 then margin_fence_m = fence_margin_fallback_m() end
         crewed_avoid_alt_m    = PARAM.AVD_ALT:get()
         crewed_avoid_alt_frame  = PARAM.AVD_ALT_TP:get()
         daa_alert             = PARAM.AVD_ALERT:get()
@@ -911,13 +930,14 @@ local DAA = {
         -- The turn radius these standoffs are compared against is the achievable one at the
         -- roll limit, not WP_LOITER_RAD: a standoff only has to clear the turn the aircraft
         -- will actually fly while avoiding, and it is not loitering when it does that.
-        -- Falls back to WP_LOITER_RAD when no cruise speed is set, so the check still fires.
-        local turn_r = turn_radius_m(cruise_ms)
-        if turn_r <= 0 then turn_r = wp_loiter_rad_m end
-        if turn_r > 0 and margin_fence_m < turn_r then
-            warn(W, string.format("MARGIN_FENCE %.0f < turn %.0f: fences may thrash", margin_fence_m, turn_r)) end
-        if turn_r > 0 and uav_clear_xy < turn_r then
-            warn(W, string.format("AVD_UAV_XY %.0f < turn %.0f: tight drone avoid", uav_clear_xy, turn_r)) end
+        -- Same formula (and the same WP_LOITER_RAD fallback for no cruise speed set) as
+        -- fence_margin_fallback_m() above, which is what margin_fence_m itself may already
+        -- be - one shared computation, not two that could quietly drift apart.
+        local achievable_turn_radius_m = fence_margin_fallback_m()
+        if achievable_turn_radius_m > 0 and margin_fence_m < achievable_turn_radius_m then
+            warn(W, string.format("MARGIN_FENCE %.0f < turn %.0f: fences may thrash", margin_fence_m, achievable_turn_radius_m)) end
+        if achievable_turn_radius_m > 0 and uav_clear_xy < achievable_turn_radius_m then
+            warn(W, string.format("AVD_UAV_XY %.0f < turn %.0f: tight drone avoid", uav_clear_xy, achievable_turn_radius_m)) end
         -- margin ordering: the aircraft near-miss (NMAC) must sit inside the aircraft
         -- well-clear standoff. NMAC is an aircraft-only boundary, so it is NOT compared
         -- against the drone standoff (AVD_UAV_XY).
@@ -926,8 +946,8 @@ local DAA = {
         if near_miss_z >= well_clear_z then
             warn(W, "NMAC_Z >= WCLR_Z: vert nearmiss>wellclr") end
         -- lookahead must give room to react
-        if turn_r > 0 and lookahead_param_m < 3 * turn_r then
-            warn(W, string.format("LKAHD_M %.0f < 3x turn %.0f: reacts late", lookahead_param_m, turn_r)) end
+        if achievable_turn_radius_m > 0 and lookahead_param_m < 3 * achievable_turn_radius_m then
+            warn(W, string.format("LKAHD_M %.0f < 3x turn %.0f: reacts late", lookahead_param_m, achievable_turn_radius_m)) end
         if bendy_ratio > 1.8 then
             warn(W, string.format("BR_RATIO %.1f > 1.8: fence-follow unstable", bendy_ratio)) end
         -- trapped-failsafe consistency
