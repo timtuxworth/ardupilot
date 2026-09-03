@@ -129,6 +129,21 @@ When flying near fences in wind, `DAA_WIND_MARG` widens the standoff in proporti
 to wind speed (above `DAA_WIND_MIN`) so cross-track drift is less likely to carry
 the aircraft across a boundary. See the Parameters table for both.
 
+**Known limitation: a headwind on approach to a fence gets little or no extra
+margin.** `DAA_WIND_MARG` scales off `ahrs:get_wind()` - the AHRS/EKF's own wind
+estimate, which planedaa reads and does not second-guess. A wind blowing along the
+current track (a straight-in headwind or tailwind) is aliased with airspeed-sensor
+bias in that estimator: without a heading change relative to the wind, the two
+cannot be told apart, and the reported estimate can read near zero even in a real,
+substantial wind. A crosswind has no such ambiguity and is estimated correctly.
+Confirmed on a live SITL comparison: identical 5 m/s wind, only the direction
+relative to a fixed approach track differed - a pure headwind gave an EKF estimate
+of ~0.04 m/s, a pure crosswind gave the correct ~5 m/s, and `DAA_WIND_MARG` widened
+the standoff in one case and not the other. This is a property of the estimator,
+not of planedaa's use of it, and there is no fix at this layer - raise
+`DAA_MARGIN_FENCE` itself if you routinely fly headwind-on-approach geometries near
+fences and want margin that does not depend on the wind estimate.
+
 ### 5. Terrain (default altitude frame)
 
 `DAA_AVD_ALT_TP` defaults to **3 (above terrain)**, and altitude-fence avoidance
