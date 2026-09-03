@@ -22,7 +22,7 @@
 
 local DAAloiter = {}
 
-DAAloiter.SCRIPT_VERSION = "4.8.0-001"
+DAAloiter.SCRIPT_VERSION = "4.8.0-002"
 DAAloiter.SCRIPT_NAME = "DAA loiter"
 DAAloiter.SCRIPT_NAME_SHORT = "DAAloiter"
 
@@ -34,6 +34,10 @@ DAAloiter.SCRIPT_NAME_SHORT = "DAAloiter"
 -- unlike that shared table, so a private literal here carries no drift risk of its own.
 local BANNER_SEVERITY = 6
 
+-- daageo is stateless (see that file) and wrap_360 needs no configured state, so it is
+-- required directly rather than injected.
+local wrap_360 = require("daageo").wrap_360
+
 function DAAloiter.new(deps)
     local self = { active = false }
 
@@ -43,7 +47,6 @@ function DAAloiter.new(deps)
     local MAV_SEVERITY              = deps.MAV_SEVERITY
     local SCRIPT_NAME_SHORT         = DAAloiter.SCRIPT_NAME_SHORT
     local get_mode_string           = deps.get_mode_string
-    local wrap_360                  = deps.wrap_360
     local mavlink_wrappers          = deps.mavlink_wrappers
 
     -- pushed in by configure()
