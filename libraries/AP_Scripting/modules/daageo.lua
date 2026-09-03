@@ -15,6 +15,14 @@
 
 local DAAgeometry = {}
 
+DAAgeometry.SCRIPT_VERSION = "4.8.0-001"
+DAAgeometry.SCRIPT_NAME = "DAA geometry"
+DAAgeometry.SCRIPT_NAME_SHORT = "DAAgeo"
+
+-- Load-banner severity only - this module does no other logging, so no full severity
+-- table is needed; MAV_SEVERITY.INFO is a fixed MAVLink wire value (6).
+local BANNER_SEVERITY = 6
+
 local GRAVITY_MSS = 9.80665
 
 function DAAgeometry.new()
@@ -152,5 +160,7 @@ function DAAgeometry.new()
 
     return self
 end
+
+gcs:send_text(BANNER_SEVERITY, string.format("%s %s module loaded", DAAgeometry.SCRIPT_NAME, DAAgeometry.SCRIPT_VERSION))
 
 return DAAgeometry

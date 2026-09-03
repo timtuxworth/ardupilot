@@ -22,6 +22,18 @@
 
 local DAAloiter = {}
 
+DAAloiter.SCRIPT_VERSION = "4.8.0-001"
+DAAloiter.SCRIPT_NAME = "DAA loiter"
+DAAloiter.SCRIPT_NAME_SHORT = "DAAloiter"
+
+-- Load-banner severity only - NOT exported, and not what the instance logs with below.
+-- This module is a tightly-coupled collaborator of planedaa.lua, not a standalone library
+-- like pid.lua (whose SCRIPT_NAME/SCRIPT_VERSION pattern this follows) - MAV_SEVERITY stays
+-- an injected dependency below so there is one shared severity table, not one per module
+-- that could theoretically drift. MAV_SEVERITY.INFO is a fixed MAVLink wire value (6),
+-- unlike that shared table, so a private literal here carries no drift risk of its own.
+local BANNER_SEVERITY = 6
+
 function DAAloiter.new(deps)
     local self = { active = false }
 
@@ -29,7 +41,7 @@ function DAAloiter.new(deps)
     local ALT_FRAME                 = deps.ALT_FRAME
     local MAV_DO_REPOSITION_FLAGS   = deps.MAV_DO_REPOSITION_FLAGS
     local MAV_SEVERITY              = deps.MAV_SEVERITY
-    local SCRIPT_NAME_SHORT         = deps.SCRIPT_NAME_SHORT
+    local SCRIPT_NAME_SHORT         = DAAloiter.SCRIPT_NAME_SHORT
     local get_mode_string           = deps.get_mode_string
     local wrap_360                  = deps.wrap_360
     local mavlink_wrappers          = deps.mavlink_wrappers
@@ -158,5 +170,7 @@ function DAAloiter.new(deps)
 
     return self
 end
+
+gcs:send_text(BANNER_SEVERITY, string.format("%s %s module loaded", DAAloiter.SCRIPT_NAME, DAAloiter.SCRIPT_VERSION))
 
 return DAAloiter
