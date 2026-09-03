@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-003"
+DAAcore.SCRIPT_VERSION = "4.8.0-004"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -40,10 +40,33 @@ local BANNER_SEVERITY = 6
 -- configure() below), passed as an explicit argument each call.
 local geometry = require("daageo")
 
+-- Implementation constants: how THIS module works, not a runtime-configurable behaviour,
+-- so they live here rather than being injected from planedaa.lua - Codex's review of the
+-- constructor deps tables and Tim's "the complexity of making it a deps doesn't seem worth
+-- it" (re: FLT_MAX) both landed on the same conclusion.  If one of these ever needs to be
+-- configurable it should become a real DAA_ parameter, not a constructor argument.
+local FLT_MAX             = 3.402823466e+38
+-- The candidate-heading sweep in DAA.detect() runs coarse-to-fine: it steps at
+-- COARSE_SWEEP_MULT * DAA_HEADING_INC, then refines around the winner at the full
+-- DAA_HEADING_INC. The final resolution is unchanged; the worst case (boxed in, no
+-- heading clears, so every candidate is probed) costs ~COARSE_SWEEP_MULT times less.
+-- Not a parameter: DAA_HEADING_INC already exposes the resolution-vs-CPU trade, and
+-- this only sets how the same search is scheduled.
+local COARSE_SWEEP_MULT   = 4
+-- minimum length of the bendy-ruler second-leg probe, so a plane sitting almost on top
+-- of its waypoint still tests a sane segment (mirrors OA_BENDYRULER_LOOKAHEAD_STEP2_MIN)
+local MIN_STEP2_M         = 2.0
+-- Shortest turn chord worth its own obstacle probe.  Below this the post-turn point is on
+-- top of us and the bearing to it is noise, so probe_turn_arc() declines.
+local MIN_TURN_CHORD_M    = 5.0
+-- Clamp for the clearances written to DAAD: "no obstacle at all" is FLT_MAX internally and
+-- would wreck the autoscaling of any plot it shares an axis with.
+local LOG_CLEARANCE_MAX_M = 9999.0
+
 function DAAcore.new(deps)
     local self = {}
 
-    -- collaborators and constants, fixed for the life of the instance
+    -- collaborators, fixed for the life of the instance
     local obstacles             = deps.obstacles
     -- obstacles already owns this taxonomy (it is the code that classifies obstacles into
     -- it) - reading it back through obstacles rather than a second injected copy means
@@ -51,11 +74,6 @@ function DAAcore.new(deps)
     local OBSTACLE_TYPE         = obstacles.OBSTACLE_TYPE
     local MAV_SEVERITY          = deps.MAV_SEVERITY
     local SCRIPT_NAME_SHORT     = DAAcore.SCRIPT_NAME_SHORT
-    local FLT_MAX               = deps.FLT_MAX
-    local COARSE_SWEEP_MULT     = deps.COARSE_SWEEP_MULT
-    local MIN_STEP2_M           = deps.MIN_STEP2_M
-    local MIN_TURN_CHORD_M      = deps.MIN_TURN_CHORD_M
-    local LOG_CLEARANCE_MAX_M   = deps.LOG_CLEARANCE_MAX_M
     -- ahrs, gcs, logger, fence and OAScripting are ArduPilot singletons: global in every chunk
 
     -- the module helpers this file leans on, bound once so the sweep reaches them as
