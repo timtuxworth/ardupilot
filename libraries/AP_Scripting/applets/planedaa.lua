@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-096"
+SCRIPT_VERSION      = "4.8.0-097"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -473,19 +473,10 @@ GRAVITY_MSS = 9.80665
 -- this much to count as progress, when the turn radius is not usable (no airspeed yet).
 -- It only has to be larger than position noise: real progress closes hundreds of metres.
 MIN_HUNG_PROGRESS_M = 10.0
--- minimum length of the bendy-ruler second-leg probe, so a plane sitting almost on top
--- of its waypoint still tests a sane segment (mirrors OA_BENDYRULER_LOOKAHEAD_STEP2_MIN)
-MIN_STEP2_M = 2.0
--- Shortest turn chord worth its own obstacle probe.  Below this the post-turn point is on
--- top of us and the bearing to it is noise, so probe_turn_arc() declines.
-MIN_TURN_CHORD_M = 5.0
 -- How long after an avoidance target is dropped a waypoint completion is still credited to
 -- it.  The vehicle finishes the waypoint on the NEXT navigation tick after we hand the
 -- target back, so requiring avoidance to still be live missed 3 of 4 real skips.
 SKIP_AVOID_GRACE_MS = 2000
--- Clamp for the clearances written to DAAD: "no obstacle at all" is FLT_MAX internally and
--- would wreck the autoscaling of any plot it shares an axis with.
-LOG_CLEARANCE_MAX_M = 9999.0
 
 
 -- Load a module, reporting a failure in a form that survives the 64-character cap on a
@@ -601,21 +592,10 @@ local function configure_modules()
     })
 end
 
--- The candidate-heading sweep in DAA.detect() runs coarse-to-fine: it steps at
--- COARSE_SWEEP_MULT * DAA_HEADING_INC, then refines around the winner at the full
--- DAA_HEADING_INC. The final resolution is unchanged; the worst case (boxed in, no
--- heading clears, so every candidate is probed) costs ~COARSE_SWEEP_MULT times less.
--- Not a parameter: DAA_HEADING_INC already exposes the resolution-vs-CPU trade, and
--- this only sets how the same search is scheduled.
-COARSE_SWEEP_MULT = 4
-
 -- Floor for SCR_VM_I_COUNT below which DAA.warnings() complains. Overrunning the VM
 -- instruction budget kills the script outright (and then blocks arming), so this is a
 -- safety-relevant setting, not a tuning one. See planedaa.md for the recommended value.
 MIN_VM_I_COUNT = 150000
-
-
-FLT_MAX = 3.402823466e+38
 
 -------------------------------------------------------------------------------
 --- Vehicle State stored in local variables to reduce api calls
@@ -764,11 +744,6 @@ end
 core = need("daacore").new({
     obstacles           = obstacles,
     MAV_SEVERITY        = MAV_SEVERITY,
-    FLT_MAX             = FLT_MAX,
-    COARSE_SWEEP_MULT   = COARSE_SWEEP_MULT,
-    MIN_STEP2_M         = MIN_STEP2_M,
-    MIN_TURN_CHORD_M    = MIN_TURN_CHORD_M,
-    LOG_CLEARANCE_MAX_M = LOG_CLEARANCE_MAX_M,
 })
 
 -- The altitude loiter is a POLICY implementation living behind a small seam: five members
