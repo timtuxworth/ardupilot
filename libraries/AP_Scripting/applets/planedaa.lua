@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-088"
+SCRIPT_VERSION      = "4.8.0-089"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -860,7 +860,14 @@ local DAA = {
     -- methods to log DAA results DAAD = Detect, DAAA = Alert, DAAV = aVoid
 
     local function log_avoid(obstacle, target_loc)
-        if target_loc == nil then
+        -- Both can be nil independently: avoid_obstacle()'s "done" branch calls this with
+        -- obstacle == nil on the very cycle avoidance ends, before daa_target_loc is cleared
+        -- (that happens in set_avoid_location(nil), called separately) - so target_loc alone
+        -- being non-nil does not guarantee obstacle is too.  Reproduced live: "Excl. Circle
+        -- done" followed immediately by "attempt to index a nil value (local 'obstacle')" at
+        -- the old obstacle.distance_m read below, which aborted the rest of that cycle's
+        -- DAA.avoid() - including any state bookkeeping still to run after this call.
+        if target_loc == nil or obstacle == nil then
             return
         end
         -- TrR records the turn radius the sizing assumed at this moment, so a flight log can
