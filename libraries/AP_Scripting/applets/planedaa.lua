@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-085"
+SCRIPT_VERSION      = "4.8.0-086"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -60,7 +60,7 @@ MAV_SEVERITY        = {EMERGENCY=0, ALERT=1, CRITICAL=2, ERROR=3, WARNING=4, NOT
 -- luacheck: ignore DAA_active
 local DAA_active = true;
 
-local PARAM_TABLE_KEY = 125
+local PARAM_TABLE_KEY = 126
 local PARAM_TABLE_PREFIX = "DAA_"
 
 -- bind a parameter to a variable
