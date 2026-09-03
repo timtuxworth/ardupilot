@@ -5,9 +5,9 @@
     about what to do in response.  The applet keeps that, so an integrator adding their own
     avoidance action only has to edit planedaa.lua (see planedaa.md).
 
-    DAAobstacles.new(geometry) takes the geometry instance it needs rather than requiring one
-    itself, so the caller decides what it is wired to.  Everything else the applet knows is
-    pushed in rather than reached for:
+    daageo is stateless (see that file), so it is required directly rather than injected -
+    only location_project() is needed here, and it takes no configured state.  Everything
+    else the applet knows is pushed in rather than reached for:
       configure()    - cached parameter values and the OBSTACLE_TYPE / ADSB_EMITTER enums,
                        refreshed with the applet's other parameters
       update_state() - the current vehicle location, once per cycle
@@ -17,13 +17,15 @@
 
 local DAAobstacles = {}
 
-DAAobstacles.SCRIPT_VERSION = "4.8.0-001"
+DAAobstacles.SCRIPT_VERSION = "4.8.0-002"
 DAAobstacles.SCRIPT_NAME = "DAA obstacles"
 DAAobstacles.SCRIPT_NAME_SHORT = "DAAobs"
 
 -- Load-banner severity only - this module does no other logging, so no full severity
 -- table is needed; MAV_SEVERITY.INFO is a fixed MAVLink wire value (6).
 local BANNER_SEVERITY = 6
+
+local location_project = require("daageo").location_project
 
 -- The obstacle taxonomy this module classifies against.  Owned here rather than injected:
 -- AP_OAScripting returns these values, and this is the code that interprets them.
@@ -80,11 +82,8 @@ DAAobstacles.ADSB_EMITTER = {
 
 local FLT_MAX = 3.402823466e+38
 
-function DAAobstacles.new(geo)
+function DAAobstacles.new()
     local self = {}
-
-    -- only the one geometry function this module needs, not the whole instance
-    local location_project = geo.location_project
 
     local OBSTACLE_TYPE = DAAobstacles.OBSTACLE_TYPE
     local ADSB_EMITTER  = DAAobstacles.ADSB_EMITTER
