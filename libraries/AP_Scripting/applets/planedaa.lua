@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-084"
+SCRIPT_VERSION      = "4.8.0-085"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -684,7 +684,7 @@ local function get_vehicle_state()
 
     -- after current_mode and now_ms are current, not before: the loiter watches for the
     -- pilot leaving GUIDED and times its cool-down off these
-    loiteralt.update_state({ current_loc = current_loc, current_mode = current_mode, now_ms = now_ms })
+    loiteralt.update_state(current_loc, current_mode, now_ms)
 
     -- refresh parameters every 5 seconds, its not that urgent we know about changs
     if (now_ms - now_params_ms) > 5000 then
@@ -840,16 +840,17 @@ local DAA = {
     -- parameter in flight takes effect on the next cycle instead of at the next reboot
     local lookahead_set_m   = lookahead_param_m
 
+    -- Speed and heading of the horizontal wind, from the AHRS wind estimate.  Computed
+    -- directly from the x/y components rather than through an intermediate Vector2f:
+    -- this runs every active cycle and a userdata allocation here bought nothing that
+    -- math.sqrt/math.atan don't already give for free.
     local function calculate_windspeed()
-                -- Get wind estimate and convert to 2D
         local wind_3d = ahrs:get_wind()
-        local wind_2d = Vector2f()
-        if wind_3d ~= nil then                  -- get_wind returns nil when there is no valid estimate: treat as calm
-            wind_2d:x(wind_3d:x())
-            wind_2d:y(wind_3d:y())
+        if wind_3d == nil then                  -- get_wind returns nil when there is no valid estimate: treat as calm
+            return 0.0, 0.0
         end
-
-        return  wind_2d:length(), wind_2d:angle()
+        local wx, wy = wind_3d:x(), wind_3d:y()
+        return math.sqrt(wx * wx + wy * wy), math.atan(wy, wx)
     end
 
     -- methods to log DAA results DAAD = Detect, DAAA = Alert, DAAV = aVoid
@@ -981,10 +982,10 @@ local DAA = {
     -- Take the mechanism's threat report.  This has to be a method rather than an
     -- assignment in update(): update() runs at file scope, so assigning there would create
     -- globals while every policy function below reads these class locals.
-    function DAA.take_report(report)
-        obstacle_avoiding = report.obstacle
-        aircraft_avoiding = report.aircraft
-        return report.target_loc
+    function DAA.take_report(target_loc, obstacle, aircraft)
+        obstacle_avoiding = obstacle
+        aircraft_avoiding = aircraft
+        return target_loc
     end
 
     --return true if we are in a state where DAA can apply
@@ -992,12 +993,15 @@ local DAA = {
         return DAA.enabled and active and arming:is_armed()
     end
 
-    -- populate some local values with a static/consistent picture of the vehicle state
-    function DAA.get_vehicle_state()
+    -- populate some local values with a static/consistent picture of the vehicle state.
+    -- fetched_current_loc is the position get_vehicle_state() (file scope) already read
+    -- this same cycle - passed in rather than re-fetched, so ahrs:get_position() is only
+    -- ever called once per cycle instead of once per get_vehicle_state function.
+    function DAA.get_vehicle_state(fetched_current_loc)
         local current_target_loc = vehicle:get_target_location()
 
         active      = true;
-        current_loc = ahrs:get_position()
+        current_loc = fetched_current_loc
 
         -- get_vehicle_state() re-reads DAA_LKAHD_M into lookahead_param_m every 5 s, but
         -- current_lookahead is the working value the sweep actually uses.  Re-seed it when
@@ -1039,25 +1043,20 @@ local DAA = {
             navigation_target_loc = current_target_loc:copy()
         end
 
-        groundspeed_ms              = ahrs:groundspeed_vector():length()
+        -- one fetch, not two: :length() and :angle() both read the same vector
+        local groundspeed_vec        = ahrs:groundspeed_vector()
+        groundspeed_ms              = groundspeed_vec:length()
+        ground_course_deg           = wrap_180(math.deg(groundspeed_vec:angle()))
         airspeed_ms                 = ahrs:airspeed_EAS() or groundspeed_ms
         -- Calculate wind direction and speed
         wind_speed, wind_dir_rad    = calculate_windspeed()
-        ground_course_deg           = wrap_180(math.deg(ahrs:groundspeed_vector():angle()))
 
-        -- hand the mechanism the picture it searches against.  It keeps its own copies as
-        -- locals rather than reading ours through a table: the sweep touches them on every
-        -- one of a hundred-plus probes a cycle.
-        core.update_state({
-            current_loc           = current_loc,
-            navigation_target_loc = navigation_target_loc,
-            airspeed_ms           = airspeed_ms,
-            groundspeed_ms        = groundspeed_ms,
-            ground_course_deg     = ground_course_deg,
-            wind_speed            = wind_speed,
-            wind_dir_rad          = wind_dir_rad,
-            now_ms                = now_ms,
-        })
+        -- hand the mechanism the picture it searches against, positionally: it keeps its
+        -- own copies as locals rather than reading ours through a table, and the sweep
+        -- touches them on every one of a hundred-plus probes a cycle, so a table literal
+        -- here would be built and thrown away on every single active cycle.
+        core.update_state(current_loc, navigation_target_loc, airspeed_ms, groundspeed_ms,
+                          ground_course_deg, wind_speed, wind_dir_rad, now_ms)
     end
 
 
@@ -1734,7 +1733,7 @@ local function update()
         last_switch_state = switch_state
     end
 
-    DAA.get_vehicle_state()
+    DAA.get_vehicle_state(current_loc)
     if DAA.isactive() then
         local suggested_target_loc = DAA.take_report(core.detect())
         DAA.alert(suggested_target_loc)

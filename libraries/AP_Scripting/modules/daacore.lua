@@ -99,15 +99,20 @@ function DAAcore.new(deps)
         end
     end
 
-    local function update_state(state)
-        current_loc            = state.current_loc
-        navigation_target_loc  = state.navigation_target_loc
-        airspeed_ms            = state.airspeed_ms
-        groundspeed_ms         = state.groundspeed_ms
-        ground_course_deg      = state.ground_course_deg
-        wind_speed             = state.wind_speed
-        wind_dir_rad           = state.wind_dir_rad
-        now_ms                 = state.now_ms
+    -- Positional, not a table: this runs every cycle the applet is active, and the sweep
+    -- alone can call find_closest_obstacle() over a hundred times in one cycle, so a
+    -- table literal here would be the single most frequent allocation in the script.
+    local function update_state(new_current_loc, new_navigation_target_loc, new_airspeed_ms,
+                                 new_groundspeed_ms, new_ground_course_deg,
+                                 new_wind_speed, new_wind_dir_rad, new_now_ms)
+        current_loc            = new_current_loc
+        navigation_target_loc  = new_navigation_target_loc
+        airspeed_ms            = new_airspeed_ms
+        groundspeed_ms         = new_groundspeed_ms
+        ground_course_deg      = new_ground_course_deg
+        wind_speed             = new_wind_speed
+        wind_dir_rad           = new_wind_dir_rad
+        now_ms                 = new_now_ms
     end
 
     local function log_detect_result(obstacle_found, distance_found_m, best_distance_m, distance_to_target_m, best_bearing_deg, target_loc, obstacle_type)
@@ -193,6 +198,12 @@ function DAAcore.new(deps)
         return math.min(avoid_step1_m, target_distance + math.min(margin_fence_m / 2, 100))
     end
 
+    -- Forward-declared: resist_bearing_change() (defined here, ahead of probe_bearing in
+    -- the file) needs to call it, and needs the SAME turn-lead-aware measurement probe_bearing
+    -- gives every other candidate in the sweep.  Assigned without "local" at its usual
+    -- location further down; this is the upvalue resist_bearing_change closes over.
+    local probe_bearing
+
     --[[
     This function is called when BendyRuler has found a bearing which is obstacles free at at least lookahead_step1_dist and  then lookahead_step2_dist from the present location
     In many situations, this new bearing can be either left or right of the obstacle, and BendyRuler can have a tough time deciding between the two.
@@ -200,28 +211,40 @@ function DAAcore.new(deps)
     Therefore, this method attempts to avoid changing direction of the vehicle by more than _bendy_angle degrees,
     unless the new margin is atleast _bendy_ratio times better than the margin with previously calculated bearing.
     We return true if we have resisted the change and will follow the last calculated bearing.
+
+    Returns (bearing, distance): the distance is the clearance of WHICHEVER bearing is
+    returned, not of the candidate that was proposed.  Getting this right matters for
+    logging: DAAD.DstB used to be left as the proposed candidate's distance even on the
+    "stay the course" path, so it could read as fully clear while the bearing actually
+    being flown was not - see project_planedaa_standoff_not_achieved in memory.
     --]]
-    local function resist_bearing_change(bearing_orig_deg, avoid_step1_m, bearing_deg, distance_found_m)
+    local function resist_bearing_change(bearing_orig_deg, bearing_deg, distance_found_m,
+                                          full_distance, target_loc)
         if bearing_orig_deg == nil then
             -- no prior commitment, accept the proposed bearing
-            return bearing_deg
+            return bearing_deg, distance_found_m
         end
         if distance_found_m == 0 then
             -- obstacle is immediate, must manoeuvre regardless
-            return bearing_deg
+            return bearing_deg, distance_found_m
         end
         if math.abs(wrap_180(bearing_orig_deg - bearing_deg)) < bendy_angle then
             -- proposed change is small enough, no resistance needed
-            return bearing_deg
+            return bearing_deg, distance_found_m
         end
         if current_loc == nil then
             -- no current position to measure against, accept the proposed bearing
-            return bearing_deg
+            return bearing_deg, distance_found_m
         end
-        -- measure clearance in the previously committed direction
-        local test_loc = current_loc:copy()
-        test_loc:offset_bearing(bearing_orig_deg, avoid_step1_m)
-        local distance_previous_m, _ = find_closest_obstacle(current_loc, test_loc, avoid_step1_m, wind_speed)
+        -- Measure clearance in the previously committed direction using the SAME
+        -- turn-lead-aware probe every other candidate in the sweep goes through, not a
+        -- bare straight-line offset.  A straight-line retest here compared an
+        -- already-turn-corrected new candidate against an uncorrected retest of the old
+        -- one - biasing this decision toward "stay the course" whenever the committed
+        -- bearing itself needed the turn lead to read accurately, which is exactly the
+        -- geometry of continuing to track an avoidance already under way.
+        local distance_previous_m = probe_bearing(bearing_orig_deg, bearing_orig_deg,
+                                                   full_distance, target_loc, false)
         -- Only switch sides if the new direction is significantly better: POSITIVE clearance
         -- and bendy_ratio times clearer than continuing.  The positive-clearance requirement is
         -- what makes this negative-aware: when hugging a boundary both clearances read near-zero
@@ -230,10 +253,10 @@ function DAAcore.new(deps)
         -- a committed side that is itself breaching (distance_previous_m < 0) towards a side that
         -- actually clears (distance_found_m > 0), so containment is preserved.
         if distance_found_m > 0 and distance_found_m >= bendy_ratio * distance_previous_m then
-            return bearing_deg
+            return bearing_deg, distance_found_m
         end
         -- new direction is not significantly better — stay the course
-        return bearing_orig_deg
+        return bearing_orig_deg, distance_previous_m
     end
 
     --[[
@@ -393,12 +416,19 @@ function DAAcore.new(deps)
         return wrap_360(last_avoid_bearing_deg + d)
     end
 
-    local function refine_avoidance_bearing(direct_bearing_deg, raw_bearing_deg, raw_distance_m, motion, obstacle)
+    local function refine_avoidance_bearing(direct_bearing_deg, raw_bearing_deg, raw_distance_m,
+                                            motion, obstacle, full_distance, target_loc)
         local pass_behind = motion.pass_behind
         local ttc_s = motion.ttc
 
-        -- (1) clearance hysteresis: the safe, multi-obstacle, anti-flip baseline
-        local resisted = resist_bearing_change(last_avoid_bearing_deg, current_lookahead, raw_bearing_deg, raw_distance_m)
+        -- (1) clearance hysteresis: the safe, multi-obstacle, anti-flip baseline.  The
+        -- returned distance is only accurate for `resisted` itself - apply_side_commitment
+        -- and apply_slew_limit below can move the bearing further without a matching
+        -- re-measurement, so a bearing damped by either is logged against this value as
+        -- the best available figure, not a guaranteed-exact one.
+        local resisted, resisted_distance_m =
+                resist_bearing_change(last_avoid_bearing_deg, raw_bearing_deg, raw_distance_m,
+                                      full_distance, target_loc)
         local bearing = resisted
 
         local urgent = (ttc_s ~= nil) and (ttc_s < slew_urg_s)
@@ -433,7 +463,7 @@ function DAAcore.new(deps)
 
         log_smoothing(direct_bearing_deg, raw_bearing_deg, resisted, bearing,
                       committed_side_sign, side_flip_pending, urgent, motion, obstacle)
-        return bearing
+        return bearing, resisted_distance_m
     end
 
     -- Second step of the bendy ruler test: having flown one step out to loc_test, look a
@@ -539,7 +569,8 @@ function DAAcore.new(deps)
     -- (distance_found_m, bearing_test_deg, obstacle_found); a clear course returns
     -- FLT_MAX with obstacle_found == nil. allow_straight lets the unobstructed
     -- straight-ahead path short-circuit (only meaningful for the i == 0 candidate).
-    local function probe_bearing(bearing_test_deg, bearing_deg, full_distance, target_loc, allow_straight)
+    -- (forward-declared above, for resist_bearing_change's benefit)
+    probe_bearing = function(bearing_test_deg, bearing_deg, full_distance, target_loc, allow_straight)
         local avoid_step1_m     = current_lookahead
         local avoid_step2_m     = current_lookahead * 2.0
 
@@ -960,7 +991,12 @@ function DAAcore.new(deps)
             -- Fences are fixed and containment is safety-critical: a heading slew limit or a
             -- committed side could delay/deflect the turn at a hard boundary and breach it.
             -- Keep the responsive bendy-ruler behaviour (clearance hysteresis only).
-            best_bearing_deg        = resist_bearing_change(last_avoid_bearing_deg, current_lookahead, best_bearing_deg, best_distance_m)
+            -- best_distance_m is reassigned here too, to the clearance of whichever bearing
+            -- comes back - not the discarded candidate's - so DAAD.DstB reflects what is
+            -- actually flown, including on the "stay the course" path.
+            best_bearing_deg, best_distance_m = resist_bearing_change(
+                last_avoid_bearing_deg, best_bearing_deg, best_distance_m,
+                distance_to_target_m, target_loc)
             last_avoid_bearing_deg  = best_bearing_deg
             committed_side_sign     = 0
             side_flip_pending       = false
@@ -985,7 +1021,9 @@ function DAAcore.new(deps)
             -- Otherwise commit a side and slew-limit the heading so we track a smooth path
             -- instead of wiggling as the obstacle (and the instantaneous geometry) moves.
             -- refine_avoidance_bearing() also logs the DAAS smoothing trace each cycle.
-            best_bearing_deg        = refine_avoidance_bearing(bearing_deg, best_bearing_deg, best_distance_m, motion, obstacle_avoiding)
+            best_bearing_deg, best_distance_m = refine_avoidance_bearing(
+                bearing_deg, best_bearing_deg, best_distance_m, motion, obstacle_avoiding,
+                distance_to_target_m, target_loc)
             last_avoid_bearing_deg  = best_bearing_deg
         end
 
@@ -1005,17 +1043,14 @@ function DAAcore.new(deps)
                           best_bearing_deg, new_target_loc, obstacle_avoiding.type)
         return new_target_loc
     end
-    -- The report is what lets mechanism and policy live in separate files: detect_impl()
-    -- still returns just the suggested target, and the two contacts it settled on are
-    -- handed back alongside it rather than left in shared state for the applet to read.
+    -- Multiple return values, not a report table: this is what lets mechanism and policy
+    -- live in separate files, since detect_impl() still returns just the suggested target
+    -- and the two contacts it settled on are handed back alongside it rather than left in
+    -- shared state for the applet to read - but only actively avoiding builds this at all,
+    -- so a table here would be one more allocation on the already-heavier active cycles.
     function self.detect()
-
         local target_loc = detect_impl()
-        return {
-            target_loc  = target_loc,
-            obstacle    = obstacle_avoiding,
-            aircraft    = aircraft_avoiding,
-        }
+        return target_loc, obstacle_avoiding, aircraft_avoiding
     end
 
     self.configure          = configure

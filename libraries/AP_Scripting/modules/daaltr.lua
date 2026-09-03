@@ -46,10 +46,12 @@ function DAAloiter.new(deps)
         wp_loiter_rad_m  = settings.wp_loiter_rad_m
     end
 
-    local function update_state(state)
-        current_loc  = state.current_loc
-        current_mode = state.current_mode
-        now_ms       = state.now_ms
+    -- Positional, not a table: called every cycle, and a table literal here would be one
+    -- more transient allocation the run never keeps.
+    local function update_state(new_current_loc, new_current_mode, new_now_ms)
+        current_loc  = new_current_loc
+        current_mode = new_current_mode
+        now_ms       = new_now_ms
     end
 
     local pre_loiteralt_heading_deg = -1.0
