@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-093"
+SCRIPT_VERSION      = "4.8.0-094"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -758,7 +758,6 @@ core = need("daacore").new({
     obstacles           = obstacles,
     OBSTACLE_TYPE       = OBSTACLE_TYPE,
     MAV_SEVERITY        = MAV_SEVERITY,
-    SCRIPT_NAME_SHORT   = SCRIPT_NAME_SHORT,
     FLT_MAX             = FLT_MAX,
     COARSE_SWEEP_MULT   = COARSE_SWEEP_MULT,
     MIN_STEP2_M         = MIN_STEP2_M,
@@ -774,7 +773,6 @@ loiteralt = need("daaltr").new({
     ALT_FRAME               = ALT_FRAME,
     MAV_DO_REPOSITION_FLAGS = MAV_DO_REPOSITION_FLAGS,
     MAV_SEVERITY            = MAV_SEVERITY,
-    SCRIPT_NAME_SHORT       = SCRIPT_NAME_SHORT,
     get_mode_string         = get_mode_string,
     wrap_360                = wrap_360,
     mavlink_wrappers        = mavlink_wrappers,
