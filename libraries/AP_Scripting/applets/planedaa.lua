@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-087"
+SCRIPT_VERSION      = "4.8.0-088"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -56,9 +56,6 @@ MAV_SEVERITY        = {EMERGENCY=0, ALERT=1, CRITICAL=2, ERROR=3, WARNING=4, NOT
 
 
 -- ADSB Emitter types
-
--- luacheck: ignore DAA_active
-local DAA_active = true;
 
 local PARAM_TABLE_KEY = 126
 local PARAM_TABLE_PREFIX = "DAA_"
@@ -827,9 +824,10 @@ local DAA = {
     local feed_watch_label      = ""            -- label of the moving obstacle we are tracking ("" = none)
     local feed_is_stale         = false         -- its last-seen update was stale
     local feed_stale_warn_ms    = uint32_t(0)   -- throttle for the "traffic stale" GCS text
-    -- luacheck: ignore previous_aircraft
-    local previous_aircraft     = ""
-    local STATE                 = {monitoring = 1, avoiding = 2, loitering = 3, loitering_avoiding = 4, hovering = 5, landing  = 6}
+    -- monitoring/avoiding/loitering are the only reachable states; hovering/landing/
+    -- loitering_avoiding were speculative scaffolding (never assigned since the very first
+    -- commit) and are dropped along with the dead branches that compared against them.
+    local STATE                 = {monitoring = 1, avoiding = 2, loitering = 3}
     local current_state         = STATE.monitoring
     local LoWC_active           = false
     local LoWC_label            = ""
@@ -860,10 +858,6 @@ local DAA = {
     end
 
     -- methods to log DAA results DAAD = Detect, DAAA = Alert, DAAV = aVoid
-
-    -- luacheck: ignore log_alert
-    local function log_alert()
-    end
 
     local function log_avoid(obstacle, target_loc)
         if target_loc == nil then
@@ -1357,11 +1351,9 @@ local DAA = {
         if daa_action == 0 then
             return              -- parameter DAA_AVOID can be used to disable avoidance
         end
-        -- mid-manoeuvre (hovering/avoiding/landing): don't re-decide the state, just fall
-        -- through to avoid_obstacle() below and keep flying the manoeuvre we are on.
-        local mid_manoeuvre = current_state == STATE.hovering
-                              or current_state == STATE.avoiding
-                              or current_state == STATE.landing
+        -- mid-manoeuvre: don't re-decide the state, just fall through to avoid_obstacle()
+        -- below and keep flying the manoeuvre we are on.
+        local mid_manoeuvre = current_state == STATE.avoiding
 
         if loiteralt.active then
             current_state = STATE.loitering
@@ -1497,7 +1489,7 @@ local DAA = {
     local function hung_update()
         if hung_alrt_s <= 0 or not in_fw_flight
             or daa_target_loc == nil or navigation_target_loc == nil or current_loc == nil
-            or current_state == STATE.loitering or current_state == STATE.loitering_avoiding then
+            or current_state == STATE.loitering then
             hung_reset()
             return
         end
