@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-089"
+SCRIPT_VERSION      = "4.8.0-090"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -426,25 +426,18 @@ PARAM.ROLL_LIMIT_DEG              = bind_param("ROLL_LIMIT_DEG")
 PARAM.WP_LOITER_RAD               = bind_param("WP_LOITER_RAD")
 PARAM.WP_RADIUS                   = bind_param("WP_RADIUS")
 
-local roll_limit_deg        = PARAM.ROLL_LIMIT_DEG:get()
+-- Cached locals below are kept ONLY where this file reads the value itself (a startup
+-- sanity check in DAA.warnings(), a hot-path comparison, or - like margin_fence_m below -
+-- self-referential derivation).  A parameter that exists solely to be forwarded into a
+-- module's configure() call is fetched straight from PARAM there instead: see
+-- configure_modules() below, and project_planedaa_param_cache_cleanup in memory.
 local lookahead_param_m     = PARAM.LKAHD_M:get()
 local detect_m              = PARAM.DETECT_M:get()
-local plan_m                = PARAM.PLAN_M:get()
 local margin_fence_m        = PARAM.MARGIN_FENCE:get()
 if margin_fence_m <= 0 then margin_fence_m = math.abs(PARAM.WP_LOITER_RAD:get()) end   -- 0 => use the turn radius so the fence standoff = one loiter circle
-local margin_alt_m          = PARAM.MARGIN_ALT:get()
-local alt_hyst_m            = PARAM.ALT_HYST_M:get()
-local alt_cool_ms           = PARAM.ALT_COOL_S:get() * 1000
-local loiter_cool_ms        = PARAM.LTR_COOL_S:get() * 1000
-local margin_crewed_m       = PARAM.MARGIN_CA:get()
-local margin_vertical_m     = PARAM.MARGIN_CA_Z:get()
-local margin_uav_m          = PARAM.MARGIN_UAV:get()
-local margin_ais_m          = PARAM.MARGIN_AIS:get()
-local margin_proximity_m    = PARAM.MARGIN_PRX:get()
 -- refresh_period_ms is the loop period in ms; DAA_UPDATE_RATE is in Hz (floored at 1 Hz to avoid /0)
 local refresh_period_ms     = 1000.0 / math.max(PARAM.UPDATE_RATE:get(), 1.0)
 local bendy_ratio           = PARAM.BR_RATIO:get()
-local bendy_angle           = PARAM.BR_ANGLE:get()
 -- WP_LOITER_RAD is signed: negative selects a counter-clockwise loiter.  Every use here
 -- wants the magnitude - as a distance, as a reposition radius, and as a turn-radius stand-in -
 -- and the loiter direction is carried separately, so take the sign out once, at the source.
@@ -454,22 +447,19 @@ local crewed_avoid_alt_m    = PARAM.AVD_ALT:get()
 local crewed_avoid_alt_frame = PARAM.AVD_ALT_TP:get()
 local daa_alert             = PARAM.AVD_ALERT:get()
 local daa_action            = PARAM.AVD_ACTION:get()
-local wind_min_ms           = PARAM.WIND_MIN:get()
-local wind_margin_per_ms    = PARAM.WIND_MARG:get()
 local well_clear_xy         = PARAM.AVD_WCLR_XY:get()
 local well_clear_z          = PARAM.AVD_WCLR_Z:get()
 local uav_clear_xy          = PARAM.AVD_UAV_XY:get()
 local near_miss_xy          = PARAM.AVD_NMAC_XY:get()
 local near_miss_z           = PARAM.AVD_NMAC_Z:get()
 local slew_dps              = PARAM.SLEW_DPS:get()
-local slew_urg_s            = PARAM.SLEW_URG:get()
 local side_hold_s           = PARAM.SIDE_HOLD:get()
-local cpa_min_ms            = PARAM.CPA_MIN:get()
 local trap_act              = PARAM.TRAP_ACT:get()
 local trap_s                = PARAM.TRAP_S:get()
 local trap_clr_s            = PARAM.TRAP_CLR_S:get()
 local trap_esc_act          = PARAM.TRAP_ESC_ACT:get()
 local stale_s               = PARAM.STALE_S:get()
+local margin_crewed_m       = PARAM.MARGIN_CA:get()
 local hung_alrt_s           = PARAM.HUNG_ALRT_S:get()
 
 GRAVITY_MSS = 9.80665
@@ -549,33 +539,39 @@ end
 -- Push the cached parameter values into the modules.  Called at startup and from the 5 s
 -- parameter refresh, so an operator changing a margin in flight reaches the modules
 -- exactly as it reaches the rest of the applet.
+-- Parameters read ONLY here (nowhere else in this file) are fetched straight from PARAM
+-- inline rather than kept as a module-level cached local - one fewer distinct name for the
+-- parser budget, at the cost of one :get() call every 5 s instead of an upvalue read
+-- (measured: :get() is a C binding call, but this only runs on the 5 s parameter refresh,
+-- never per-cycle or per-probe, so the runtime cost is immaterial).  See
+-- project_planedaa_param_cache_cleanup in memory.
 local function configure_modules()
-    geometry.configure({ roll_limit_deg = roll_limit_deg })
+    geometry.configure({ roll_limit_deg = PARAM.ROLL_LIMIT_DEG:get() })
     obstacles.configure({
         margin_fence_m      = margin_fence_m,
         margin_crewed_m     = margin_crewed_m,
-        margin_uav_m        = margin_uav_m,
-        margin_ais_m        = margin_ais_m,
-        margin_proximity_m  = margin_proximity_m,
+        margin_uav_m        = PARAM.MARGIN_UAV:get(),
+        margin_ais_m        = PARAM.MARGIN_AIS:get(),
+        margin_proximity_m  = PARAM.MARGIN_PRX:get(),
         well_clear_xy       = well_clear_xy,
         uav_clear_xy        = uav_clear_xy,
-        wind_min_ms         = wind_min_ms,
-        wind_margin_per_ms  = wind_margin_per_ms,
+        wind_min_ms         = PARAM.WIND_MIN:get(),
+        wind_margin_per_ms  = PARAM.WIND_MARG:get(),
     })
     core.configure({
-        alt_cool_ms       = alt_cool_ms,        alt_hyst_m        = alt_hyst_m,
-        bearing_inc_deg   = bearing_inc_deg,    bendy_angle       = bendy_angle,
-        bendy_ratio       = bendy_ratio,        cpa_min_ms        = cpa_min_ms,
-        detect_m          = detect_m,           margin_alt_m      = margin_alt_m,
+        alt_cool_ms       = PARAM.ALT_COOL_S:get() * 1000, alt_hyst_m  = PARAM.ALT_HYST_M:get(),
+        bearing_inc_deg   = bearing_inc_deg,    bendy_angle       = PARAM.BR_ANGLE:get(),
+        bendy_ratio       = bendy_ratio,        cpa_min_ms        = PARAM.CPA_MIN:get(),
+        detect_m          = detect_m,           margin_alt_m      = PARAM.MARGIN_ALT:get(),
         margin_crewed_m   = margin_crewed_m,    margin_fence_m    = margin_fence_m,
-        margin_vertical_m = margin_vertical_m,  plan_m            = plan_m,
+        margin_vertical_m = PARAM.MARGIN_CA_Z:get(), plan_m       = PARAM.PLAN_M:get(),
         side_hold_s       = side_hold_s,        slew_dps          = slew_dps,
-        slew_urg_s        = slew_urg_s,         well_clear_xy     = well_clear_xy,
+        slew_urg_s        = PARAM.SLEW_URG:get(), well_clear_xy   = well_clear_xy,
         well_clear_z      = well_clear_z,       wp_loiter_rad_m   = wp_loiter_rad_m,
         lookahead_param_m = lookahead_param_m,
     })
     loiteralt.configure({
-        loiter_cool_ms  = loiter_cool_ms,
+        loiter_cool_ms  = PARAM.LTR_COOL_S:get() * 1000,
         wp_loiter_rad_m = wp_loiter_rad_m,
     })
 end
@@ -685,34 +681,18 @@ local function get_vehicle_state()
 
     -- refresh parameters every 5 seconds, its not that urgent we know about changs
     if (now_ms - now_params_ms) > 5000 then
-        roll_limit_deg        = PARAM.ROLL_LIMIT_DEG:get()
         lookahead_param_m     = PARAM.LKAHD_M:get()
         detect_m              = PARAM.DETECT_M:get()
-        plan_m                = PARAM.PLAN_M:get()
         margin_fence_m        = PARAM.MARGIN_FENCE:get()
         if margin_fence_m <= 0 then margin_fence_m = math.abs(PARAM.WP_LOITER_RAD:get()) end   -- 0 => use the turn radius
-        margin_alt_m          = PARAM.MARGIN_ALT:get()
-        alt_hyst_m            = PARAM.ALT_HYST_M:get()
-        alt_cool_ms           = PARAM.ALT_COOL_S:get() * 1000
-        loiter_cool_ms        = PARAM.LTR_COOL_S:get() * 1000
-        margin_crewed_m       = PARAM.MARGIN_CA:get()
-        margin_vertical_m     = PARAM.MARGIN_CA_Z:get()
-        margin_uav_m          = PARAM.MARGIN_UAV:get()
-        margin_ais_m          = PARAM.MARGIN_AIS:get()
-        margin_proximity_m    = PARAM.MARGIN_PRX:get()
         refresh_period_ms     = 1000.0 / math.max(PARAM.UPDATE_RATE:get(), 1.0)
         bendy_ratio           = PARAM.BR_RATIO:get()
-        bendy_angle           = PARAM.BR_ANGLE:get()
         wp_loiter_rad_m       = math.abs(PARAM.WP_LOITER_RAD:get())
         wp_radius_m           = math.abs(PARAM.WP_RADIUS:get())
-        -- the modules cache these too, so push the new values through
-        configure_modules()
         crewed_avoid_alt_m    = PARAM.AVD_ALT:get()
         crewed_avoid_alt_frame  = PARAM.AVD_ALT_TP:get()
         daa_alert             = PARAM.AVD_ALERT:get()
         daa_action            = PARAM.AVD_ACTION:get()
-        wind_min_ms           = PARAM.WIND_MIN:get()
-        wind_margin_per_ms    = PARAM.WIND_MARG:get()
 
         bearing_inc_deg       = PARAM.HEADING_INC:get() or DEFAULT_HEADING_INC_DEG
         if bearing_inc_deg <= 0 then
@@ -725,15 +705,21 @@ local function get_vehicle_state()
         near_miss_xy          = PARAM.AVD_NMAC_XY:get()
         near_miss_z           = PARAM.AVD_NMAC_Z:get()
         slew_dps              = PARAM.SLEW_DPS:get()
-        slew_urg_s            = PARAM.SLEW_URG:get()
         side_hold_s           = PARAM.SIDE_HOLD:get()
-        cpa_min_ms            = PARAM.CPA_MIN:get()
         trap_act              = PARAM.TRAP_ACT:get()
         trap_s                = PARAM.TRAP_S:get()
         trap_clr_s            = PARAM.TRAP_CLR_S:get()
         trap_esc_act          = PARAM.TRAP_ESC_ACT:get()
         stale_s               = PARAM.STALE_S:get()
         hung_alrt_s           = PARAM.HUNG_ALRT_S:get()
+        margin_crewed_m       = PARAM.MARGIN_CA:get()
+
+        -- the modules cache these too, so push the new values through - LAST, after every
+        -- local above is refreshed.  This used to run partway through the block, before
+        -- bearing_inc_deg (among others) was refreshed, so core.configure() was handed a
+        -- one-refresh-cycle-stale bearing_inc_deg every time after the first; moving the
+        -- call to the end fixes that incidentally.
+        configure_modules()
 
         now_params_ms         = now_ms
     end
