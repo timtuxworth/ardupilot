@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-095"
+SCRIPT_VERSION      = "4.8.0-096"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -762,9 +762,7 @@ end
 -- what to do with the answer - alerting, commanding and the failsafes all stay in this
 -- file, which is what keeps this the only file an integrator has to edit.
 core = need("daacore").new({
-    geometry            = geometry,
     obstacles           = obstacles,
-    OBSTACLE_TYPE       = OBSTACLE_TYPE,
     MAV_SEVERITY        = MAV_SEVERITY,
     FLT_MAX             = FLT_MAX,
     COARSE_SWEEP_MULT   = COARSE_SWEEP_MULT,
