@@ -21,6 +21,18 @@
 
 local DAAcore = {}
 
+DAAcore.SCRIPT_VERSION = "4.8.0-001"
+DAAcore.SCRIPT_NAME = "DAA core"
+DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
+
+-- Load-banner severity only - NOT exported, and not what the instance logs with below.
+-- This module is a tightly-coupled collaborator of planedaa.lua, not a standalone library
+-- like pid.lua (whose SCRIPT_NAME/SCRIPT_VERSION pattern this follows) - MAV_SEVERITY stays
+-- an injected dependency below so there is one shared severity table, not one per module
+-- that could theoretically drift. MAV_SEVERITY.INFO is a fixed MAVLink wire value (6),
+-- unlike that shared table, so a private literal here carries no drift risk of its own.
+local BANNER_SEVERITY = 6
+
 function DAAcore.new(deps)
     local self = {}
 
@@ -29,7 +41,7 @@ function DAAcore.new(deps)
     local obstacles             = deps.obstacles
     local OBSTACLE_TYPE         = deps.OBSTACLE_TYPE
     local MAV_SEVERITY          = deps.MAV_SEVERITY
-    local SCRIPT_NAME_SHORT     = deps.SCRIPT_NAME_SHORT
+    local SCRIPT_NAME_SHORT     = DAAcore.SCRIPT_NAME_SHORT
     local FLT_MAX               = deps.FLT_MAX
     local COARSE_SWEEP_MULT     = deps.COARSE_SWEEP_MULT
     local MIN_STEP2_M           = deps.MIN_STEP2_M
@@ -1124,5 +1136,7 @@ function DAAcore.new(deps)
 
     return self
 end
+
+gcs:send_text(BANNER_SEVERITY, string.format("%s %s module loaded", DAAcore.SCRIPT_NAME, DAAcore.SCRIPT_VERSION))
 
 return DAAcore
