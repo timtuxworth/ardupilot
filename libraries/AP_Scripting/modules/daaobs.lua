@@ -17,6 +17,14 @@
 
 local DAAobstacles = {}
 
+DAAobstacles.SCRIPT_VERSION = "4.8.0-001"
+DAAobstacles.SCRIPT_NAME = "DAA obstacles"
+DAAobstacles.SCRIPT_NAME_SHORT = "DAAobs"
+
+-- Load-banner severity only - this module does no other logging, so no full severity
+-- table is needed; MAV_SEVERITY.INFO is a fixed MAVLink wire value (6).
+local BANNER_SEVERITY = 6
+
 -- The obstacle taxonomy this module classifies against.  Owned here rather than injected:
 -- AP_OAScripting returns these values, and this is the code that interprets them.
 DAAobstacles.OBSTACLE_TYPE = {
@@ -361,5 +369,7 @@ function DAAobstacles.new(geo)
 
     return self
 end
+
+gcs:send_text(BANNER_SEVERITY, string.format("%s %s module loaded", DAAobstacles.SCRIPT_NAME, DAAobstacles.SCRIPT_VERSION))
 
 return DAAobstacles
