@@ -836,6 +836,58 @@ function DAAcore.new(deps)
     end
 
 
+    -- Coarse pass of the sweep: step at coarse_inc_deg around the full circle (test_step1
+    -- alternates left/right) until a clear heading is found or every candidate is exhausted.
+    -- Returns clear_delta_deg (the signed deflection of the first clear heading, or nil if
+    -- boxed in - nothing cleared) and obstacle_distance_m (the worst blocker seen, needed by
+    -- the boxed-in refine below), plus the possibly-improved best_distance_m/best_bearing_deg
+    -- (every probe can improve these, clear or not).  A separate function rather than a
+    -- goto-out-of-loop: returning on the first clear heading is the same short-circuit,
+    -- without a jump target.
+    local function coarse_sweep(bearing_deg, distance_to_target_m, target_loc, coarse_inc_deg,
+                                best_distance_m, best_bearing_deg)
+        local obstacle_distance_m = FLT_MAX
+        for i = 0, math.floor(360 / coarse_inc_deg) do
+            local distance_found_m, bearing_found_deg, obstacle_found =
+                    test_step1(distance_to_target_m, bearing_deg, i, target_loc, coarse_inc_deg)
+            if distance_found_m > best_distance_m then
+                best_distance_m     = distance_found_m
+                best_bearing_deg    = bearing_found_deg
+            end
+            if obstacle_found == nil then -- found a path with no obstacles - done!
+                return wrap_180(bearing_found_deg - bearing_deg), obstacle_distance_m,
+                       best_distance_m, best_bearing_deg
+            end
+            if distance_found_m < obstacle_distance_m then
+                obstacle_avoiding   = obstacle_found
+                obstacle_distance_m = distance_found_m
+            end
+        end
+        return nil, obstacle_distance_m, best_distance_m, best_bearing_deg
+    end
+
+    -- Probe one refine candidate at centre_deg + delta_deg, shared by both refine loops in
+    -- sweep_for_heading() below.  They differ in what centre and delta sequence they walk
+    -- (see the comments at each call site) but do the same thing with each candidate: adopt
+    -- it if it clears, otherwise fold it into the running worst-blocker distance so the
+    -- boxed-in case still has a best-available fallback.  Returns cleared (true/false) and,
+    -- only when cleared, the distance/bearing to adopt; obstacle_distance_m is always
+    -- returned since the caller's running total must carry across candidates that don't clear.
+    local function probe_refine_candidate(centre_deg, delta_deg, direct_bearing_deg,
+                                          distance_to_target_m, target_loc, obstacle_distance_m)
+        local distance_found_m, bearing_found_deg, obstacle_found =
+                probe_bearing(wrap_180(centre_deg + delta_deg), direct_bearing_deg,
+                             distance_to_target_m, target_loc, false)
+        if obstacle_found == nil then
+            return true, distance_found_m, bearing_found_deg, obstacle_distance_m
+        end
+        if distance_found_m < obstacle_distance_m then
+            obstacle_avoiding   = obstacle_found
+            obstacle_distance_m = distance_found_m
+        end
+        return false, nil, nil, obstacle_distance_m
+    end
+
     -- Sweep for the heading that best clears the obstacles between here and target_loc.
     -- Returns the updated best_distance_m and best_bearing_deg; obstacle_avoiding is an
     -- upvalue and is updated in place as closer obstacles are found.
@@ -849,7 +901,6 @@ function DAAcore.new(deps)
         if distance_to_target_m < 20 then
             return best_distance_m, best_bearing_deg
         end
-        local obstacle_distance_m = FLT_MAX
         -- Try increments around a circle, alternating left and right. The first heading
         -- that clears all obstacles for two look-ahead steps wins (a bounded downwind
         -- preference is applied afterwards, once we know we are avoiding).
@@ -863,24 +914,10 @@ function DAAcore.new(deps)
         -- COARSE_SWEEP_MULT x the increment and refining only around the winner keeps the
         -- final angular resolution while cutting the worst case by ~COARSE_SWEEP_MULT.
         local coarse_inc_deg  = bearing_inc_deg * COARSE_SWEEP_MULT
-        local clear_delta_deg = nil     -- signed deflection of the first clear coarse heading
-
-        for i = 0, math.floor(360 / coarse_inc_deg) do
-            local distance_found_m, bearing_found_deg, obstacle_found = test_step1(distance_to_target_m, bearing_deg, i, target_loc, coarse_inc_deg)
-            if distance_found_m > best_distance_m then
-                best_distance_m     = distance_found_m
-                best_bearing_deg    = bearing_found_deg
-            end
-            if obstacle_found == nil then -- found a path with no obstacles - done!
-                clear_delta_deg = wrap_180(bearing_found_deg - bearing_deg)
-                goto continue
-            end
-            if distance_found_m < obstacle_distance_m then
-                obstacle_avoiding   = obstacle_found
-                obstacle_distance_m = distance_found_m
-            end
-        end
-        ::continue::
+        local clear_delta_deg, obstacle_distance_m
+        clear_delta_deg, obstacle_distance_m, best_distance_m, best_bearing_deg =
+                coarse_sweep(bearing_deg, distance_to_target_m, target_loc, coarse_inc_deg,
+                            best_distance_m, best_bearing_deg)
 
         -- Refine. The clear coarse heading sits one coarse step beyond the last blocked one,
         -- so the smallest deflection that actually clears lies inside that window. Walk the
@@ -898,17 +935,15 @@ function DAAcore.new(deps)
                 if test_mag >= clear_mag then
                     break   -- reached the known-clear coarse heading; keep it
                 end
-                local distance_found_m, bearing_found_deg, obstacle_found =
-                        probe_bearing(wrap_180(bearing_deg + sign * test_mag), bearing_deg, distance_to_target_m, target_loc, false)
-                if obstacle_found == nil then
+                local cleared, distance_found_m, bearing_found_deg
+                cleared, distance_found_m, bearing_found_deg, obstacle_distance_m =
+                        probe_refine_candidate(bearing_deg, sign * test_mag, bearing_deg,
+                                               distance_to_target_m, target_loc, obstacle_distance_m)
+                if cleared then
                     -- a smaller deflection also clears, so prefer it (closer to the direct path)
                     best_distance_m  = distance_found_m
                     best_bearing_deg = bearing_found_deg
                     break
-                end
-                if distance_found_m < obstacle_distance_m then
-                    obstacle_avoiding   = obstacle_found
-                    obstacle_distance_m = distance_found_m
                 end
             end
         elseif obstacle_avoiding ~= nil then
@@ -923,18 +958,16 @@ function DAAcore.new(deps)
                 -- alternate either side of the most open heading: +1, -1, +2, -2, ... steps
                 local step_n = math.floor((j + 1) / 2)
                 local sign   = (j % 2 == 1) and 1 or -1
-                local distance_found_m, bearing_found_deg, obstacle_found =
-                        probe_bearing(wrap_180(centre_deg + sign * step_n * bearing_inc_deg), bearing_deg, distance_to_target_m, target_loc, false)
-                if obstacle_found == nil then
+                local cleared, distance_found_m, bearing_found_deg
+                cleared, distance_found_m, bearing_found_deg, obstacle_distance_m =
+                        probe_refine_candidate(centre_deg, sign * step_n * bearing_inc_deg, bearing_deg,
+                                               distance_to_target_m, target_loc, obstacle_distance_m)
+                if cleared then
                     -- there was a gap after all; steer for it (still avoiding, so
                     -- obstacle_avoiding stays set, exactly as the full sweep would leave it)
                     best_distance_m  = distance_found_m
                     best_bearing_deg = bearing_found_deg
                     break
-                end
-                if distance_found_m < obstacle_distance_m then
-                    obstacle_avoiding   = obstacle_found
-                    obstacle_distance_m = distance_found_m
                 end
             end
         end
