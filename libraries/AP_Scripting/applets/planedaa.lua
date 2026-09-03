@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-086"
+SCRIPT_VERSION      = "4.8.0-087"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -792,9 +792,15 @@ local DAA = {
     local navigating            = false;
     local active                = true;
     local current_loc           = ahrs:get_position() -- luacheck: ignore current_loc
-    local groundspeed_ms        = ahrs:groundspeed_vector():length()
-    local airspeed_ms           = ahrs:airspeed_EAS() or groundspeed_ms
-    local ground_course_deg     = wrap_180(math.deg(ahrs:groundspeed_vector():angle()))
+    -- Placeholder values only: get_vehicle_state()/DAA.get_vehicle_state() overwrite all
+    -- five of these on the first real cycle, in one place, before anything reads them -
+    -- see the comment there.  Kept here only because Lua requires an initial value for
+    -- each upvalue; wind is left literally unmeasured (0.0/0.0) rather than fetched
+    -- again from ahrs, so there is exactly one fetch site for wind/airspeed/groundspeed
+    -- in the whole file, not two.
+    local groundspeed_ms        = 0.0
+    local airspeed_ms           = 0.0
+    local ground_course_deg     = 0.0
     local wind_dir_rad          = 0.0
     local wind_speed            = 0.0
     local obstacle_avoiding     = nil
@@ -1712,8 +1718,14 @@ local last_switch_state = 0
 local no_DAA_displayed  = false
 
 local function update()
+    -- Both state-fetch calls first, back to back, before anything else runs this cycle:
+    -- position/mode (get_vehicle_state) then target/wind/airspeed/groundspeed
+    -- (DAA.get_vehicle_state) - so every decision made later in this same cycle, in
+    -- either function, sees one consistent snapshot rather than values fetched at
+    -- scattered points across the cycle.  Neither depends on the switch-function check
+    -- below.
     get_vehicle_state()
-
+    DAA.get_vehicle_state(current_loc)
 
     local switch_function = PARAM.ACT_FN:get()
     if switch_function == nil then
@@ -1733,7 +1745,6 @@ local function update()
         last_switch_state = switch_state
     end
 
-    DAA.get_vehicle_state(current_loc)
     if DAA.isactive() then
         local suggested_target_loc = DAA.take_report(core.detect())
         DAA.alert(suggested_target_loc)
