@@ -17,7 +17,7 @@
 
 local DAAobstacles = {}
 
-DAAobstacles.SCRIPT_VERSION = "4.8.0-002"
+DAAobstacles.SCRIPT_VERSION = "4.8.0-003"
 DAAobstacles.SCRIPT_NAME = "DAA obstacles"
 DAAobstacles.SCRIPT_NAME_SHORT = "DAAobs"
 
@@ -46,6 +46,22 @@ DAAobstacles.OBSTACLE_TYPE = {
     FENCE_ALT_MAX               = 11,   -- max altitude fence (AC_FENCE_TYPE_ALT_MAX, FENCE_TYPE bit 0)
     FENCE_ALT_MIN               = 12,   -- min altitude fence (AC_FENCE_TYPE_ALT_MIN, FENCE_TYPE bit 3)
 }
+
+-- true for the horizontal fence obstacle types.  A fence is a boundary rather than a
+-- point, so it carries no usable location and its real range has to come from
+-- OAScripting:fence_distance().  The altitude fences (FENCE_ALT_MAX/MIN) are handled
+-- separately and are deliberately not in this list - callers that also need to route
+-- those (e.g. daacore.lua's resolver dispatch) OR them in explicitly.  The single
+-- source of truth for "is this a fence" - daacore.lua and planedaa.lua both used to
+-- carry their own copy of this list.
+function DAAobstacles.is_fence_obstacle(obstacle_type)
+    return obstacle_type == DAAobstacles.OBSTACLE_TYPE.FENCE_HOME
+        or obstacle_type == DAAobstacles.OBSTACLE_TYPE.FENCE_CIRCLE_INCLUSION
+        or obstacle_type == DAAobstacles.OBSTACLE_TYPE.FENCE_CIRCLE_EXCLUSION
+        or obstacle_type == DAAobstacles.OBSTACLE_TYPE.FENCE_POLYGON_INCLUSION
+        or obstacle_type == DAAobstacles.OBSTACLE_TYPE.FENCE_POLYGON_EXCLUSION
+        or obstacle_type == DAAobstacles.OBSTACLE_TYPE.FENCE_LUA
+end
 
 -- ADS-B emitter categories (MAV_ADSB_EMITTER_TYPE), used only to label a contact.
 DAAobstacles.ADSB_EMITTER = {
@@ -224,18 +240,7 @@ function DAAobstacles.new()
         return "unknown"
     end
 
-    -- true for the horizontal fence obstacle types.  A fence is a boundary rather than a
-    -- point, so it carries no usable location and its real range has to come from
-    -- OAScripting:fence_distance().  The altitude fences (FENCE_ALT_MAX/MIN) are handled
-    -- separately and are deliberately not in this list.
-    local function is_fence_obstacle(obstacle_type)
-        return obstacle_type == OBSTACLE_TYPE.FENCE_HOME
-            or obstacle_type == OBSTACLE_TYPE.FENCE_CIRCLE_INCLUSION
-            or obstacle_type == OBSTACLE_TYPE.FENCE_CIRCLE_EXCLUSION
-            or obstacle_type == OBSTACLE_TYPE.FENCE_POLYGON_INCLUSION
-            or obstacle_type == OBSTACLE_TYPE.FENCE_POLYGON_EXCLUSION
-            or obstacle_type == OBSTACLE_TYPE.FENCE_LUA
-    end
+    local is_fence_obstacle = DAAobstacles.is_fence_obstacle
 
     local function populate_obstacle(distance_m, any_obstacle)
         local obstacle = {}
@@ -365,6 +370,7 @@ function DAAobstacles.new()
     self.obstacle_report_distance = obstacle_report_distance
     self.get_standoff             = get_standoff
     self.find_closest_obstacle    = find_closest_obstacle
+    self.is_fence_obstacle        = is_fence_obstacle
 
     return self
 end
