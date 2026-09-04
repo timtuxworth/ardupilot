@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-102"
+SCRIPT_VERSION      = "4.8.0-103"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -843,6 +843,12 @@ local DAA = {
     local update_target_location_save_loc = nil -- this is the saved current_target for use by update_target_location ONLY
     local navigation_target_loc = nil           -- this is where the vehicle is trying to get to (i.e. next waypoint if no avoidance)
     local daa_target_loc        = nil           -- this is where the DAA is currently trying to go in order to avoid obstacles (nil if not avoiding)
+    -- Crosstrack (horizontal path-following) state saved from just before avoidance
+    -- disabled it, restored when avoidance ends - see set_avoid_location() below.
+    -- Defaults true (ArduPlane's normal AUTO/GUIDED behaviour) so a firmware without
+    -- the set_crosstrack_enabled()/get_crosstrack_enabled() bindings degrades to
+    -- "always leave crosstrack alone" rather than an undefined saved value.
+    local saved_crosstrack_enabled = true
 
     -- the distance we look ahead is adjusted dynamically based on avoidance results
     local current_lookahead = lookahead_param_m
@@ -1246,13 +1252,38 @@ local DAA = {
         -- if the "new" target is nil then revert back to the original navigation target which should be the current waypoint
         if new_target_loc == nil then
             if update_target_location(navigation_target_loc) then
+                if daa_target_loc ~= nil then
+                    -- Leaving avoidance: restore whatever crosstrack state was in
+                    -- effect before it was disabled below, now that the mission/
+                    -- guided target is back in charge of the leg.
+                    vehicle:set_crosstrack_enabled(saved_crosstrack_enabled)
+                end
                 daa_target_loc = nil
             end
             return false
         end
         -- if the "new" target is different from the current DAA target then lets try to go there
         if not locations_equal(daa_target_loc, new_target_loc) then
+            local entering_avoidance = (daa_target_loc == nil)
             if update_target_location(new_target_loc) then
+                if entering_avoidance then
+                    -- Entering avoidance: fly the direct current-position-to-target
+                    -- line DAA itself evaluated when it chose this bearing, not the
+                    -- stale prev_WP_loc -> target leg - a stale crosstrack reference
+                    -- manufactured a large XTE and could command a bank direction
+                    -- that contradicted DAA's own current_loc -> bearing evaluation
+                    -- (confirmed live 2026-09-04, log 00000178.BIN: NTUN.XT jumped
+                    -- from +7m to -22.6m the instant DAA changed HdgB). Unlike
+                    -- set_crosstrack_start(), this never touches prev_WP_loc, so the
+                    -- vertical glide-slope calculation that also depends on it is
+                    -- undisturbed - see project_planedaa_reversal_awareness in
+                    -- memory for why that distinction matters here.
+                    local enabled = vehicle:get_crosstrack_enabled()
+                    if enabled ~= nil then
+                        saved_crosstrack_enabled = enabled
+                    end
+                    vehicle:set_crosstrack_enabled(false)
+                end
                 daa_target_loc = new_target_loc:copy()
                 return true
             end
