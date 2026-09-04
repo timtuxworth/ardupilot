@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-010"
+DAAcore.SCRIPT_VERSION = "4.8.0-011"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -330,7 +330,19 @@ function DAAcore.new(deps)
     consecutive cycles, not refinement in general - so a still-clear committed bearing is
     only held over a fresh candidate when that candidate would reverse bank direction from
     what the aircraft is currently, physically holding; a same-direction refinement (still
-    turning the same way, just tightening towards the target) is let through every cycle.
+    turning the same way, just tightening towards the target) is let through every cycle -
+    BUT ONLY when that fresh candidate is itself genuinely clear (margin-satisfied), not
+    merely "the least-bad option this cycle's sweep happened to find." Confirmed live
+    2026-09-04 (log 00000175.BIN): once the sweep can no longer find a fully-clear
+    heading near a boundary it is skirting, it falls back to its best-available
+    candidate every cycle - and if that candidate happens to keep the same bank
+    direction, the ORIGINAL same-direction exemption let it through completely
+    unresisted, one shrinking-clearance "best available" replacing the last, walking
+    the achieved clearance down from a few metres to a breach with no reversal (and so
+    no Stage 1b latch) ever in the picture. Same-direction refinement is safe to let
+    through unconditionally only while it is actually choosing a clear path; once the
+    sweep is reduced to "best of the unsafe options," a same-direction change gets the
+    same hold-while-the-old-one-still-clears treatment a reversal already gets.
     Only a MATERIAL course change (>= bendy_angle, the same DAA_BR_ANGLE threshold used
     elsewhere in this file) is ever classified as needing a reversal at all - a small
     correction with the opposite arithmetic sign is not itself a whipsaw and must not
@@ -436,13 +448,31 @@ function DAAcore.new(deps)
             -- rather than risk the servo-overshoot whipsaw this exists to prevent.
             return bearing_orig_deg, distance_previous_m
         end
+
+        -- A second probe, of the FRESH candidate this time - not to duplicate the sweep's
+        -- own margin check, but because the sweep can hand back its best-AVAILABLE
+        -- candidate (obstacle_found ~= nil) rather than a genuinely clear one whenever it
+        -- cannot find a fully-clear heading this cycle, and resolve_fence_bearing() does
+        -- not otherwise tell this function which kind it received.  Same-direction
+        -- refinement is only safe to wave through unconditionally while it is actually
+        -- choosing a clear path; once it degrades to "best of the unsafe options," letting
+        -- it straight through is exactly what walked clearance down to a live breach with
+        -- no reversal (and so no Stage 1b latch) ever entering the picture.
+        if held_is_clear and not needs_reversal then
+            local _, _, fresh_obstacle = probe_bearing(bearing_deg, bearing_deg, FLT_MAX, target_loc, false)
+            if fresh_obstacle ~= nil then
+                return bearing_orig_deg, distance_previous_m
+            end
+        end
+
         -- Either the committed bearing is no longer clear (a change is required,
         -- whatever its size), or it is still clear but the fresh candidate keeps the
-        -- SAME bank direction - a same-side refinement is not the whipsaw this guards
-        -- against, so it is let through every cycle rather than holding the aircraft on
-        -- one fixed bearing indefinitely just because it happens to stay clear (that
-        -- held a SITL aircraft on a single straight heading for 16-23s past a small
-        -- exclusion circle - see project_planedaa_reversal_awareness in memory).
+        -- SAME bank direction AND is itself genuinely clear - a same-side refinement
+        -- between two clear paths is not the whipsaw this guards against, so it is let
+        -- through every cycle rather than holding the aircraft on one fixed bearing
+        -- indefinitely just because it happens to stay clear (that held a SITL aircraft
+        -- on a single straight heading for 16-23s past a small exclusion circle - see
+        -- project_planedaa_reversal_awareness in memory).
         -- If this transition itself needs a reversal, latch that direction so a fresh
         -- sweep result next cycle cannot reverse it again before the aircraft responds.
         if needs_reversal then
