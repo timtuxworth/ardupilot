@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-100"
+SCRIPT_VERSION      = "4.8.0-101"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -105,7 +105,7 @@ PARAM.MARGIN_FENCE = bind_add_param('MARGIN_FENCE', 2, 0)
   // @Range: 50 2000
   // @User: Standard
 --]]
-PARAM.LKAHD_M  = bind_add_param('LKAHD_M', 3, 1000)
+PARAM.LKAHD_M  = bind_add_param('LKAHD_M', 3, 500)
 
 --[[
   // @Param: DAA_UPDATE_RATE
@@ -322,7 +322,7 @@ PARAM.CPA_MIN = bind_add_param('CPA_MIN', 27, 2)
     // @Values: 0:Disabled,1:RTL,2:QRTL,3:QLOITER,4:QLAND
     // @User: Standard
 --]]
-PARAM.TRAP_ACT = bind_add_param('TRAP_ACT', 28, 0)
+PARAM.TRAP_ACT = bind_add_param('TRAP_ACT', 28, 1)
 
 --[[
     // @Param: DAA_TRAP_S
@@ -414,7 +414,7 @@ PARAM.DETECT_M = bind_add_param('DETECT_M', 36, 1000)
     // @Range: 100 2000
     // @User: Standard
 --]]
-PARAM.PLAN_M = bind_add_param('PLAN_M', 37, 1000)
+PARAM.PLAN_M = bind_add_param('PLAN_M', 37, 250)
 
 PARAM.AVD_ENABLE                  = bind_param("AVD_ENABLE")
 PARAM.AVD_WCLR_XY                 = bind_param("AVD_WCLR_XY")
