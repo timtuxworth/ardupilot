@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-008"
+DAAcore.SCRIPT_VERSION = "4.8.0-010"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -82,6 +82,7 @@ function DAAcore.new(deps)
     local wrap_180                  = geometry.wrap_180
     local location_project          = geometry.location_project
     local max_turn_rate_dps         = geometry.max_turn_rate_dps
+    local arc_projection            = geometry.arc_projection
     local effective_groundspeed     = geometry.effective_groundspeed
     local find_closest_obstacle     = obstacles.find_closest_obstacle
     local populate_obstacle         = obstacles.populate_obstacle
@@ -91,7 +92,7 @@ function DAAcore.new(deps)
     local alt_cool_ms, alt_hyst_m, bearing_inc_deg, bendy_angle
     local bendy_ratio, cpa_min_ms, detect_m, margin_alt_m
     local margin_crewed_m, margin_fence_m, margin_vertical_m, plan_m
-    local roll_limit_deg
+    local roll_limit_deg, roll_rate_dps
     local side_hold_s, slew_dps, slew_urg_s, well_clear_xy
     local well_clear_z, wp_loiter_rad_m, lookahead_param_m
 
@@ -130,6 +131,7 @@ function DAAcore.new(deps)
         margin_vertical_m      = settings.margin_vertical_m
         plan_m                 = settings.plan_m
         roll_limit_deg         = settings.roll_limit_deg
+        roll_rate_dps          = settings.roll_rate_dps
         side_hold_s            = settings.side_hold_s
         slew_dps               = settings.slew_dps
         slew_urg_s             = settings.slew_urg_s
@@ -329,16 +331,24 @@ function DAAcore.new(deps)
     only held over a fresh candidate when that candidate would reverse bank direction from
     what the aircraft is currently, physically holding; a same-direction refinement (still
     turning the same way, just tightening towards the target) is let through every cycle.
+    Only a MATERIAL course change (>= bendy_angle, the same DAA_BR_ANGLE threshold used
+    elsewhere in this file) is ever classified as needing a reversal at all - a small
+    correction with the opposite arithmetic sign is not itself a whipsaw and must not
+    arm or re-arm the latch.
     (An earlier version held the committed bearing unconditionally whenever clear, with no
     same-direction escape - that produced a real SITL regression: a single held bearing
     stayed clear of a small exclusion circle for 16-23s of straight flight, well past the
     circle, before the aircraft ever turned back towards the target.) Once a genuine
     reversal is accepted, its bank direction is latched until the aircraft's own roll
-    confirms the reversal happened, so a second reversal cannot land before the first one
-    completes. Stage 2 (giving the turn-lead model a bank-aware transition, clearance-
-    checked in its own right) is not yet built - this latch is an interim guard, not a
-    substitute for it, and per review MUST be breakable the moment the held bearing itself
-    stops being clear (a lock that can hold an unsafe path is worse than no lock).
+    reaches THAT side - merely passing back through wings-level does not confirm the
+    reversal happened, it only confirms the old bank was released, and releasing the
+    latch there let a second, opposite reversal back in before the first one completed
+    (a real field breach, not a hypothetical - two live SITL flights both showed dense
+    clusters of sub-second bank reversals right before a fence breach). Stage 2 (giving
+    the turn-lead model a bank-aware transition, clearance-checked in its own right) is
+    not yet built - this latch is an interim guard, not a substitute for it, and per
+    review MUST be breakable the moment the held bearing itself stops being clear (a
+    lock that can hold an unsafe path is worse than no lock).
 
     "Still clear" is obstacle_found == nil from probe_bearing() - the same authoritative
     signal every other candidate in the sweep is judged by, already wind-aware (daaobs.lua
@@ -382,10 +392,12 @@ function DAAcore.new(deps)
 
         if reversal_target_sign ~= nil then
             local holding_sign = bank_sign(current_roll_deg)
-            if holding_sign == 0 or holding_sign == reversal_target_sign
+            if holding_sign == reversal_target_sign
                     or (now_ms - reversal_since_ms) > MAX_REVERSAL_LATCH_MS then
-                -- No longer holding the OLD bank (reached wings-level or past it towards
-                -- the target side - not necessarily the target bank fully established),
+                -- Roll has actually reached the requested target bank side (not merely
+                -- wings-level - crossing back through the deadband confirms the OLD bank
+                -- was released, not that the new one was established, and releasing here
+                -- let a second, opposite reversal land before the first one completed),
                 -- or the safety valve fired: free to re-evaluate normally below.
                 reversal_target_sign = nil
             elseif held_is_clear then
@@ -405,9 +417,18 @@ function DAAcore.new(deps)
         -- What bank direction the fresh candidate needs, and whether that differs from
         -- the bank the aircraft is currently, physically holding - computed up front
         -- because it now gates BOTH branches below, not just the "no longer clear" one.
-        local needed_sign = (wrap_180(bearing_deg - ground_course_deg) >= 0) and 1 or -1
+        -- A candidate within bendy_angle of the current ground course is a small
+        -- correction, not a turn with a bank direction of its own - the sign of such a
+        -- tiny change is noise and must not be classified as needing a reversal (the
+        -- original fault was 150-220 deg jumps, not sub-bendy_angle corrections).
+        local course_change_deg = wrap_180(bearing_deg - ground_course_deg)
         local current_sign = bank_sign(current_roll_deg)
-        local needs_reversal = current_sign ~= 0 and current_sign ~= needed_sign
+        local needs_reversal = false
+        local needed_sign = current_sign
+        if math.abs(course_change_deg) >= bendy_angle then
+            needed_sign   = (course_change_deg >= 0) and 1 or -1
+            needs_reversal = current_sign ~= 0 and current_sign ~= needed_sign
+        end
 
         if held_is_clear and needs_reversal then
             -- Still genuinely clear, but the only reason to move off it is a fresh
@@ -714,6 +735,67 @@ function DAAcore.new(deps)
         return location_project(projected_loc, side_deg, radius_m * (1.0 - math.cos(turn_rad)), to_loc)
     end
 
+    -- Stage 2: where the vehicle will actually be for a candidate that requires REVERSING
+    -- bank direction from what it is currently, physically holding.  location_after_
+    -- course_change() above assumes the target bank is established instantaneously, which
+    -- is fine for a same-direction turn but is exactly what let a genuinely-required
+    -- reversal get judged safe by a transition that cannot physically happen that fast -
+    -- confirmed live (two SITL fence breaches, 2026-09-04) even after the reversal-latch
+    -- fix (daacore.lua's resist_fence_bearing_change): the aircraft still had to
+    -- momentarily fly through the OLD bank, wings-level, and the NEW bank before the
+    -- constant-arc turn the old model assumed from the first instant.
+    --
+    -- Modelled as three bounded segments (current bank -> wings level -> target bank ->
+    -- constant-bank arc), each a call to geometry.arc_projection() - no new obstacle
+    -- probes here, only a more honest ANCHOR for the existing ones: probe_bearing()'s own
+    -- step1/step2/turn-arc checks run unchanged against whatever this returns, so a
+    -- reversal candidate costs the same number of obstacle-database queries as before,
+    -- just against a physically achievable point instead of an unreachable one.
+    --
+    -- roll_rate_dps (RLL2SRV_RMAX, falling back to ROLL_LIMIT_DEG / RLL2SRV_TCONST when
+    -- RMAX is left at its ArduPlane default of 0 - "rate limit disabled") bounds how fast
+    -- each phase can happen; see DAAgeometry.roll_rate_dps().  Degrades to the plain
+    -- single-arc model whenever there is nothing to unload (no reversal needed, or no roll
+    -- telemetry/rate bound), so the ordinary case costs nothing extra.
+    local function location_for_candidate(bearing_test_deg, target_loc)
+        local course_change_deg = wrap_180(bearing_test_deg - ground_course_deg)
+        local needed_sign       = (course_change_deg >= 0) and 1 or -1
+        local current_sign      = bank_sign(current_roll_deg)
+        if current_sign == 0 or current_sign == needed_sign or roll_rate_dps <= 0 then
+            return location_after_course_change(current_loc, bearing_test_deg, target_loc)
+        end
+
+        local ground_speed_ms   = effective_groundspeed(airspeed_ms, bearing_test_deg, wind_dir_rad, wind_speed)
+        local rate_at_limit_dps = max_turn_rate_dps(airspeed_ms, roll_limit_deg)
+        if ground_speed_ms <= 0 or rate_at_limit_dps <= 0 then
+            return location_after_course_change(current_loc, bearing_test_deg, target_loc)
+        end
+
+        -- Phase A: unload the CURRENT bank to wings-level, still turning the OLD way at
+        -- whatever roll the aircraft actually holds right now - it does not teleport to
+        -- wings-level, that costs |current_roll_deg| / roll_rate_dps seconds, banked the
+        -- old way for all of it.
+        local unload_time_s = math.abs(current_roll_deg) / roll_rate_dps
+        local mid_loc, mid_heading_deg = arc_projection(current_loc, ground_course_deg, current_sign,
+                unload_time_s, airspeed_ms, ground_speed_ms, math.abs(current_roll_deg), target_loc)
+
+        -- Phase B: roll INTO the new direction up to the full roll limit - the target bank
+        -- is not established instantly either.
+        local establish_time_s = roll_limit_deg / roll_rate_dps
+        local established_loc, established_heading_deg = arc_projection(mid_loc, mid_heading_deg, needed_sign,
+                establish_time_s, airspeed_ms, ground_speed_ms, roll_limit_deg, target_loc)
+
+        -- Phase C: whatever course change is still outstanding, at the now-established
+        -- bank - the same constant-bank model every other candidate is judged by, just
+        -- starting from where the transition actually leaves the aircraft rather than
+        -- from where it is right now.
+        local remaining_deg    = wrap_180(bearing_test_deg - established_heading_deg)
+        local remaining_time_s = math.abs(remaining_deg) / rate_at_limit_dps
+        return (arc_projection(established_loc, established_heading_deg,
+                (remaining_deg >= 0) and 1 or -1, remaining_time_s,
+                airspeed_ms, ground_speed_ms, roll_limit_deg, target_loc))
+    end
+
     -- The straight leg above starts where the turn ENDS, so on its own it never looks at the
     -- ground the turn itself covers.  One extra probe along the chord from here to that point
     -- closes the gap: against log 161's exclusion circles it caught every case that sampling
@@ -749,7 +831,10 @@ function DAAcore.new(deps)
         -- carrot downwind; it is really a TURN lead and calm air needs it just as much.
         -- Without it the probe assumes the vehicle is already on the candidate course, so a
         -- heading that needs a reversal is judged against a path the turn never flies.
-        local adjusted_loc          = location_after_course_change(current_loc, bearing_test_deg, target_loc)
+        -- location_for_candidate() upgrades this further for a candidate that reverses
+        -- bank direction from what the aircraft is currently, physically holding - see
+        -- its own comment for why the plain single-arc model is not safe there.
+        local adjusted_loc          = location_for_candidate(bearing_test_deg, target_loc)
 
         -- Position after one step from where we think we will be after turning to bearing_test_deg
         local avoidance_distance_m  = calc_avoidance_distance(avoid_step1_m, full_distance)
