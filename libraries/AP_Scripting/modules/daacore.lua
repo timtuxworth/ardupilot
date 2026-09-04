@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-007"
+DAAcore.SCRIPT_VERSION = "4.8.0-008"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -323,12 +323,19 @@ function DAAcore.new(deps)
     --[[
     Fence-specific hysteresis: persistence (Stage 1) plus a reversal-in-progress latch
     (Stage 1b) - see project_planedaa_reversal_awareness in memory for the full field
-    report, SITL reproduction and log analysis behind this. Summary: a fence does not need
-    the clearest heading re-chosen every cycle, it needs one that STAYS clear, so a still-
-    clear committed bearing is kept even when a fresh candidate would do "better"; and once
-    a genuine reversal is accepted, its bank direction is latched until the aircraft's own
-    roll confirms the reversal happened, so a second reversal cannot land before the first
-    one completes. Stage 2 (giving the turn-lead model a bank-aware transition, clearance-
+    report, SITL reproduction and log analysis behind this. Summary: what actually caused
+    the servo-overshoot whipsaw was a REVERSAL of commanded bank direction between
+    consecutive cycles, not refinement in general - so a still-clear committed bearing is
+    only held over a fresh candidate when that candidate would reverse bank direction from
+    what the aircraft is currently, physically holding; a same-direction refinement (still
+    turning the same way, just tightening towards the target) is let through every cycle.
+    (An earlier version held the committed bearing unconditionally whenever clear, with no
+    same-direction escape - that produced a real SITL regression: a single held bearing
+    stayed clear of a small exclusion circle for 16-23s of straight flight, well past the
+    circle, before the aircraft ever turned back towards the target.) Once a genuine
+    reversal is accepted, its bank direction is latched until the aircraft's own roll
+    confirms the reversal happened, so a second reversal cannot land before the first one
+    completes. Stage 2 (giving the turn-lead model a bank-aware transition, clearance-
     checked in its own right) is not yet built - this latch is an interim guard, not a
     substitute for it, and per review MUST be breakable the moment the held bearing itself
     stops being clear (a lock that can hold an unsafe path is worse than no lock).
@@ -395,18 +402,29 @@ function DAAcore.new(deps)
             end
         end
 
-        if held_is_clear then
-            -- still genuinely clear: keep flying it, regardless of whether the fresh
-            -- candidate would do better - it is not broken, so this does not fix it.
-            return bearing_orig_deg, distance_previous_m
-        end
-        -- Committed bearing is no longer clear: a change is actually required, whatever
-        -- its size. If it requires reversing bank direction, latch that direction so a
-        -- fresh sweep result next cycle cannot reverse it again before the aircraft
-        -- responds.
+        -- What bank direction the fresh candidate needs, and whether that differs from
+        -- the bank the aircraft is currently, physically holding - computed up front
+        -- because it now gates BOTH branches below, not just the "no longer clear" one.
         local needed_sign = (wrap_180(bearing_deg - ground_course_deg) >= 0) and 1 or -1
         local current_sign = bank_sign(current_roll_deg)
-        if current_sign ~= 0 and current_sign ~= needed_sign then
+        local needs_reversal = current_sign ~= 0 and current_sign ~= needed_sign
+
+        if held_is_clear and needs_reversal then
+            -- Still genuinely clear, but the only reason to move off it is a fresh
+            -- candidate that would reverse bank direction - hold the committed bearing
+            -- rather than risk the servo-overshoot whipsaw this exists to prevent.
+            return bearing_orig_deg, distance_previous_m
+        end
+        -- Either the committed bearing is no longer clear (a change is required,
+        -- whatever its size), or it is still clear but the fresh candidate keeps the
+        -- SAME bank direction - a same-side refinement is not the whipsaw this guards
+        -- against, so it is let through every cycle rather than holding the aircraft on
+        -- one fixed bearing indefinitely just because it happens to stay clear (that
+        -- held a SITL aircraft on a single straight heading for 16-23s past a small
+        -- exclusion circle - see project_planedaa_reversal_awareness in memory).
+        -- If this transition itself needs a reversal, latch that direction so a fresh
+        -- sweep result next cycle cannot reverse it again before the aircraft responds.
+        if needs_reversal then
             reversal_target_sign = needed_sign
             reversal_since_ms    = now_ms
         end
