@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-014"
+DAAcore.SCRIPT_VERSION = "4.8.0-015"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -649,7 +649,17 @@ function DAAcore.new(deps)
 
     -- (3) Heading slew-rate limit, for small changes only - large turns bypass this.
     local function apply_slew_limit(bearing)
-        if slew_dps <= 0 or last_avoid_bearing_deg == nil then
+        -- last_avoid_bearing_deg is shared with the fence-avoidance path, so it can
+        -- already be non-nil the FIRST time a moving obstacle ever triggers this
+        -- function in a flight (a fence was avoided earlier, this is not the "first
+        -- cycle" refine_avoidance_bearing() thinks it is) - last_cmd_bearing_ms is
+        -- only ever set below, in THIS function's own caller, so it genuinely is
+        -- still nil then and must be checked on its own, not inferred from
+        -- last_avoid_bearing_deg.  Without this a real flight crashed here
+        -- (2026-09-04, log 00000183.BIN) the first time a drone avoidance ran after
+        -- an earlier fence episode, aborting that cycle's avoidance decision
+        -- entirely - a fence breach followed ~10s later.
+        if slew_dps <= 0 or last_avoid_bearing_deg == nil or last_cmd_bearing_ms == nil then
             return bearing
         end
         local dt = (now_ms - last_cmd_bearing_ms):tofloat() / 1000.0
