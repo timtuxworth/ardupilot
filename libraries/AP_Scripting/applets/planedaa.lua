@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-103"
+SCRIPT_VERSION      = "4.8.0-104"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -830,11 +830,6 @@ local DAA = {
     local feed_watch_label      = ""            -- label of the moving obstacle we are tracking ("" = none)
     local feed_is_stale         = false         -- its last-seen update was stale
     local feed_stale_warn_ms    = uint32_t(0)   -- throttle for the "traffic stale" GCS text
-    -- monitoring/avoiding/loitering are the only reachable states; hovering/landing/
-    -- loitering_avoiding were speculative scaffolding (never assigned since the very first
-    -- commit) and are dropped along with the dead branches that compared against them.
-    local STATE                 = {monitoring = 1, avoiding = 2, loitering = 3}
-    local current_state         = STATE.monitoring
     local LoWC_active           = false
     local LoWC_label            = ""
     local NMAC_active           = false
@@ -850,10 +845,10 @@ local DAA = {
     -- "always leave crosstrack alone" rather than an undefined saved value.
     local saved_crosstrack_enabled = true
 
-    -- the distance we look ahead is adjusted dynamically based on avoidance results
-    local current_lookahead = lookahead_param_m
-    -- last DAA_LKAHD_M we seeded current_lookahead from, so an operator changing the
-    -- parameter in flight takes effect on the next cycle instead of at the next reboot
+    -- Last DAA_LKAHD_M this file announced a change for - the working value the sweep
+    -- actually probes at is core.update_state()'s own copy (kept in sync via
+    -- lookahead_param_m in configure_modules()); this is only a "did it change" sentinel
+    -- for the GCS message below.
     local lookahead_set_m   = lookahead_param_m
 
     -- Speed and heading of the horizontal wind, from the AHRS wind estimate.  Computed
@@ -1023,15 +1018,12 @@ local DAA = {
         active      = true;
         current_loc = fetched_current_loc
 
-        -- get_vehicle_state() re-reads DAA_LKAHD_M into lookahead_param_m every 5 s, but
-        -- current_lookahead is the working value the sweep actually uses.  Re-seed it when
-        -- the operator changes the parameter; testing for a change rather than assigning
-        -- every cycle leaves room for the dynamic adjustment the comment above promises.
+        -- get_vehicle_state() re-reads DAA_LKAHD_M into lookahead_param_m every 5 s;
+        -- announce it to the GCS only when it actually changes.
         if lookahead_param_m ~= lookahead_set_m then
-            lookahead_set_m     = lookahead_param_m
-            current_lookahead   = lookahead_param_m
+            lookahead_set_m = lookahead_param_m
             gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(
-                ": probe distance now %.0f m", current_lookahead))
+                ": probe distance now %.0f m", lookahead_param_m))
         end
 
         if OAScripting == nil then
@@ -1315,7 +1307,6 @@ local DAA = {
                 -- leaves us in GUIDED if that is what we were in beforehand).
                 loiteralt.stop(true)
             end
-            current_state = STATE.monitoring
         end
 
         if daa_target_loc == nil then
@@ -1329,7 +1320,6 @@ local DAA = {
             gcs:send_named_string("DAA-AVOID", "")
             gcs:send_named_string("DAA-OBSTCL", "")
             avoiding_label = ""
-            current_state = STATE.monitoring
         end
     end
 
@@ -1354,7 +1344,6 @@ local DAA = {
                 gcs:send_named_string("DAA-AVOID", "obstacle")
                 gcs:send_named_string("DAA-OBSTCL", avoiding_label)
                 now_avoiding_ms = now_ms
-                current_state = STATE.avoiding
             end
         else
             if avoiding_label ~= "" then
@@ -1362,7 +1351,6 @@ local DAA = {
                 gcs:send_named_string("DAA-AVOID", "")
                 gcs:send_named_string("DAA-OBSTCL", "")
                 avoiding_label = ""
-                current_state = STATE.monitoring
             end
         end
         log_avoid(obstacle, daa_target_loc)
@@ -1382,7 +1370,6 @@ local DAA = {
         -- loiteralt.stop(false), so a plane at the boundary cannot thrash the mode.
         if aircraft_avoiding == nil or (current_loc:get_distance(aircraft_avoiding.location) > (well_clear_xy + margin_crewed_m)) then
             if loiteralt.stop(false) then
-                current_state = STATE.monitoring
                 return
             end
         end
@@ -1401,17 +1388,13 @@ local DAA = {
         if daa_action == 0 then
             return              -- parameter DAA_AVOID can be used to disable avoidance
         end
-        -- mid-manoeuvre: don't re-decide the state, just fall through to avoid_obstacle()
-        -- below and keep flying the manoeuvre we are on.
-        local mid_manoeuvre = current_state == STATE.avoiding
 
         if loiteralt.active then
-            current_state = STATE.loitering
             do_loitering()
         -- Crewed traffic outranks whatever we are already avoiding, so the loiter trigger is
-        -- tested BEFORE mid_manoeuvre below.  An aircraft that appears while a fence or drone
-        -- avoidance is already running must still be able to take over; previously the
-        -- mid-manoeuvre branch matched first and the loiter could never start.
+        -- tested before falling through to ordinary bendy-ruler avoidance below.  An aircraft
+        -- that appears while a fence or drone avoidance is already running must still be able
+        -- to take over.
         -- DAA_AVD_ALT = 0 disables the loiter-to-altitude (see above).  Tested before
         -- assess_obstacle_motion() so the CPA work is skipped when the loiter is off.
         elseif aircraft_avoiding ~= nil and crewed_avoid_alt_m > 0
@@ -1423,7 +1406,6 @@ local DAA = {
             -- then falls through to normal monitoring. A missing/uncertain velocity => conflict.
             if loiteralt.start(crewed_avoid_alt_m, crewed_avoid_alt_frame, true, airspeed_ms) then
                 gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITER AIRCRAFT: %s", aircraft_avoiding.label))
-                current_state = STATE.loitering
 
                 gcs:send_named_string("DAA-AVOID", "LOITER")
                 gcs:send_named_float("DAA-LOITER", crewed_avoid_alt_m)
@@ -1432,28 +1414,19 @@ local DAA = {
 
                 return
             end
-            -- the loiter did not start: do not announce it and do not claim the state.
-            -- Fall through to ordinary bendy-ruler avoidance below, keeping any
-            -- mid-manoeuvre state rather than dropping it for a loiter that never began.
-            if not mid_manoeuvre then
-                current_state = STATE.monitoring
-            end
-        elseif mid_manoeuvre then   -- luacheck: ignore 542
-            -- (deliberately empty)
-        else
-            current_state = STATE.monitoring
+            -- the loiter did not start: fall through to ordinary bendy-ruler avoidance below.
         end
         avoid_obstacle(new_target_loc, obstacle_avoiding)
-        if loiteralt.active then
-            current_state = STATE.loitering -- deal with avoiding an obstacle (e.g. a drone) while currently in a loiter (to avoid a plane)
-        end
     end
 
     -- a moving obstacle (drone/aircraft/bird/AIS/proximity) may move out of the way;
     -- a fence will not, so a fence trap is held until the pilot intervenes
     local function obstacle_is_dynamic(obstacle_type)
         if obstacle_type == nil then return true end
-        local is_fence = (obstacle_type >= OBSTACLE_TYPE.FENCE_HOME and obstacle_type <= OBSTACLE_TYPE.FENCE_LUA)
+        -- obstacles.is_fence_obstacle() covers the horizontal fence types; the altitude
+        -- fences are handled separately there (see its own comment) but are also fixed,
+        -- not dynamic, so this caller ORs them in explicitly.
+        local is_fence = obstacles.is_fence_obstacle(obstacle_type)
             or obstacle_type == OBSTACLE_TYPE.FENCE_ALT_MAX
             or obstacle_type == OBSTACLE_TYPE.FENCE_ALT_MIN
         return not is_fence
@@ -1533,13 +1506,10 @@ local DAA = {
     -- detour flies away from the waypoint for a while and must not read as no progress.  The
     -- new best has to beat the old by a turn radius - the distance scale the avoidance geometry
     -- itself works at - so position noise cannot keep resetting the timer.
-    -- daa_target_loc is the "we are avoiding" test rather than current_state, because
-    -- avoid_obstacle() drops current_state back to monitoring on its "done" branch while
-    -- avoidance is still commanded.
     local function hung_update()
         if hung_alrt_s <= 0 or not in_fw_flight
             or daa_target_loc == nil or navigation_target_loc == nil or current_loc == nil
-            or current_state == STATE.loitering then
+            or loiteralt.active then
             hung_reset()
             return
         end
