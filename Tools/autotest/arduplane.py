@@ -7963,6 +7963,12 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
 
         self.reboot_sitl()
 
+        # This test is about the fix that lets avoidance skip a breached fence, not the
+        # trapped failsafe - home is deliberately inside the exclusion the whole time,
+        # which the trap would otherwise treat as a sustained compromise and RTL. The
+        # script registers this parameter when it loads, so it can only be set post-boot.
+        self.set_parameter("DAA_TRAP_ACT", 0)
+
         # mission: takeoff → waypoint 800 m north (outside the fence) → RTL
         self.start_flying_simple_relhome_mission([
             (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 80),
@@ -9510,6 +9516,15 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             "DAA_TRAP_S": 5,
             "DAA_TRAP_ACT": 1,          # RTL: no VTOL on this airframe, and it retargets to
                                         # home - which is what the release rule must survive
+            # The 100 m shortfall this test is built around (excl_radius/margin/
+            # wp_from_centre above) was tuned against 1000 m probe/target-placement
+            # distances - pin them explicitly rather than riding whatever DAA_LKAHD_M/
+            # DAA_PLAN_M's shipping defaults are. A smaller DAA_PLAN_M in particular lets
+            # the commanded avoidance target sit close enough to the real waypoint that
+            # the mission reports it "skipped" without the vehicle ever truly closing the
+            # standoff - collapsing the irreconcilable-geometry deadlock this test needs.
+            "DAA_LKAHD_M": 1000,
+            "DAA_PLAN_M": 1000,
         })
 
         # waypoint 2 sits inside the keep-out on the near side: approachable to 450 m from
@@ -9797,7 +9812,13 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
 
         self.reboot_sitl()
         self.wait_ready_to_arm()
-        self.set_parameter("DAA_MARGIN_FENCE", 100)
+        self.set_parameters({
+            "DAA_MARGIN_FENCE": 100,
+            # This test is about find_threats()'s breach-scoping, not the trapped
+            # failsafe - the home-circle breach is deliberately sustained for the whole
+            # run, which the trap would otherwise treat as a compromise and RTL for.
+            "DAA_TRAP_ACT": 0,
+        })
         self.context_collect('STATUSTEXT')
 
         self.start_flying_simple_relhome_mission([
@@ -10070,8 +10091,10 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         The visible symptom is the range at which the plane turns away from the wall.'''
         self.install_planedaa_scripts()
 
-        # DAA_LKAHD_M is the operator setting; use the shipping default so the test
-        # exercises the configuration that actually flies
+        # This test's whole geometry (wall placement, dogleg ranges) is built around a
+        # 1000 m probe distance - set it explicitly rather than riding whatever
+        # DAA_LKAHD_M's shipping default happens to be, since that default is tuned for
+        # flight behaviour, not for this test's fixed wall.
         lookahead_m = 1000
         step2_leg_m = 2 * lookahead_m
         fence_margin_m = 100
@@ -10112,7 +10135,10 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         self.wait_ready_to_arm()
 
         # the script registers its parameters when it loads at boot
-        self.set_parameter("DAA_MARGIN_FENCE", fence_margin_m)
+        self.set_parameters({
+            "DAA_MARGIN_FENCE": fence_margin_m,
+            "DAA_LKAHD_M": lookahead_m,
+        })
 
         # the waypoint is beyond the wall, so the plane keeps pressing north into it
         self.start_flying_simple_relhome_mission([
