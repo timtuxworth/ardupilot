@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-101"
+SCRIPT_VERSION      = "4.8.0-102"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -425,6 +425,12 @@ PARAM.AVD_NMAC_Z                  = bind_param("AVD_NMAC_Z")
 PARAM.ROLL_LIMIT_DEG              = bind_param("ROLL_LIMIT_DEG")
 PARAM.WP_LOITER_RAD               = bind_param("WP_LOITER_RAD")
 PARAM.WP_RADIUS                   = bind_param("WP_RADIUS")
+-- Roll-rate bound for the bank-aware reversal transition (daacore.lua's
+-- location_for_candidate()) - RLL2SRV_RMAX when the operator has set it, otherwise
+-- daageo's roll_limit_deg/RLL2SRV_TCONST fallback, since ArduPlane ships RLL2SRV_RMAX at
+-- 0 ("rate limit disabled") by default.
+PARAM.RLL2SRV_RMAX                = bind_param("RLL2SRV_RMAX")
+PARAM.RLL2SRV_TCONST              = bind_param("RLL2SRV_TCONST")
 
 -- Cached locals below are kept ONLY where this file reads the value itself (a startup
 -- sanity check in DAA.warnings(), a hot-path comparison, or - like margin_fence_m below -
@@ -547,6 +553,11 @@ local function fence_margin_fallback_m()
 end
 if margin_fence_m <= 0 then margin_fence_m = fence_margin_fallback_m() end
 
+-- See daageo's roll_rate_dps() for the rationale (RLL2SRV_RMAX, falling back to
+-- roll_limit_deg / RLL2SRV_TCONST since RMAX ships at 0).  Refreshed alongside
+-- roll_limit_deg every 5 s below, since the fallback depends on it.
+local roll_rate_dps = geometry.roll_rate_dps(PARAM.RLL2SRV_RMAX:get(), roll_limit_deg, PARAM.RLL2SRV_TCONST:get())
+
 local bearing_inc_deg = PARAM.HEADING_INC:get() or DEFAULT_HEADING_INC_DEG
 if bearing_inc_deg <= 0 then
     bearing_inc_deg = DEFAULT_HEADING_INC_DEG
@@ -587,6 +598,7 @@ local function configure_modules()
         margin_vertical_m = PARAM.MARGIN_CA_Z:get(),
         plan_m            = PARAM.PLAN_M:get(),
         roll_limit_deg    = roll_limit_deg,
+        roll_rate_dps     = roll_rate_dps,
         side_hold_s       = side_hold_s,
         slew_dps          = slew_dps,
         slew_urg_s        = PARAM.SLEW_URG:get(),
@@ -698,6 +710,7 @@ local function get_vehicle_state()
         lookahead_param_m     = PARAM.LKAHD_M:get()
         detect_m              = PARAM.DETECT_M:get()
         roll_limit_deg        = PARAM.ROLL_LIMIT_DEG:get()
+        roll_rate_dps         = geometry.roll_rate_dps(PARAM.RLL2SRV_RMAX:get(), roll_limit_deg, PARAM.RLL2SRV_TCONST:get())
         margin_fence_m        = PARAM.MARGIN_FENCE:get()
         refresh_period_ms     = 1000.0 / math.max(PARAM.UPDATE_RATE:get(), 1.0)
         bendy_ratio           = PARAM.BR_RATIO:get()
