@@ -8816,12 +8816,21 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         self.do_fence_enable()
         self.wait_text("Plane DAA", check_context=True, timeout=60)
 
+        # Stop as soon as a refusal is seen, not after a fixed 60s.  The corridor's
+        # geometry only holds while the aircraft is outbound: once it reaches WP2 and
+        # turns for RTL, "abeam to the right" flips from the 100 m east wall to the
+        # wide-open west side, and the loiter point legitimately starts landing inside
+        # the fence.  Polling for the full 60s risks running past that turn-around and
+        # picking up a later, unrelated, genuine success for the same tracked contact -
+        # which the aggregate booleans below cannot distinguish from the bug they exist
+        # to catch.
         tstart = self.get_sim_time()
-        while self.get_sim_time() - tstart < 60:
+        refused = False
+        while self.get_sim_time() - tstart < 60 and not refused:
             inject_aircraft()
             self.wait_heartbeat()
+            refused = self.statustext_in_collections("set_vehicle FAILED") is not None
 
-        refused = self.statustext_in_collections("set_vehicle FAILED") is not None
         announced = self.statustext_in_collections("LOITER AIRCRAFT") is not None
         avoided = self.statustext_in_collections("AVOIDING") is not None
         self.progress("loiter refused=%s, announced=%s, (fence avoidance seen=%s)"
