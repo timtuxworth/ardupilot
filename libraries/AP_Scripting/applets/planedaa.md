@@ -284,7 +284,7 @@ defaulting to 1000 m so the split changes nothing on its own.
 
 **Do not shorten `DAA_PLAN_M` casually.**
 
-ArduPlane's past-the-waypoint test draws its finish line *through* `next_WP_loc`. A
+ArduPlane's past-the-waypoint test draws its finish line _through_ `next_WP_loc`. A
 target a kilometre out puts that line out of reach. A near one puts it alongside the
 aircraft — and the moment the avoidance bearing has any component back towards the
 previous waypoint, the mission completes and moves on. It also costs clearance: replacing
@@ -294,9 +294,9 @@ skipped its waypoint at 106 m and finished **7 m** off the fence instead of clea
 Anything that shortens this has to beat two conditions, not one:
 
 - clear the waypoint acceptance distance (`WP_RADIUS` scaled by EAS2TAS², see
-  `AP_L1_Control::turn_distance`), or the target reads as *Reached waypoint*;
-- stay beyond the projection of the *previous* waypoint onto the avoidance bearing, or
-  the target reads as *Passed waypoint*.
+  `AP_L1_Control::turn_distance`), or the target reads as _Reached waypoint_;
+- stay beyond the projection of the _previous_ waypoint onto the avoidance bearing, or
+  the target reads as _Passed waypoint_.
 
 The visible cost of leaving it long is a wide excursion away from the route before the
 aircraft comes back to it, most pronounced at the 1000 m default on a short leg.
@@ -313,7 +313,7 @@ target replacement and cannot be tuned away.
 
 What it should not be is silent, so the applet announces it:
 
-```
+```text
 pDAA WP3 skipped by 140m while avoiding
 ```
 
@@ -444,7 +444,7 @@ defer to — it is precisely the situation in which everything else has already 
 to help. Still worth confirming against the startup messages rather than assuming the
 fence branch is armed.
 
-`DAA_HUNG_ALRT_S` measures a lack of *progress*, not a lack of headings. Detecting that
+`DAA_HUNG_ALRT_S` measures a lack of _progress_, not a lack of headings. Detecting that
 the bendy ruler is genuinely boxed in — no clear heading exists at all — is a separate
 condition and is **not implemented**; a boxed-in vehicle is caught only once it stops
 making progress, or breaches something.
@@ -509,7 +509,7 @@ loiteralt = need("daaltr2").new({ ... })
 
 and nothing else moves. Your module decides what "loiter" means — orbit the other way,
 descend instead of hold, refuse below a height, hand back to a different mode — while the
-applet keeps deciding *when* a loiter is called for. That is the seam: **the applet owns
+applet keeps deciding _when_ a loiter is called for. That is the seam: **the applet owns
 which policy applies and when; the module owns how it is carried out.**
 
 The same shape is available for the mechanism. `daacore.lua` is reached through
@@ -528,7 +528,7 @@ same one.
 
 Lua's parser keeps one table of **every distinct identifier, string literal and number in a
 chunk**, and it is sized in powers of two. Crossing **1024 entries** doubles it from 32 KB
-to 64 KB *while parsing*, and because the collector does not run inside `luaL_loadfile`
+to 64 KB _while parsing_, and because the collector does not run inside `luaL_loadfile`
 that lands straight on the peak. A large script that fits comfortably once loaded can fail
 to load with `Insufficent memory`.
 
