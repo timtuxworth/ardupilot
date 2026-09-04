@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-012"
+DAAcore.SCRIPT_VERSION = "4.8.0-013"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -109,7 +109,6 @@ function DAAcore.new(deps)
     local committed_side_sign       = 0
     local side_flip_pending         = false
     local side_flip_want_ms         = uint32_t(0)
-    local now_debug_ms              = millis()
     local current_lookahead         = 0
     local lookahead_set_m           = nil
     -- reversal-in-progress latch (see resist_bearing_change): nil, or the bank sign
@@ -163,7 +162,7 @@ function DAAcore.new(deps)
         current_roll_deg       = new_current_roll_deg
     end
 
-    local function log_detect_result(obstacle_found, distance_found_m, best_distance_m, distance_to_target_m, best_bearing_deg, target_loc, obstacle_type)
+    local function log_detect_result(distance_found_m, best_distance_m, distance_to_target_m, best_bearing_deg, target_loc, obstacle_type)
         if target_loc == nil or distance_found_m == nil or distance_to_target_m == nil or best_bearing_deg == nil then
             -- we can't be avoiding if no target, so no loggin required
             return
@@ -173,7 +172,11 @@ function DAAcore.new(deps)
             'BfffffLLfBI',                  -- Formats (L for Lat/Lng, f for Alt)
             '-mmmmdDUm--',                  -- Units (D=lat deg, U=lng deg, m=meter)
             '------GG---',                  -- Multipliers (G=1e-7 for L types)
-            (obstacle_found and 1 or 0),    -- Obs - Obstacle found true/false
+            -- Obs - Obstacle found true/false.  This is the only caller, and it is
+            -- only ever reached once an obstacle has already been found, so this is
+            -- always 1 - kept as a logged field (not removed) since existing log
+            -- analysis tooling reads it, but no longer a parameter here.
+            1,
             distance_found_m,               -- DstF - clearance of the WORST heading in the sweep
             -- DstB - clearance of the heading we CHOSE (HdgB).  A heading that clears every
             -- obstacle reports FLT_MAX, so clamp it to something a log viewer can scale.
@@ -1277,6 +1280,19 @@ function DAAcore.new(deps)
     -- reports back via upvalues, the same style everything else in this closure already uses.
     -- They are what "choose" means in detect_impl()'s gather -> choose -> project -> log shape.
 
+    -- Clear ALL fence/moving-obstacle avoidance state at once - an EPISODE BOUNDARY
+    -- (nothing left to avoid this cycle: the moving obstacle cleared, or the sweep found
+    -- no obstacle at all), not a mid-episode context switch.  resolve_fence_bearing()
+    -- below deliberately does NOT call this: it has just committed a fresh fence bearing
+    -- this cycle and must not discard it, only the moving-obstacle-specific smoothing
+    -- state that no longer applies while on the fence path.
+    local function reset_horizontal_avoidance()
+        last_avoid_bearing_deg = nil
+        reversal_target_sign   = nil
+        committed_side_sign    = 0
+        side_flip_pending      = false
+    end
+
     -- Fences are fixed and containment is safety-critical: a heading slew limit or a committed
     -- side could delay/deflect the turn at a hard boundary and breach it, so this is hysteresis
     -- only (resist_fence_bearing_change), no smoothing, no CPA - the responsive bendy-ruler
@@ -1315,9 +1331,7 @@ function DAAcore.new(deps)
             -- is always tracked on fresh data; near a marginal crossing that can cost a few
             -- extra (slew-limited) heading reversals, which is the safe trade.
             obstacle_avoiding       = nil
-            last_avoid_bearing_deg  = nil
-            committed_side_sign     = 0
-            side_flip_pending       = false
+            reset_horizontal_avoidance()
             return best_bearing_deg, best_distance_m, true
         end
         best_bearing_deg, best_distance_m = refine_avoidance_bearing(
@@ -1356,10 +1370,7 @@ function DAAcore.new(deps)
         local alt_obstacle = detect_altitude_fence()
 
         if obstacle_avoiding == nil then
-            last_avoid_bearing_deg = nil
-            reversal_target_sign = nil
-            committed_side_sign = 0
-            side_flip_pending = false
+            reset_horizontal_avoidance()
             if alt_obstacle ~= nil then
                 -- no horizontal threat, but we are approaching an altitude fence: keep heading to the
                 -- waypoint and let update_target_location() clamp the commanded altitude into the safe band
@@ -1371,13 +1382,12 @@ function DAAcore.new(deps)
             return nil -- no avoidance required
         end
 
-        if (now_ms - now_debug_ms) > 2000 then
-            now_debug_ms = now_ms
-        end
-
         local obstacle_type = obstacle_avoiding.type
+        -- obstacles.is_fence_obstacle() covers the horizontal fence types; the altitude
+        -- fences are handled separately there (see its own comment) but also route
+        -- through resolve_fence_bearing() below, so this ORs them in explicitly.
         local is_fence = obstacle_type ~= nil and (
-            (obstacle_type >= OBSTACLE_TYPE.FENCE_HOME and obstacle_type <= OBSTACLE_TYPE.FENCE_LUA)
+            obstacles.is_fence_obstacle(obstacle_type)
             or obstacle_type == OBSTACLE_TYPE.FENCE_ALT_MAX
             or obstacle_type == OBSTACLE_TYPE.FENCE_ALT_MIN)
 
@@ -1405,7 +1415,7 @@ function DAAcore.new(deps)
         -- instead of clearing it.
         local proj_distance = math.max(distance_to_target_m, plan_m)
         local new_target_loc = location_project(current_loc, best_bearing_deg, proj_distance, target_loc)
-        log_detect_result(true, obstacle_avoiding.distance_m, best_distance_m, distance_to_target_m,
+        log_detect_result(obstacle_avoiding.distance_m, best_distance_m, distance_to_target_m,
                           best_bearing_deg, new_target_loc, obstacle_avoiding.type)
         return new_target_loc
     end
