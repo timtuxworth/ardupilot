@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-013"
+DAAcore.SCRIPT_VERSION = "4.8.0-014"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -1342,6 +1342,15 @@ function DAAcore.new(deps)
 
     -- detect flying objects or fences when flying towards navigation_target_loc
     local function detect_impl()
+        -- Was a horizontal fence being avoided going into this cycle?  Captured before the
+        -- reset just below, for the release-veto check further down: was_avoiding_fence
+        -- deliberately excludes the altitude fences (obstacles.is_fence_obstacle()'s own
+        -- scope) - they have their own separate clamp-and-continue path via
+        -- detect_altitude_fence()/clamp_alt_to_fence() and never hijack the horizontal
+        -- bearing the way a circle/polygon fence does.
+        local was_avoiding_fence = obstacle_avoiding ~= nil
+                and obstacles.is_fence_obstacle(obstacle_avoiding.type)
+
         -- TODO be smarter about re-populating this
         obstacle_avoiding = nil
         aircraft_avoiding = nil
@@ -1368,6 +1377,32 @@ function DAAcore.new(deps)
 
         -- proactively check the altitude fences (vertical clamp-and-continue)
         local alt_obstacle = detect_altitude_fence()
+
+        if obstacle_avoiding == nil then
+            -- The sweep's "clear" verdict projects the aircraft as though it had ALREADY
+            -- turned onto the chosen bearing (location_after_course_change()'s
+            -- instantaneous-bank assumption) - correct once established, but not yet true
+            -- for a large course change still in progress.  Before actually releasing a
+            -- fence avoidance on that verdict alone, confirm the aircraft's CURRENT,
+            -- unprojected position is also clear - not just the future path once the turn
+            -- completes.  Confirmed live 2026-09-04 (log 00000181.BIN): "done" fired and a
+            -- fence breach followed 200ms later, far too soon for that turn to have
+            -- actually finished.  Only one extra probe, and only on the cycle release is
+            -- actually being considered - every other cycle costs nothing extra.
+            if was_avoiding_fence and last_avoid_bearing_deg ~= nil then
+                local near_loc = location_project(current_loc, ground_course_deg, 1, target_loc)
+                local current_distance_m, current_obstacle =
+                        find_closest_obstacle(current_loc, near_loc, detect_m, wind_speed)
+                if current_obstacle ~= nil then
+                    -- Still too close right now: veto the release and keep flying the last
+                    -- committed avoidance bearing for one more cycle rather than accepting
+                    -- the sweep's optimistic direct-to-target answer.
+                    obstacle_avoiding = current_obstacle
+                    best_bearing_deg  = last_avoid_bearing_deg
+                    best_distance_m   = current_distance_m
+                end
+            end
+        end
 
         if obstacle_avoiding == nil then
             reset_horizontal_avoidance()
