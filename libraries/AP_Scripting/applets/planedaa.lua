@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-097"
+SCRIPT_VERSION      = "4.8.0-100"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -574,16 +574,25 @@ local function configure_modules()
         wind_margin_per_ms  = PARAM.WIND_MARG:get(),
     })
     core.configure({
-        alt_cool_ms       = PARAM.ALT_COOL_S:get() * 1000, alt_hyst_m  = PARAM.ALT_HYST_M:get(),
-        bearing_inc_deg   = bearing_inc_deg,    bendy_angle       = PARAM.BR_ANGLE:get(),
-        bendy_ratio       = bendy_ratio,        cpa_min_ms        = PARAM.CPA_MIN:get(),
-        detect_m          = detect_m,           margin_alt_m      = PARAM.MARGIN_ALT:get(),
-        margin_crewed_m   = margin_crewed_m,    margin_fence_m    = margin_fence_m,
-        margin_vertical_m = PARAM.MARGIN_CA_Z:get(), plan_m       = PARAM.PLAN_M:get(),
+        alt_cool_ms       = PARAM.ALT_COOL_S:get() * 1000,
+        alt_hyst_m        = PARAM.ALT_HYST_M:get(),
+        bearing_inc_deg   = bearing_inc_deg,
+        bendy_angle       = PARAM.BR_ANGLE:get(),
+        bendy_ratio       = bendy_ratio,
+        cpa_min_ms        = PARAM.CPA_MIN:get(),
+        detect_m          = detect_m,
+        margin_alt_m      = PARAM.MARGIN_ALT:get(),
+        margin_crewed_m   = margin_crewed_m,
+        margin_fence_m    = margin_fence_m,
+        margin_vertical_m = PARAM.MARGIN_CA_Z:get(),
+        plan_m            = PARAM.PLAN_M:get(),
         roll_limit_deg    = roll_limit_deg,
-        side_hold_s       = side_hold_s,        slew_dps          = slew_dps,
-        slew_urg_s        = PARAM.SLEW_URG:get(), well_clear_xy   = well_clear_xy,
-        well_clear_z      = well_clear_z,       wp_loiter_rad_m   = wp_loiter_rad_m,
+        side_hold_s       = side_hold_s,
+        slew_dps          = slew_dps,
+        slew_urg_s        = PARAM.SLEW_URG:get(),
+        well_clear_xy     = well_clear_xy,
+        well_clear_z      = well_clear_z,
+        wp_loiter_rad_m   = wp_loiter_rad_m,
         lookahead_param_m = lookahead_param_m,
     })
     loiteralt.configure({
@@ -773,16 +782,17 @@ local DAA = {
     local active                = true;
     local current_loc           = ahrs:get_position() -- luacheck: ignore current_loc
     -- Placeholder values only: get_vehicle_state()/DAA.get_vehicle_state() overwrite all
-    -- five of these on the first real cycle, in one place, before anything reads them -
+    -- six of these on the first real cycle, in one place, before anything reads them -
     -- see the comment there.  Kept here only because Lua requires an initial value for
     -- each upvalue; wind is left literally unmeasured (0.0/0.0) rather than fetched
-    -- again from ahrs, so there is exactly one fetch site for wind/airspeed/groundspeed
-    -- in the whole file, not two.
+    -- again from ahrs, so there is exactly one fetch site for wind/airspeed/groundspeed/
+    -- roll in the whole file, not two.
     local groundspeed_ms        = 0.0
     local airspeed_ms           = 0.0
     local ground_course_deg     = 0.0
     local wind_dir_rad          = 0.0
     local wind_speed            = 0.0
+    local current_roll_deg      = 0.0
     local obstacle_avoiding     = nil
     local aircraft_avoiding     = nil
     local trap_active           = false         -- trapped-failsafe is currently controlling the vehicle
@@ -1052,13 +1062,18 @@ local DAA = {
         airspeed_ms                 = ahrs:airspeed_EAS() or groundspeed_ms
         -- Calculate wind direction and speed
         wind_speed, wind_dir_rad    = calculate_windspeed()
+        -- get_roll() is deprecated - use the _rad form.  Needed for the fence
+        -- reversal-in-progress latch (project_planedaa_reversal_awareness): the sweep
+        -- must know which way the aircraft is ACTUALLY banked, not just which way it was
+        -- last told to go.
+        current_roll_deg            = math.deg(ahrs:get_roll_rad())
 
         -- hand the mechanism the picture it searches against, positionally: it keeps its
         -- own copies as locals rather than reading ours through a table, and the sweep
         -- touches them on every one of a hundred-plus probes a cycle, so a table literal
         -- here would be built and thrown away on every single active cycle.
         core.update_state(current_loc, navigation_target_loc, airspeed_ms, groundspeed_ms,
-                          ground_course_deg, wind_speed, wind_dir_rad, now_ms)
+                          ground_course_deg, wind_speed, wind_dir_rad, now_ms, current_roll_deg)
     end
 
 
