@@ -2940,6 +2940,19 @@ function vehicle:is_landing() end
 ---@return boolean -- true on success
 function vehicle:set_crosstrack_start(new_start_location) end
 
+-- Temporarily enable/disable horizontal crosstrack path-following without touching
+-- the previous target location (unlike set_crosstrack_start above), so a vertical
+-- glide-slope calculation that also depends on it is left undisturbed. Save the
+-- prior state with get_crosstrack_enabled() and restore it when done.
+---@param enabled boolean
+---@return boolean -- true on success
+function vehicle:set_crosstrack_enabled(enabled) end
+
+-- Get whether horizontal crosstrack path-following is currently enabled.
+-- Returns nil if the vehicle does not support this.
+---@return boolean|nil
+function vehicle:get_crosstrack_enabled() end
+
 -- Register a custom mode. This behaves like guided mode but will report with a custom number and name
 ---@param number integer -- mode number to use, should be over 100
 ---@param full_name string -- Full mode name
