@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-011"
+DAAcore.SCRIPT_VERSION = "4.8.0-012"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -323,54 +323,66 @@ function DAAcore.new(deps)
     end
 
     --[[
-    Fence-specific hysteresis: persistence (Stage 1) plus a reversal-in-progress latch
-    (Stage 1b) - see project_planedaa_reversal_awareness in memory for the full field
-    report, SITL reproduction and log analysis behind this. Summary: what actually caused
-    the servo-overshoot whipsaw was a REVERSAL of commanded bank direction between
-    consecutive cycles, not refinement in general - so a still-clear committed bearing is
-    only held over a fresh candidate when that candidate would reverse bank direction from
-    what the aircraft is currently, physically holding; a same-direction refinement (still
-    turning the same way, just tightening towards the target) is let through every cycle -
-    BUT ONLY when that fresh candidate is itself genuinely clear (margin-satisfied), not
-    merely "the least-bad option this cycle's sweep happened to find." Confirmed live
-    2026-09-04 (log 00000175.BIN): once the sweep can no longer find a fully-clear
-    heading near a boundary it is skirting, it falls back to its best-available
-    candidate every cycle - and if that candidate happens to keep the same bank
-    direction, the ORIGINAL same-direction exemption let it through completely
-    unresisted, one shrinking-clearance "best available" replacing the last, walking
-    the achieved clearance down from a few metres to a breach with no reversal (and so
-    no Stage 1b latch) ever in the picture. Same-direction refinement is safe to let
-    through unconditionally only while it is actually choosing a clear path; once the
-    sweep is reduced to "best of the unsafe options," a same-direction change gets the
-    same hold-while-the-old-one-still-clears treatment a reversal already gets.
+    Fence-specific hysteresis: persistence (Stage 1), a reversal-in-progress latch
+    (Stage 1b), and a bank-aware reversal transition (Stage 2, see
+    location_for_candidate() above) - see project_planedaa_reversal_awareness in memory
+    for the full field report, SITL reproductions and log analyses behind this (three
+    separate live breaches, 2026-09-04, each closing a different gap in what came
+    before it).
+
+    Persistence rests on TWO signals, not one, because they catch different failures:
+
+    1. held_is_clear (obstacle_found == nil from probe_bearing() - the same
+       authoritative, wind-aware signal every other candidate in the sweep is judged
+       by): true only when the held bearing is FULLY clear.  Gates the reversal hold
+       below - a genuine bank reversal is only resisted while the held bearing remains
+       fully safe; the moment it is not, the latch below must not keep flying an
+       unsafe path just to avoid a second reversal.
+    2. The CONTESTED_ZONE_M comparison below: while still within a few standoffs of a
+       boundary, a fresh candidate - reversal or same-direction - is refused whenever
+       it offers LESS clearance than the currently held one, unless the held bearing
+       has itself crossed into an actual violation.  held_is_clear alone cannot do this
+       job: every retest in this function passes allow_straight=false, so even a fully
+       safe candidate returns a large FINITE sum (see probe_bearing()'s own comment),
+       never the FLT_MAX sentinel - meaning held_is_clear is essentially always false
+       throughout an active, still-safe approach, not just at its unsafe end.  Gating
+       persistence on it alone (an earlier version of this fix did exactly that) left
+       a same-direction refinement completely unresisted for the WHOLE eroding
+       approach: one shrinking-clearance "best available" replacing the last, walking
+       achieved clearance from tens of metres down to a live breach with no reversal
+       (and so no Stage 1b latch) ever entering the picture - confirmed on two separate
+       SITL flights on the SAME day as the fix that turned out not to close this gap.
+
+    Both checks are needed: held_is_clear (1) is the right bar for "is a reversal
+    actually required," since instantaneous roll-based whipsaw detection has nothing to
+    do with distance; the numeric comparison (2) is the right bar for "is this specific
+    change making things worse," which a boolean cannot express and which does not
+    care whether the change is a reversal or not.  CONTESTED_ZONE_M bounds (2) to the
+    genuinely close-in case: far-field retest numbers fluctuate cycle to cycle purely
+    from position noise (two "hundreds of metres clear" evaluations are never exactly
+    equal), and comparing those directly would eventually reproduce the earlier,
+    already-fixed 16-23s-straight-flight regression this whole function exists to
+    avoid (an unconditional hold-while-clear, with no same-direction escape at all).
+
     Only a MATERIAL course change (>= bendy_angle, the same DAA_BR_ANGLE threshold used
     elsewhere in this file) is ever classified as needing a reversal at all - a small
     correction with the opposite arithmetic sign is not itself a whipsaw and must not
-    arm or re-arm the latch.
-    (An earlier version held the committed bearing unconditionally whenever clear, with no
-    same-direction escape - that produced a real SITL regression: a single held bearing
-    stayed clear of a small exclusion circle for 16-23s of straight flight, well past the
-    circle, before the aircraft ever turned back towards the target.) Once a genuine
-    reversal is accepted, its bank direction is latched until the aircraft's own roll
-    reaches THAT side - merely passing back through wings-level does not confirm the
-    reversal happened, it only confirms the old bank was released, and releasing the
-    latch there let a second, opposite reversal back in before the first one completed
-    (a real field breach, not a hypothetical - two live SITL flights both showed dense
-    clusters of sub-second bank reversals right before a fence breach). Stage 2 (giving
-    the turn-lead model a bank-aware transition, clearance-checked in its own right) is
-    not yet built - this latch is an interim guard, not a substitute for it, and per
-    review MUST be breakable the moment the held bearing itself stops being clear (a
-    lock that can hold an unsafe path is worse than no lock).
+    arm or re-arm the latch.  Once a genuine reversal is accepted, its bank direction is
+    latched until the aircraft's own roll reaches THAT side - merely passing back
+    through wings-level does not confirm the reversal happened, it only confirms the
+    old bank was released, and releasing the latch there let a second, opposite
+    reversal back in before the first one completed (a real field breach, not a
+    hypothetical). Stage 2 (location_for_candidate() above) gives the turn-lead model a
+    bank-aware transition so a genuinely-required reversal's own safety assessment
+    accounts for the time the transition itself takes, rather than assuming the target
+    bank is established instantaneously - but per review this latch MUST still be
+    breakable the moment the held bearing itself stops being clear (a lock that can
+    hold an unsafe path is worse than no lock).
 
-    "Still clear" is obstacle_found == nil from probe_bearing() - the same authoritative
-    signal every other candidate in the sweep is judged by, already wind-aware (daaobs.lua
-    scales the margin by DAA_WIND_MARG before ever deciding obstacle_found) - not a
-    distance-vs-margin comparison duplicated here, which would need to reproduce that
-    scaling exactly and drift out of sync with it if daaobs.lua's margin logic ever changes.
-
-    NEEDS TESTING against log169 before this is trusted alone - see the memory file for
-    what to measure (minimum achieved fence clearance and margin compliance, not just
-    whether the roll oscillation disappears).
+    NEEDS TESTING against a fresh live flight before this is trusted alone - the first
+    two "fixes" here each looked complete against their own reproduction and were not;
+    see the memory file for what to measure (minimum achieved fence clearance across
+    several consecutive laps, not just whether one particular symptom disappears).
 
     Returns (bearing, distance): the distance is the clearance of WHICHEVER bearing is
     returned, not of the candidate that was proposed.  Getting this right matters for
@@ -449,30 +461,39 @@ function DAAcore.new(deps)
             return bearing_orig_deg, distance_previous_m
         end
 
-        -- A second probe, of the FRESH candidate this time - not to duplicate the sweep's
-        -- own margin check, but because the sweep can hand back its best-AVAILABLE
-        -- candidate (obstacle_found ~= nil) rather than a genuinely clear one whenever it
-        -- cannot find a fully-clear heading this cycle, and resolve_fence_bearing() does
-        -- not otherwise tell this function which kind it received.  Same-direction
-        -- refinement is only safe to wave through unconditionally while it is actually
-        -- choosing a clear path; once it degrades to "best of the unsafe options," letting
-        -- it straight through is exactly what walked clearance down to a live breach with
-        -- no reversal (and so no Stage 1b latch) ever entering the picture.
-        if held_is_clear and not needs_reversal then
-            local _, _, fresh_obstacle = probe_bearing(bearing_deg, bearing_deg, FLT_MAX, target_loc, false)
-            if fresh_obstacle ~= nil then
-                return bearing_orig_deg, distance_previous_m
-            end
+        -- Contested-zone persistence: this is what actually stops a same-direction
+        -- refinement from creeping achieved clearance down cycle by cycle with no
+        -- single cycle ever individually alarming - confirmed live 2026-09-04 (two
+        -- separate SITL flights, both after the reversal-only fix above): a same-
+        -- direction candidate is essentially NEVER "held_is_clear" once genuinely close
+        -- to a boundary (a retest here always uses allow_straight=false, so even a
+        -- fully-safe candidate returns a large FINITE sum, not probe_bearing()'s FLT_MAX
+        -- short-circuit - see probe_bearing()'s own comment), so gating persistence on
+        -- that boolean left same-direction refinement completely unresisted for the
+        -- entire eroding approach, not just its final unsafe moment.
+        --
+        -- So: while still within a few standoffs of the boundary, refuse a fresh
+        -- candidate that offers LESS clearance than the currently held one, whatever
+        -- its direction - unless the held bearing has itself crossed into an actual
+        -- violation (distance_previous_m <= 0), which still overrides everything, same
+        -- as the reversal case above. Bounded to CONTESTED_ZONE_M so it never touches
+        -- the far-field case the numeric retest is noisy in (two "fully safe, hundreds
+        -- of metres clear" evaluations from slightly different positions are never
+        -- exactly equal, and comparing them directly out there would eventually
+        -- reproduce the original 16-23s-straight-flight regression this whole function
+        -- exists to avoid).
+        local CONTESTED_ZONE_M = margin_fence_m * 4
+        if distance_previous_m > 0 and distance_previous_m < CONTESTED_ZONE_M
+                and distance_found_m < distance_previous_m then
+            return bearing_orig_deg, distance_previous_m
         end
 
-        -- Either the committed bearing is no longer clear (a change is required,
-        -- whatever its size), or it is still clear but the fresh candidate keeps the
-        -- SAME bank direction AND is itself genuinely clear - a same-side refinement
-        -- between two clear paths is not the whipsaw this guards against, so it is let
-        -- through every cycle rather than holding the aircraft on one fixed bearing
-        -- indefinitely just because it happens to stay clear (that held a SITL aircraft
-        -- on a single straight heading for 16-23s past a small exclusion circle - see
-        -- project_planedaa_reversal_awareness in memory).
+        -- Either the committed bearing is no longer clear/has crossed into violation (a
+        -- change is required, whatever its size), or the fresh candidate is at least as
+        -- good as what is already held - accepted every cycle rather than holding the
+        -- aircraft on one fixed bearing indefinitely just because it happens to stay
+        -- clear (that held a SITL aircraft on a single straight heading for 16-23s past
+        -- a small exclusion circle - see project_planedaa_reversal_awareness in memory).
         -- If this transition itself needs a reversal, latch that direction so a fresh
         -- sweep result next cycle cannot reverse it again before the aircraft responds.
         if needs_reversal then
