@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-015"
+DAAcore.SCRIPT_VERSION = "4.8.0-016"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -62,6 +62,10 @@ local MIN_TURN_CHORD_M    = 5.0
 -- Clamp for the clearances written to DAAD: "no obstacle at all" is FLT_MAX internally and
 -- would wreck the autoscaling of any plot it shares an axis with.
 local LOG_CLEARANCE_MAX_M = 9999.0
+-- How far ahead validate_horizontal_release() projects the aircraft's CURRENT bank
+-- before deciding a fence is genuinely clear - long enough to matter physically, short
+-- enough to stay a "where am I actually about to be" check rather than a second sweep.
+local VALIDATE_PROJECTION_S = 2.0
 
 function DAAcore.new(deps)
     local self = {}
@@ -115,6 +119,13 @@ function DAAcore.new(deps)
     -- (+1/-1) a fence-avoidance reversal is currently committed to reaching
     local reversal_target_sign      = nil
     local reversal_since_ms         = uint32_t(0)
+    -- Last bearing committed specifically to a FENCE, kept independent of
+    -- last_avoid_bearing_deg (which a moving-obstacle episode overwrites/clears via
+    -- reset_horizontal_avoidance()).  Set only by resolve_fence_bearing(), cleared only
+    -- once validate_horizontal_release() confirms the fence is genuinely clear - so a
+    -- fence's relevance survives a moving obstacle briefly outranking it in the same-cycle
+    -- single-winner obstacle choice.  See validate_horizontal_release()'s own comment.
+    local fence_hold_bearing_deg    = nil
 
     local function configure(settings)
         alt_cool_ms            = settings.alt_cool_ms
@@ -1295,7 +1306,12 @@ function DAAcore.new(deps)
     -- no obstacle at all), not a mid-episode context switch.  resolve_fence_bearing()
     -- below deliberately does NOT call this: it has just committed a fresh fence bearing
     -- this cycle and must not discard it, only the moving-obstacle-specific smoothing
-    -- state that no longer applies while on the fence path.
+    -- state that no longer applies while on the fence path.  fence_hold_bearing_deg is
+    -- deliberately NOT one of these fields either, for the same reason but stronger: it
+    -- must survive being called from resolve_moving_bearing()'s "obstacle opening"
+    -- branch below, so a moving obstacle outranking a still-relevant fence for a cycle
+    -- or two cannot erase the fence's own memory.  Only validate_horizontal_release()
+    -- clears it, and only once it has confirmed the fence is genuinely clear.
     local function reset_horizontal_avoidance()
         last_avoid_bearing_deg = nil
         reversal_target_sign   = nil
@@ -1314,6 +1330,9 @@ function DAAcore.new(deps)
         best_bearing_deg, best_distance_m = resist_fence_bearing_change(
             last_avoid_bearing_deg, best_bearing_deg, best_distance_m, target_loc)
         last_avoid_bearing_deg  = best_bearing_deg
+        -- Independent of last_avoid_bearing_deg - see fence_hold_bearing_deg's own
+        -- declaration and reset_horizontal_avoidance()'s comment for why.
+        fence_hold_bearing_deg  = best_bearing_deg
         committed_side_sign     = 0
         side_flip_pending       = false
         return best_bearing_deg, best_distance_m
@@ -1350,17 +1369,60 @@ function DAAcore.new(deps)
         return best_bearing_deg, best_distance_m, false
     end
 
+    -- One shared release-validation path for every way a horizontal avoidance can lapse
+    -- this cycle - the sweep finding nothing at all, or a moving obstacle opening up -
+    -- called from detect_impl() only once obstacle_avoiding has actually become nil,
+    -- never while a fence or an unresolved moving obstacle is still the live winner.
+    -- Exists because the single-obstacle-per-cycle choice can hand the cycle to a
+    -- moving obstacle while a fence is still close: that fence's own eventual release
+    -- must not go unchecked just because the fence was not this cycle's winner.
+    -- fence_hold_bearing_deg carries "a fence was recently relevant" independently of
+    -- whichever obstacle actually won - see its declaration - and this is the only
+    -- place that clears it.
+    --
+    -- The check itself projects a real continuation of the aircraft's CURRENT bank for
+    -- VALIDATE_PROJECTION_S seconds - not location_after_course_change()'s
+    -- instantaneous-bank assumption the sweep's own candidates use, and not the 1 m
+    -- stub this replaced - so it reflects where a turn already in progress will
+    -- actually put the aircraft before committing to the release.
+    -- Confirmed live 2026-09-04 (logs 00000183.BIN, 00000184.BIN): a drone briefly
+    -- outranked an active fence avoidance, the drone's own release went unchecked
+    -- against the fence, and the aircraft - still banked from avoiding the drone - flew
+    -- into the fence 1-2 s later.
+    local function validate_horizontal_release(target_loc, candidate_bearing_deg, candidate_distance_m)
+        if fence_hold_bearing_deg == nil then
+            return candidate_bearing_deg, candidate_distance_m, nil
+        end
+
+        local current_sign = bank_sign(current_roll_deg)
+        local near_loc
+        if current_sign ~= 0 and roll_rate_dps > 0 then
+            local ground_speed_ms = effective_groundspeed(airspeed_ms, ground_course_deg, wind_dir_rad, wind_speed)
+            near_loc = arc_projection(current_loc, ground_course_deg, current_sign,
+                    VALIDATE_PROJECTION_S, airspeed_ms, ground_speed_ms,
+                    math.abs(current_roll_deg), target_loc)
+        else
+            -- Wings-level (or no usable roll-rate bound): continuing straight is the
+            -- honest projection.
+            near_loc = location_project(current_loc, ground_course_deg,
+                    math.max(airspeed_ms, 1.0) * VALIDATE_PROJECTION_S, target_loc)
+        end
+
+        local hold_distance_m, hold_obstacle = find_closest_obstacle(current_loc, near_loc, detect_m, wind_speed)
+        if hold_obstacle == nil then
+            -- Genuinely clear on the path the aircraft is actually flying: the fence
+            -- episode is really over.
+            fence_hold_bearing_deg = nil
+            return candidate_bearing_deg, candidate_distance_m, nil
+        end
+
+        -- Still too close on the real trajectory: keep the fence's last committed
+        -- bearing for one more cycle rather than accepting this cycle's release.
+        return fence_hold_bearing_deg, hold_distance_m, hold_obstacle
+    end
+
     -- detect flying objects or fences when flying towards navigation_target_loc
     local function detect_impl()
-        -- Was a horizontal fence being avoided going into this cycle?  Captured before the
-        -- reset just below, for the release-veto check further down: was_avoiding_fence
-        -- deliberately excludes the altitude fences (obstacles.is_fence_obstacle()'s own
-        -- scope) - they have their own separate clamp-and-continue path via
-        -- detect_altitude_fence()/clamp_alt_to_fence() and never hijack the horizontal
-        -- bearing the way a circle/polygon fence does.
-        local was_avoiding_fence = obstacle_avoiding ~= nil
-                and obstacles.is_fence_obstacle(obstacle_avoiding.type)
-
         -- TODO be smarter about re-populating this
         obstacle_avoiding = nil
         aircraft_avoiding = nil
@@ -1388,30 +1450,37 @@ function DAAcore.new(deps)
         -- proactively check the altitude fences (vertical clamp-and-continue)
         local alt_obstacle = detect_altitude_fence()
 
-        if obstacle_avoiding == nil then
-            -- The sweep's "clear" verdict projects the aircraft as though it had ALREADY
-            -- turned onto the chosen bearing (location_after_course_change()'s
-            -- instantaneous-bank assumption) - correct once established, but not yet true
-            -- for a large course change still in progress.  Before actually releasing a
-            -- fence avoidance on that verdict alone, confirm the aircraft's CURRENT,
-            -- unprojected position is also clear - not just the future path once the turn
-            -- completes.  Confirmed live 2026-09-04 (log 00000181.BIN): "done" fired and a
-            -- fence breach followed 200ms later, far too soon for that turn to have
-            -- actually finished.  Only one extra probe, and only on the cycle release is
-            -- actually being considered - every other cycle costs nothing extra.
-            if was_avoiding_fence and last_avoid_bearing_deg ~= nil then
-                local near_loc = location_project(current_loc, ground_course_deg, 1, target_loc)
-                local current_distance_m, current_obstacle =
-                        find_closest_obstacle(current_loc, near_loc, detect_m, wind_speed)
-                if current_obstacle ~= nil then
-                    -- Still too close right now: veto the release and keep flying the last
-                    -- committed avoidance bearing for one more cycle rather than accepting
-                    -- the sweep's optimistic direct-to-target answer.
-                    obstacle_avoiding = current_obstacle
-                    best_bearing_deg  = last_avoid_bearing_deg
-                    best_distance_m   = current_distance_m
-                end
+        local obstacle_type = obstacle_avoiding ~= nil and obstacle_avoiding.type or nil
+        -- obstacles.is_fence_obstacle() covers the horizontal fence types; the altitude
+        -- fences are handled separately there (see its own comment) but also route
+        -- through resolve_fence_bearing() below, so this ORs them in explicitly.
+        local is_fence = obstacle_type ~= nil and (
+            obstacles.is_fence_obstacle(obstacle_type)
+            or obstacle_type == OBSTACLE_TYPE.FENCE_ALT_MAX
+            or obstacle_type == OBSTACLE_TYPE.FENCE_ALT_MIN)
+
+        if obstacle_avoiding ~= nil and is_fence then
+            best_bearing_deg, best_distance_m =
+                    resolve_fence_bearing(target_loc, best_bearing_deg, best_distance_m)
+        elseif obstacle_avoiding ~= nil then
+            local obstacle_gone
+            best_bearing_deg, best_distance_m, obstacle_gone =
+                    resolve_moving_bearing(bearing_deg, target_loc, best_bearing_deg, best_distance_m)
+            if obstacle_gone then
+                obstacle_avoiding = nil
             end
+        end
+
+        if obstacle_avoiding == nil then
+            -- Either the sweep found nothing this cycle, or a moving obstacle just
+            -- opened up - both are a horizontal release, and neither can be trusted on
+            -- its own: the sweep's "clear" verdict assumes the aircraft has ALREADY
+            -- turned onto the chosen bearing, and a moving obstacle winning the
+            -- single-obstacle choice for the last cycle or two can silently outrank a
+            -- fence that is still close.  validate_horizontal_release() is the one
+            -- place both are checked against reality before being accepted.
+            best_bearing_deg, best_distance_m, obstacle_avoiding =
+                    validate_horizontal_release(target_loc, best_bearing_deg, best_distance_m)
         end
 
         if obstacle_avoiding == nil then
@@ -1425,27 +1494,6 @@ function DAAcore.new(deps)
                 return alt_target_loc
             end
             return nil -- no avoidance required
-        end
-
-        local obstacle_type = obstacle_avoiding.type
-        -- obstacles.is_fence_obstacle() covers the horizontal fence types; the altitude
-        -- fences are handled separately there (see its own comment) but also route
-        -- through resolve_fence_bearing() below, so this ORs them in explicitly.
-        local is_fence = obstacle_type ~= nil and (
-            obstacles.is_fence_obstacle(obstacle_type)
-            or obstacle_type == OBSTACLE_TYPE.FENCE_ALT_MAX
-            or obstacle_type == OBSTACLE_TYPE.FENCE_ALT_MIN)
-
-        if is_fence then
-            best_bearing_deg, best_distance_m =
-                    resolve_fence_bearing(target_loc, best_bearing_deg, best_distance_m)
-        else
-            local obstacle_gone
-            best_bearing_deg, best_distance_m, obstacle_gone =
-                    resolve_moving_bearing(bearing_deg, target_loc, best_bearing_deg, best_distance_m)
-            if obstacle_gone then
-                return nil
-            end
         end
 
         -- Where to put the commanded target along the bearing we picked - DAA_PLAN_M, which
