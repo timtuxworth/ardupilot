@@ -17,7 +17,7 @@
 
 local DAAgeometry = {}
 
-DAAgeometry.SCRIPT_VERSION = "4.8.0-002"
+DAAgeometry.SCRIPT_VERSION = "4.8.0-003"
 DAAgeometry.SCRIPT_NAME = "DAA geometry"
 DAAgeometry.SCRIPT_NAME_SHORT = "DAAgeo"
 
@@ -105,6 +105,58 @@ function DAAgeometry.turn_radius_m(speed_ms, roll_limit_deg)
         return 0.0
     end
     return (speed_ms * speed_ms) / (GRAVITY_MSS * math.tan(math.rad(roll_limit_deg)))
+end
+
+-- Bound on ACHIEVED roll rate (deg/s), used to model how long a bank reversal actually
+-- takes rather than assuming it is instantaneous.  RLL2SRV_RMAX is the airframe's own
+-- configured cap when set; ArduPlane ships it at 0 ("rate limit disabled") by default, so
+-- the zero case is the actual case that needs handling here, not an edge case.  The
+-- fallback, roll_limit_deg / tconst_s, is the rate that would cover the full commanded
+-- roll range in one roll-controller time constant - the same order-of-magnitude estimate
+-- AP_RollController's own P gain uses when RLL2SRV_P is left at zero (P = 1/TCONST).  Like
+-- RLL2SRV_RMAX itself, this bounds DEMANDED rate, not a guarantee of ACHIEVED rate - but a
+-- real, speed-and-airframe-derived number is a large improvement over the instantaneous
+-- (infinite-rate) assumption it replaces.  Returns 0 when nothing usable is configured,
+-- and the caller decides what that means.
+function DAAgeometry.roll_rate_dps(rmax_dps, roll_limit_deg, tconst_s)
+    if rmax_dps ~= nil and rmax_dps > 0 then
+        return rmax_dps
+    end
+    if roll_limit_deg == nil or roll_limit_deg <= 0 or tconst_s == nil or tconst_s <= 0 then
+        return 0.0
+    end
+    return roll_limit_deg / tconst_s
+end
+
+-- Displace from_loc along a constant-bank turn held for duration_s seconds at roll_deg,
+-- starting on heading start_heading_deg and turning in direction turn_sign (+1 right /
+-- -1 left).  Returns (end_loc, end_heading_deg).  Same R*sin(th)/R*(1-cos(th)) chord
+-- decomposition as a full course-change projection, but parameterised by an explicit TIME
+-- and ROLL ANGLE rather than derived from the course change itself - the primitive a
+-- bank-aware, multi-segment transition (current bank -> wings level -> target bank ->
+-- constant-bank arc) is built from one segment at a time.  Degrades to straight flight for
+-- the same duration when there is no usable turn rate (roll_deg too small, or no speed) or
+-- no time to cover.
+function DAAgeometry.arc_projection(from_loc, start_heading_deg, turn_sign, duration_s,
+                                     airspeed_ms, ground_speed_ms, roll_deg, to_loc)
+    if duration_s <= 0 or ground_speed_ms <= 0 then
+        return from_loc, start_heading_deg
+    end
+    local arc_length_m     = ground_speed_ms * duration_s
+    local rate_of_turn_dps = DAAgeometry.max_turn_rate_dps(airspeed_ms, roll_deg)
+    if rate_of_turn_dps <= 0 then
+        return DAAgeometry.location_project(from_loc, start_heading_deg, arc_length_m, to_loc), start_heading_deg
+    end
+    local turn_angle_deg = turn_sign * rate_of_turn_dps * duration_s
+    local turn_rad        = math.rad(math.abs(turn_angle_deg))
+    if turn_rad < 1e-6 then
+        return DAAgeometry.location_project(from_loc, start_heading_deg, arc_length_m, to_loc), start_heading_deg
+    end
+    local radius_m = arc_length_m / turn_rad
+    local side_deg  = (turn_angle_deg >= 0) and (start_heading_deg + 90) or (start_heading_deg - 90)
+    local mid_loc   = DAAgeometry.location_project(from_loc, start_heading_deg, radius_m * math.sin(turn_rad), to_loc)
+    local end_loc   = DAAgeometry.location_project(mid_loc, side_deg, radius_m * (1.0 - math.cos(turn_rad)), to_loc)
+    return end_loc, DAAgeometry.wrap_360(start_heading_deg + turn_angle_deg)
 end
 
 --[[
