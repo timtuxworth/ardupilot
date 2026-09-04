@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-004"
+DAAcore.SCRIPT_VERSION = "4.8.0-007"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -96,7 +96,7 @@ function DAAcore.new(deps)
     local well_clear_z, wp_loiter_rad_m, lookahead_param_m
 
     -- per-cycle vehicle state, pushed in by update_state()
-    local current_loc, navigation_target_loc, airspeed_ms, groundspeed_ms, ground_course_deg, wind_speed, wind_dir_rad, now_ms
+    local current_loc, navigation_target_loc, airspeed_ms, groundspeed_ms, ground_course_deg, wind_speed, wind_dir_rad, now_ms, current_roll_deg
 
     -- the sweep's own state: nothing outside this module reads any of it
     local obstacle_avoiding         = nil
@@ -111,6 +111,10 @@ function DAAcore.new(deps)
     local now_debug_ms              = millis()
     local current_lookahead         = 0
     local lookahead_set_m           = nil
+    -- reversal-in-progress latch (see resist_bearing_change): nil, or the bank sign
+    -- (+1/-1) a fence-avoidance reversal is currently committed to reaching
+    local reversal_target_sign      = nil
+    local reversal_since_ms         = uint32_t(0)
 
     local function configure(settings)
         alt_cool_ms            = settings.alt_cool_ms
@@ -145,7 +149,7 @@ function DAAcore.new(deps)
     -- table literal here would be the single most frequent allocation in the script.
     local function update_state(new_current_loc, new_navigation_target_loc, new_airspeed_ms,
                                  new_groundspeed_ms, new_ground_course_deg,
-                                 new_wind_speed, new_wind_dir_rad, new_now_ms)
+                                 new_wind_speed, new_wind_dir_rad, new_now_ms, new_current_roll_deg)
         current_loc            = new_current_loc
         navigation_target_loc  = new_navigation_target_loc
         airspeed_ms            = new_airspeed_ms
@@ -154,6 +158,7 @@ function DAAcore.new(deps)
         wind_speed             = new_wind_speed
         wind_dir_rad           = new_wind_dir_rad
         now_ms                 = new_now_ms
+        current_roll_deg       = new_current_roll_deg
     end
 
     local function log_detect_result(obstacle_found, distance_found_m, best_distance_m, distance_to_target_m, best_bearing_deg, target_loc, obstacle_type)
@@ -239,11 +244,32 @@ function DAAcore.new(deps)
         return math.min(avoid_step1_m, target_distance + math.min(margin_fence_m / 2, 100))
     end
 
-    -- Forward-declared: resist_bearing_change() (defined here, ahead of probe_bearing in
-    -- the file) needs to call it, and needs the SAME turn-lead-aware measurement probe_bearing
-    -- gives every other candidate in the sweep.  Assigned without "local" at its usual
+    -- Forward-declared: resist_bearing_change() and resist_fence_bearing_change() (defined
+    -- here, ahead of probe_bearing in the file) need to call it, and need the SAME
+    -- turn-lead-aware measurement probe_bearing gives every other candidate in the sweep.
+    -- Assigned without "local" at its usual
     -- location further down; this is the upvalue resist_bearing_change closes over.
     local probe_bearing
+
+    -- Sign of the bank the aircraft is CURRENTLY, physically holding - not the sign of any
+    -- commanded/desired roll.  A deadband near wings-level reads as "uncommitted" (0):
+    -- right at a reversal's crossing point the true roll flickers around zero, and calling
+    -- that noise a side would thrash the reversal latch below on exactly the transition it
+    -- exists to protect.  nil (no roll telemetry) also reads as 0 - fails toward the
+    -- pre-latch behaviour (Stage 1 alone) rather than toward a lock that can never release.
+    local ROLL_DEADBAND_DEG = 10.0
+    local function bank_sign(roll_deg)
+        if roll_deg == nil or math.abs(roll_deg) < ROLL_DEADBAND_DEG then
+            return 0
+        end
+        return (roll_deg > 0) and 1 or -1
+    end
+    -- Safety valve for the reversal latch below: release it unconditionally if it has been
+    -- held this long without the aircraft's own roll confirming the reversal happened -
+    -- degrades to Stage 1 alone rather than a lock that can never clear, if roll telemetry
+    -- or the sign convention assumed here ever disagrees with reality.  Generous relative
+    -- to any reversal this airframe class should need (a few seconds), not tight.
+    local MAX_REVERSAL_LATCH_MS = 6000
 
     --[[
     This function is called when BendyRuler has found a bearing which is obstacles free at at least lookahead_step1_dist and  then lookahead_step2_dist from the present location
@@ -253,11 +279,15 @@ function DAAcore.new(deps)
     unless the new margin is atleast _bendy_ratio times better than the margin with previously calculated bearing.
     We return true if we have resisted the change and will follow the last calculated bearing.
 
+    Used by the MOVING-obstacle path only (refine_avoidance_bearing()) - the fence path has
+    its own resist_fence_bearing_change() below, with different hysteresis rules.  A moving
+    obstacle's geometry keeps changing independently of the aircraft, so re-optimizing
+    toward the clearest available heading each cycle is appropriate here in a way it is not
+    for a fixed fence; refine_avoidance_bearing() also layers its own side-commit and
+    slew-rate smoothing on top of whatever this returns.
+
     Returns (bearing, distance): the distance is the clearance of WHICHEVER bearing is
-    returned, not of the candidate that was proposed.  Getting this right matters for
-    logging: DAAD.DstB used to be left as the proposed candidate's distance even on the
-    "stay the course" path, so it could read as fully clear while the bearing actually
-    being flown was not - see project_planedaa_standoff_not_achieved in memory.
+    returned, not of the candidate that was proposed.
     --]]
     local function resist_bearing_change(bearing_orig_deg, bearing_deg, distance_found_m, target_loc)
         if bearing_orig_deg == nil then
@@ -276,37 +306,111 @@ function DAAcore.new(deps)
             -- no current position to measure against, accept the proposed bearing
             return bearing_deg, distance_found_m
         end
-        -- Measure clearance in the previously committed direction using the SAME
-        -- turn-lead-aware probe every other candidate in the sweep goes through, not a
-        -- bare straight-line offset.  A straight-line retest here compared an
-        -- already-turn-corrected new candidate against an uncorrected retest of the old
-        -- one - biasing this decision toward "stay the course" whenever the committed
-        -- bearing itself needed the turn lead to read accurately, which is exactly the
-        -- geometry of continuing to track an avoidance already under way.
-        --
-        -- Pass FLT_MAX, not the real distance to the navigation target, as probe_bearing's
-        -- full_distance.  That argument exists so a NEW candidate step does not overshoot a
-        -- nearby target; it has nothing to do with this retest, whose only question is
-        -- whether the OLD committed bearing is still safe over the full look-ahead.  Passing
-        -- the real distance here made the retest see only current_lookahead's near end - a
-        -- fence sitting just past that bounded window went undetected until 1-2 cycles
-        -- before the aircraft reached it.  Measured on a live SITL flight: the equivalent
-        -- straight-line probe (what shipped before this file's turn-lead work) would have
-        -- flagged the same bearing unsafe 8 seconds earlier, well before the eventual breach.
         local distance_previous_m = probe_bearing(bearing_orig_deg, bearing_orig_deg,
                                                    FLT_MAX, target_loc, false)
         -- Only switch sides if the new direction is significantly better: POSITIVE clearance
-        -- and bendy_ratio times clearer than continuing.  The positive-clearance requirement is
+        -- and bendy_ratio times clearer than continuing. The positive-clearance requirement is
         -- what makes this negative-aware: when hugging a boundary both clearances read near-zero
-        -- or negative and a plain ratio test flip-flops every cycle (the fence-skirt oscillation),
-        -- so we hold the committed escape direction through the hug.  It still switches away from
+        -- or negative and a plain ratio test flip-flops every cycle. It still switches away from
         -- a committed side that is itself breaching (distance_previous_m < 0) towards a side that
         -- actually clears (distance_found_m > 0), so containment is preserved.
         if distance_found_m > 0 and distance_found_m >= bendy_ratio * distance_previous_m then
             return bearing_deg, distance_found_m
         end
-        -- new direction is not significantly better — stay the course
         return bearing_orig_deg, distance_previous_m
+    end
+
+    --[[
+    Fence-specific hysteresis: persistence (Stage 1) plus a reversal-in-progress latch
+    (Stage 1b) - see project_planedaa_reversal_awareness in memory for the full field
+    report, SITL reproduction and log analysis behind this. Summary: a fence does not need
+    the clearest heading re-chosen every cycle, it needs one that STAYS clear, so a still-
+    clear committed bearing is kept even when a fresh candidate would do "better"; and once
+    a genuine reversal is accepted, its bank direction is latched until the aircraft's own
+    roll confirms the reversal happened, so a second reversal cannot land before the first
+    one completes. Stage 2 (giving the turn-lead model a bank-aware transition, clearance-
+    checked in its own right) is not yet built - this latch is an interim guard, not a
+    substitute for it, and per review MUST be breakable the moment the held bearing itself
+    stops being clear (a lock that can hold an unsafe path is worse than no lock).
+
+    "Still clear" is obstacle_found == nil from probe_bearing() - the same authoritative
+    signal every other candidate in the sweep is judged by, already wind-aware (daaobs.lua
+    scales the margin by DAA_WIND_MARG before ever deciding obstacle_found) - not a
+    distance-vs-margin comparison duplicated here, which would need to reproduce that
+    scaling exactly and drift out of sync with it if daaobs.lua's margin logic ever changes.
+
+    NEEDS TESTING against log169 before this is trusted alone - see the memory file for
+    what to measure (minimum achieved fence clearance and margin compliance, not just
+    whether the roll oscillation disappears).
+
+    Returns (bearing, distance): the distance is the clearance of WHICHEVER bearing is
+    returned, not of the candidate that was proposed.  Getting this right matters for
+    logging: DAAD.DstB used to be left as the proposed candidate's distance even on the
+    "stay the course" path, so it could read as fully clear while the bearing actually
+    being flown was not - see project_planedaa_standoff_not_achieved in memory.
+    --]]
+    local function resist_fence_bearing_change(bearing_orig_deg, bearing_deg, distance_found_m, target_loc)
+        if bearing_orig_deg == nil then
+            -- no prior commitment, accept the proposed bearing
+            reversal_target_sign = nil
+            return bearing_deg, distance_found_m
+        end
+        if distance_found_m == 0 then
+            -- obstacle is immediate, must manoeuvre regardless - overrides any latch
+            reversal_target_sign = nil
+            return bearing_deg, distance_found_m
+        end
+        if current_loc == nil then
+            -- no current position to measure against, accept the proposed bearing
+            return bearing_deg, distance_found_m
+        end
+
+        -- One retest of the committed bearing, reused below for both the latch's own
+        -- safety check and the general persistence check - never two probes in one call,
+        -- and never let a multi-value tail call balloon this function's own return past
+        -- its documented (bearing, distance) contract.
+        local distance_previous_m, _, obstacle_previous = probe_bearing(
+                bearing_orig_deg, bearing_orig_deg, FLT_MAX, target_loc, false)
+        local held_is_clear = (obstacle_previous == nil)
+
+        if reversal_target_sign ~= nil then
+            local holding_sign = bank_sign(current_roll_deg)
+            if holding_sign == 0 or holding_sign == reversal_target_sign
+                    or (now_ms - reversal_since_ms) > MAX_REVERSAL_LATCH_MS then
+                -- No longer holding the OLD bank (reached wings-level or past it towards
+                -- the target side - not necessarily the target bank fully established),
+                -- or the safety valve fired: free to re-evaluate normally below.
+                reversal_target_sign = nil
+            elseif held_is_clear then
+                -- still mid-reversal AND the held bearing is still genuinely clear: hold
+                -- it regardless of what a fresh sweep proposes.
+                return bearing_orig_deg, distance_previous_m
+            else
+                -- Still mid-reversal, but the held bearing is no longer clear: the latch
+                -- must not keep flying an unsafe path just to avoid a second reversal.
+                -- Break it and fall through to a fresh decision below, even though that
+                -- risks re-triggering the exact whipsaw this latch exists to prevent -
+                -- this is the known gap Stage 2 is meant to close.
+                reversal_target_sign = nil
+            end
+        end
+
+        if held_is_clear then
+            -- still genuinely clear: keep flying it, regardless of whether the fresh
+            -- candidate would do better - it is not broken, so this does not fix it.
+            return bearing_orig_deg, distance_previous_m
+        end
+        -- Committed bearing is no longer clear: a change is actually required, whatever
+        -- its size. If it requires reversing bank direction, latch that direction so a
+        -- fresh sweep result next cycle cannot reverse it again before the aircraft
+        -- responds.
+        local needed_sign = (wrap_180(bearing_deg - ground_course_deg) >= 0) and 1 or -1
+        local current_sign = bank_sign(current_roll_deg)
+        if current_sign ~= 0 and current_sign ~= needed_sign then
+            reversal_target_sign = needed_sign
+            reversal_since_ms    = now_ms
+        end
+        return bearing_deg, distance_found_m
     end
 
     --[[
@@ -398,9 +502,8 @@ function DAAcore.new(deps)
     Post-process the raw bendy-ruler heading into a smooth command for a MOVING
     obstacle, WITHOUT ever overriding a turn the sweep needs to clear an obstacle.
 
-    resist_bearing_change() already produces a bearing that clears ALL obstacles
-    (fences included) and only makes a large change when the new side is clearly
-    clearer. So:
+    resist_bearing_change() already produces a bearing that clears the moving obstacle
+    and only makes a large change when the new side is clearly clearer. So:
       * An urgent encounter, or a large change there is no time to damp, is a
         genuine avoidance turn -> obey it exactly, no smoothing.  (This is the
         safety fix: previously the side-commit could mirror such a turn onto the
@@ -1022,12 +1125,13 @@ function DAAcore.new(deps)
 
     -- Fences are fixed and containment is safety-critical: a heading slew limit or a committed
     -- side could delay/deflect the turn at a hard boundary and breach it, so this is hysteresis
-    -- only (resist_bearing_change), no smoothing, no CPA - the responsive bendy-ruler behaviour.
+    -- only (resist_fence_bearing_change), no smoothing, no CPA - the responsive bendy-ruler
+    -- behaviour.
     -- Returns the (possibly resisted) bearing/distance to fly; best_distance_m is reassigned to
     -- the clearance of whichever bearing comes back - not the discarded candidate's - so
     -- DAAD.DstB reflects what is actually flown, including on the "stay the course" path.
     local function resolve_fence_bearing(target_loc, best_bearing_deg, best_distance_m)
-        best_bearing_deg, best_distance_m = resist_bearing_change(
+        best_bearing_deg, best_distance_m = resist_fence_bearing_change(
             last_avoid_bearing_deg, best_bearing_deg, best_distance_m, target_loc)
         last_avoid_bearing_deg  = best_bearing_deg
         committed_side_sign     = 0
@@ -1044,6 +1148,10 @@ function DAAcore.new(deps)
     -- instantaneous geometry) moves; refine_avoidance_bearing() also logs the DAAS smoothing
     -- trace each cycle.
     local function resolve_moving_bearing(bearing_deg, target_loc, best_bearing_deg, best_distance_m)
+        -- resist_fence_bearing_change()'s reversal latch is fence-specific state: clear it
+        -- whenever the resolver switches to a moving obstacle instead, so it cannot survive
+        -- stale into a later, unrelated fence episode.
+        reversal_target_sign = nil
         local motion = assess_obstacle_motion(obstacle_avoiding)
         if not motion.is_conflict then
             -- the obstacle is leaving (opening range, predicted miss beyond its keep-out
@@ -1095,6 +1203,7 @@ function DAAcore.new(deps)
 
         if obstacle_avoiding == nil then
             last_avoid_bearing_deg = nil
+            reversal_target_sign = nil
             committed_side_sign = 0
             side_flip_pending = false
             if alt_obstacle ~= nil then
