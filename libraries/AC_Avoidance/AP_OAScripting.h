@@ -101,6 +101,28 @@ public:
     // matching polygon/circle fence is found, false otherwise.
     bool fence_distance(const Location &loc, uint8_t fence_type, float &distance_m) const;
 
+    // Breach-inclusive twin of find_fence_threats(): a fence AC_Fence itself has flagged as
+    // breached is NOT skipped here, unlike find_threats()/find_fence_threats() (see
+    // _find_fence_threats_NE()'s own comment for why they skip it - that is still correct
+    // for ordinary threat dispatch). This exists for recovery scoring while a breach is
+    // active or being approached, where the true (possibly negative) clearance is exactly
+    // the signal needed to tell an exiting path from one still penetrating.
+    //
+    // Returns two values, not one: min_path_m is the worst clearance found anywhere along
+    // the whole start_loc->end_loc segment (as find_fence_threats() would report, minus the
+    // breach skip); endpoint_m is the clearance at end_loc alone, from that same governing
+    // fence category. Every recovery candidate shares its starting position, so a shared,
+    // possibly-deep-negative start point dominates a segment-minimum comparison identically
+    // for every candidate; the endpoint is what actually differs between an improving and a
+    // worsening heading. start_loc == end_loc is a valid point-only query (no early-return
+    // guard, unlike find_fence_threats()) - it is how a caller gets "current clearance".
+    bool find_fence_clearance(const Location &start_loc, const Location &end_loc, float lookahead_m,
+                                                // Return values
+                                                float       &min_path_m,
+                                                float       &endpoint_m,
+                                                OAObstacle  &any_obstacle
+                                                ) const;
+
 
 private:
 
@@ -112,6 +134,10 @@ private:
     // (the fence loader's native units) rather than Locations, since both callers
     // already have to do that conversion once for their own start/end points.
     float _find_fence_threats_NE(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm, float lookahead_m, OAObstacle &obstacle) const;
+    // Shared by find_fence_clearance() only - see its own header comment for why this is a
+    // separate function rather than a bool argument to _find_fence_threats_NE(): a breach
+    // is never skipped here, and an extra endpoint_m value is returned alongside.
+    float _find_fence_clearance_NE(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm, float lookahead_m, float &endpoint_m, OAObstacle &obstacle) const;
 #if AP_OA_SCRIPTING_OADB_ENABLED
     float _distance_to_object(const Vector3f &start_NED_m, const Vector3f end_NED_m, OAObstacle &script_obstacle) const;
 #endif
