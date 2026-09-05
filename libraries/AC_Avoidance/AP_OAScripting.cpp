@@ -192,8 +192,14 @@ bool AP_OAScripting::find_aircraft(const Location &vehicle_loc, const float look
     return false;
 }
 
-// closest distance (metres) from a location to the nearest fence boundary edge — polygon or
-// circle, inclusion or exclusion — as a real geometric distance to the physical boundary.
+// signed clearance (metres) from a location to the nearest fence boundary edge — polygon or
+// circle, inclusion or exclusion. POSITIVE means clear (outside an exclusion fence, or inside
+// an inclusion fence); NEGATIVE means already in breach of that boundary. The boundary
+// SELECTED is still whichever is geometrically nearest by absolute distance (unchanged from
+// before this carried a sign) - only the sign attached to that selection is new, so an
+// existing caller that only cared about magnitude (e.g. the AVOIDING message) is unaffected
+// except in the rare already-breached case, where it now reports a true negative distance
+// instead of a misleading positive one.
 // Lets the AVOIDING message report a true distance for fence obstacles, which (unlike ADS-B
 // point obstacles) carry no single usable "location".  Returns true and sets distance_m if
 // any polygon/circle fence is loaded.
@@ -232,7 +238,10 @@ bool AP_OAScripting::fence_distance(const Location &loc, uint8_t fence_type, flo
         want_excl_poly = want_incl_poly = want_excl_circ = want_incl_circ = true;
     }
 
+    // closest_m tracks selection (by absolute magnitude, unchanged); closest_signed_m is the
+    // value actually returned, carrying the sign for whichever boundary closest_m selected.
     float closest_m = FLT_MAX;
+    float closest_signed_m = FLT_MAX;
 
     // polygon fences (inclusion + exclusion): true geometric point-to-edge distance
     Vector2f closest_vec_cm;
@@ -240,35 +249,56 @@ bool AP_OAScripting::fence_distance(const Location &loc, uint8_t fence_type, flo
         uint16_t num_points = 0;
         const Vector2f *points = poly.get_exclusion_polygon(i, num_points);
         if (points != nullptr && Polygon_closest_distance_point(points, num_points, point_NE_cm, closest_vec_cm)) {
-            closest_m = MIN(closest_m, closest_vec_cm.length() * 0.01f);
+            const float dist_m = closest_vec_cm.length() * 0.01f;
+            if (dist_m < closest_m) {
+                closest_m = dist_m;
+                // exclusion: outside is clear (positive), inside is breach (negative)
+                closest_signed_m = Polygon_outside(point_NE_cm, points, num_points) ? dist_m : -dist_m;
+            }
         }
     }
     for (uint8_t i = 0; want_incl_poly && i < poly.get_inclusion_polygon_count(); i++) {
         uint16_t num_points = 0;
         const Vector2f *points = poly.get_inclusion_polygon(i, num_points);
         if (points != nullptr && Polygon_closest_distance_point(points, num_points, point_NE_cm, closest_vec_cm)) {
-            closest_m = MIN(closest_m, closest_vec_cm.length() * 0.01f);
+            const float dist_m = closest_vec_cm.length() * 0.01f;
+            if (dist_m < closest_m) {
+                closest_m = dist_m;
+                // inclusion: inside is clear (positive), outside is breach (negative)
+                closest_signed_m = Polygon_outside(point_NE_cm, points, num_points) ? -dist_m : dist_m;
+            }
         }
     }
 
-    // circle fences (inclusion + exclusion): distance to the ring is |range-to-centre - radius|
+    // circle fences (inclusion + exclusion): range-to-centre vs radius already carries the
+    // right sign for an exclusion circle (positive when outside); inclusion flips it.
     Vector2f centre_cm;
     float radius_m = 0.0f;
     for (uint8_t i = 0; want_excl_circ && i < poly.get_exclusion_circle_count(); i++) {
         if (poly.get_exclusion_circle(i, centre_cm, radius_m)) {
-            closest_m = MIN(closest_m, fabsf((point_NE_cm - centre_cm).length() * 0.01f - radius_m));
+            const float range_m = (point_NE_cm - centre_cm).length() * 0.01f;
+            const float dist_m = fabsf(range_m - radius_m);
+            if (dist_m < closest_m) {
+                closest_m = dist_m;
+                closest_signed_m = range_m - radius_m;
+            }
         }
     }
     for (uint8_t i = 0; want_incl_circ && i < poly.get_inclusion_circle_count(); i++) {
         if (poly.get_inclusion_circle(i, centre_cm, radius_m)) {
-            closest_m = MIN(closest_m, fabsf((point_NE_cm - centre_cm).length() * 0.01f - radius_m));
+            const float range_m = (point_NE_cm - centre_cm).length() * 0.01f;
+            const float dist_m = fabsf(range_m - radius_m);
+            if (dist_m < closest_m) {
+                closest_m = dist_m;
+                closest_signed_m = radius_m - range_m;
+            }
         }
     }
 
     if (closest_m >= FLT_MAX) {
         return false;
     }
-    distance_m = closest_m;
+    distance_m = closest_signed_m;
     return true;
 #else
     (void)loc;
