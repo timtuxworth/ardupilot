@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-017"
+DAAcore.SCRIPT_VERSION = "4.8.0-018"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -1213,6 +1213,11 @@ function DAAcore.new(deps)
     -- Sweep for the heading that best clears the obstacles between here and target_loc.
     -- Returns the updated best_distance_m and best_bearing_deg; obstacle_avoiding is an
     -- upvalue and is updated in place as closer obstacles are found.
+    -- Third return value `swept` is for DAAR diagnostics only (RawOK) - true iff the sweep
+    -- actually ran and best_distance_m/best_bearing_deg are its real answer, false on the
+    -- under-20m early return below, where they are still just the caller's initial values
+    -- (best_distance_m in particular is the -FLT_MAX sentinel, not a genuine "everything is
+    -- unsafe" reading).
     local function sweep_for_heading(bearing_deg, distance_to_target_m, target_loc,
                                      best_distance_m, best_bearing_deg)
         -- Under 20 m to the target there is nothing useful to sweep for.  Only the sweep
@@ -1221,7 +1226,7 @@ function DAAcore.new(deps)
         -- and then suppressed traffic alerts, NMAC, the trapped failsafe, the aircraft loiter
         -- and the altitude clamp for as long as the target stayed close.
         if distance_to_target_m < 20 then
-            return best_distance_m, best_bearing_deg
+            return best_distance_m, best_bearing_deg, false
         end
         -- Try increments around a circle, alternating left and right. The first heading
         -- that clears all obstacles for two look-ahead steps wins (a bounded downwind
@@ -1293,7 +1298,7 @@ function DAAcore.new(deps)
                 end
             end
         end
-        return best_distance_m, best_bearing_deg
+        return best_distance_m, best_bearing_deg, true
     end
 
     -- The two obstacle-response resolvers below mirror detect_aircraft()/detect_altitude_fence()'s
@@ -1448,14 +1453,16 @@ function DAAcore.new(deps)
         local best_distance_m   = -FLT_MAX
 
         local distance_to_target_m = limit_distance(current_loc, target_loc, bearing_deg)
-        best_distance_m, best_bearing_deg =
+        local raw_ok
+        best_distance_m, best_bearing_deg, raw_ok =
                 sweep_for_heading(bearing_deg, distance_to_target_m, target_loc,
                                   best_distance_m, best_bearing_deg)
 
         -- Raw sweep answer, captured before any fence-hold/side-commit/slew adjustment -
-        -- DAAR's RawB/RawD (see log_resolve_diagnostics).  detect_aircraft() below only
-        -- ever touches aircraft_avoiding, never best_bearing_deg/best_distance_m, so this
-        -- is genuinely what the sweep alone found.
+        -- DAAR's RawB/RawD/RawOK.  detect_aircraft() below only ever touches
+        -- aircraft_avoiding, never best_bearing_deg/best_distance_m, so this is genuinely
+        -- what the sweep alone found. raw_ok false means the under-20m early return -
+        -- RawD is then just the -FLT_MAX sentinel, not a real "boxed in" reading.
         local raw_bearing_deg, raw_distance_m = best_bearing_deg, best_distance_m
 
         -- we need to independently detect aircraft because even if an aircraft may not be the closest obstacle found by bendy ruler, we may still need to deal with it
@@ -1499,33 +1506,60 @@ function DAAcore.new(deps)
                     validate_horizontal_release(target_loc, best_bearing_deg, best_distance_m)
         end
 
-        -- DAAR diagnostics - every cycle that reaches here, regardless of whether we end
-        -- up avoiding anything, so a fence masked by traffic the whole encounter (never
-        -- winning, so never reaching DAAD at all) is still visible after the fact. Only
-        -- remeasures the final bearing (an extra find_closest_obstacle probe) while
-        -- something is actually being avoided - the same cost-bound the release
-        -- validator itself already accepts, and there is nothing to remeasure otherwise.
-        local final_distance_m = best_distance_m
+        -- DAAR diagnostics - every cycle that reaches here, regardless of whether we end up
+        -- avoiding anything, so a fence masked by traffic the whole encounter (never winning,
+        -- so never reaching DAAD at all) is still visible after the fact.
+        --   TrajD    - clearance of continuing the CURRENT bank/heading, unrelated to what is
+        --              actually being commanded - "what happens if I fly on as I am".
+        --   CmdD     - clearance of the trajectory actually needed to REACH FinalB
+        --              (location_for_candidate()'s bank-aware transition model, the same one
+        --              Stage 2 reversal candidates are judged by), so FinalB is validated
+        --              against the turn it really implies, not the aircraft's present bank.
+        --   FenceProjD - fence-only clearance (nearest_fence_clearance_m(), immune to being
+        --              masked by traffic) along that same CmdD path - directly answers "is
+        --              the fence still a problem on the path I am about to commit to".
+        -- All three only computed while something is actually being avoided - the same
+        -- cost-bound the release validator itself already accepts - since there is nothing
+        -- to remeasure otherwise (FinalB is just the direct-to-target bearing already
+        -- validated by the sweep itself).
+        local traj_distance_m  = best_distance_m
+        local cmd_distance_m   = best_distance_m
+        local fence_proj_m     = nil
         if obstacle_avoiding ~= nil then
-            local near_loc = project_current_trajectory(target_loc)
-            final_distance_m = find_closest_obstacle(current_loc, near_loc, detect_m, wind_speed)
+            local traj_loc = project_current_trajectory(target_loc)
+            traj_distance_m = find_closest_obstacle(current_loc, traj_loc, detect_m, wind_speed)
+            local cmd_loc = location_for_candidate(best_bearing_deg, target_loc)
+            cmd_distance_m = find_closest_obstacle(current_loc, cmd_loc, detect_m, wind_speed)
+            fence_proj_m = obstacles.nearest_fence_clearance_m(cmd_loc)
         end
         -- Inlined rather than a separate local function: DAAcore.new() is already near
         -- Lua's 200-local-per-function ceiling (confirmed the hard way - a nested
         -- function here pushed it over and failed to load at all), and this has exactly
         -- one call site.
         local fence_clearance_m = obstacles.nearest_fence_clearance_m(current_loc)
+        -- Field names are abbreviated - logger.write() hard-limits the label string to under
+        -- 58 chars total (confirmed the hard way: the full names ran to 61 and the write
+        -- silently failed EVERY cycle, flooding STATUSTEXT with the error and disrupting
+        -- other tests' own message timing). RawOK->ROK, FenceD->FncD, FinalB->FnlB,
+        -- TrajD->TrjD, FenceProjD->FPrD.
         local status, err = pcall(logger.write, logger, "DAAR",
-            'RawB,RawD,FenceD,FinalB,FinalD,Held,ObjT',
-            'fffffBI',                      -- Formats
-            'dmmdm--',                      -- Units (d=degrees, m=meter)
-            '-------',                      -- Multipliers (none needed - no lat/lng here)
+            'RawB,RawD,ROK,FncD,FnlB,TrjD,CmdD,FPrD,Held,ObjT',
+            'ffBfffffBI',                    -- Formats
+            'dm-mdmmm--',                    -- Units (d=degrees, m=meter)
+            '----------',                    -- Multipliers (none needed - no lat/lng here)
             wrap_360(raw_bearing_deg),       -- RawB - sweep's own bearing, before adjustment
             math.max(math.min(raw_distance_m, LOG_CLEARANCE_MAX_M), -LOG_CLEARANCE_MAX_M),
+            raw_ok and 1 or 0,               -- ROK - false means RawD is a sentinel, not real
+            -- FncD/FPrD are SIGNED (positive clear, negative breached) since the
+            -- AP_OAScripting::fence_distance() fix - LOG_CLEARANCE_MAX_M is a "no fence
+            -- loaded" sentinel, not a "very safe" one, same as every other field here.
             (fence_clearance_m == nil) and LOG_CLEARANCE_MAX_M
                 or math.max(math.min(fence_clearance_m, LOG_CLEARANCE_MAX_M), -LOG_CLEARANCE_MAX_M),
-            wrap_360(best_bearing_deg),      -- FinalB - bearing actually being commanded
-            math.max(math.min(final_distance_m, LOG_CLEARANCE_MAX_M), -LOG_CLEARANCE_MAX_M),
+            wrap_360(best_bearing_deg),      -- FnlB - bearing actually being commanded
+            math.max(math.min(traj_distance_m, LOG_CLEARANCE_MAX_M), -LOG_CLEARANCE_MAX_M),
+            math.max(math.min(cmd_distance_m, LOG_CLEARANCE_MAX_M), -LOG_CLEARANCE_MAX_M),
+            (fence_proj_m == nil) and LOG_CLEARANCE_MAX_M
+                or math.max(math.min(fence_proj_m, LOG_CLEARANCE_MAX_M), -LOG_CLEARANCE_MAX_M),
             held and 1 or 0,
             (obstacle_avoiding ~= nil and obstacle_avoiding.type) or 0)
         if not status then
