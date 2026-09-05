@@ -4598,6 +4598,16 @@ OAScripting = {}
 ---@return OAObstacle_ud|nil obstacle -- the closest threat found
 function OAScripting:find_threats(start_loc, end_loc, lookahead_m) end
 
+-- As find_threats(), but fences only - immune to being masked by a moving obstacle
+-- (ADS-B/MAVLink traffic) that happens to be closer along the same line. Checks the
+-- WHOLE line, not just its endpoint.
+---@param start_loc Location_ud -- Location of the start of the line
+---@param end_loc Location_ud -- Location of the end of the line to check
+---@param lookahead_m number -- the furthest distance out from the line to check
+---@return number|nil distance_min_m -- distance to the closest fence found, or nil if none
+---@return OAObstacle_ud|nil obstacle -- the closest fence found
+function OAScripting:find_fence_threats(start_loc, end_loc, lookahead_m) end
+
 -- find the aircraft closest to a Location
 ---@param vehicle_loc Location_ud -- Location to search for aircraft
 ---@param lookahead_m number -- the furthest horizontal distance out from vehicle_loc to check
