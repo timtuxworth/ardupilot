@@ -17,7 +17,7 @@
 
 local DAAobstacles = {}
 
-DAAobstacles.SCRIPT_VERSION = "4.8.0-007"
+DAAobstacles.SCRIPT_VERSION = "4.8.0-008"
 DAAobstacles.SCRIPT_NAME = "DAA obstacles"
 DAAobstacles.SCRIPT_NAME_SHORT = "DAAobs"
 
@@ -405,30 +405,6 @@ function DAAobstacles.new()
         return classify_threat(distance_m, any_obstacle, wind_ms)
     end
 
-    -- Breach-inclusive, raw (no margin/classify_threat) clearance from loc1 to loc2 -
-    -- unlike find_closest_fence() above, a fence AC_Fence itself has flagged as breached
-    -- is not skipped, and the result carries the true signed clearance, not a
-    -- margin-filtered "is this within detection range" verdict. For
-    -- validate_horizontal_release()'s recovery-mode path scoring only: comparing
-    -- candidate headings against each other needs the honest number, not the margin-gated
-    -- one find_closest_fence() reports for ordinary dispatch.
-    --
-    -- loc1 == loc2 is a valid point-only query (no 1m shift - there is no direction to
-    -- shift toward, and no line to skirt along). Returns (lookahead_m, lookahead_m, nil)
-    -- rather than nil when no fence is loaded at all, so a caller folding this into a
-    -- running minimum never has to special-case a nil distance.
-    local function fence_path_clearance(loc1, loc2, lookahead_m)
-        -- No leading boolean in the Lua return here (confirmed against the generated
-        -- binding): a `boolean ... 'Null` method pushes only the output values on
-        -- success and nothing at all on failure, so every 'Null output - including the
-        -- numeric ones - comes back nil together, not just the obstacle.
-        local min_path_m, endpoint_m, obstacle = OAScripting:find_fence_clearance(loc1, loc2, lookahead_m)
-        if min_path_m == nil then
-            return lookahead_m, lookahead_m, nil
-        end
-        return min_path_m, endpoint_m, obstacle
-    end
-
     -- the taxonomy is exposed on the instance as well as the class, so a caller that has
     -- an instance never needs a second handle on the class just to name an obstacle type
     self.OBSTACLE_TYPE            = DAAobstacles.OBSTACLE_TYPE
@@ -443,7 +419,6 @@ function DAAobstacles.new()
     self.get_standoff             = get_standoff
     self.find_closest_obstacle    = find_closest_obstacle
     self.find_closest_fence       = find_closest_fence
-    self.fence_path_clearance     = fence_path_clearance
     self.is_fence_obstacle        = is_fence_obstacle
 
     return self
