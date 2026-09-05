@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-019"
+DAAcore.SCRIPT_VERSION = "4.8.0-020"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -1462,7 +1462,17 @@ function DAAcore.new(deps)
         -- by a moving obstacle with nothing to do with this fence). Searches alternating
         -- either side of candidate_bearing_deg, same "least deviation first" order the
         -- general sweep uses, and stops at the first fence-clear heading found.
-        local fresh_bearing_deg = candidate_bearing_deg
+        -- Seed the search from fence_hold_bearing_deg when there is one, even though
+        -- its own path is what just failed the check above - it is still a far better
+        -- anchor than candidate_bearing_deg, which after a moving-obstacle dismissal
+        -- (Gon=1 in DAAR) is whatever noisy bearing THAT sweep produced, arbitrary and
+        -- unstable from a fence's point of view. Seeding from it produced wide,
+        -- discontinuous swings with no relation to the fence avoidance actually in
+        -- progress - confirmed live 2026-09-05 (log 00000189.BIN): FnlB jumped from
+        -- 53 to 289 degrees in one cycle. candidate_bearing_deg remains the only
+        -- option on a genuinely first-ever encounter with this fence.
+        local seed_bearing_deg  = fence_hold_bearing_deg or candidate_bearing_deg
+        local fresh_bearing_deg = seed_bearing_deg
         local fresh_distance_m  = -FLT_MAX
         local coarse_inc_deg    = bearing_inc_deg * COARSE_SWEEP_MULT
         for i = 0, math.floor(360 / coarse_inc_deg) do
@@ -1470,7 +1480,7 @@ function DAAcore.new(deps)
             if i % 2 == 1 then
                 delta_deg = -delta_deg
             end
-            local test_deg = wrap_180(candidate_bearing_deg + delta_deg)
+            local test_deg = wrap_180(seed_bearing_deg + delta_deg)
             local test_loc = location_project(current_loc, test_deg, detect_m, target_loc)
             local distance_m, obstacle = obstacles.find_closest_fence(current_loc, test_loc, detect_m, wind_speed)
             if obstacle == nil then
