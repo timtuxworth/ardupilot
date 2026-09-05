@@ -17,7 +17,7 @@
 
 local DAAobstacles = {}
 
-DAAobstacles.SCRIPT_VERSION = "4.8.0-003"
+DAAobstacles.SCRIPT_VERSION = "4.8.0-004"
 DAAobstacles.SCRIPT_NAME = "DAA obstacles"
 DAAobstacles.SCRIPT_NAME_SHORT = "DAAobs"
 
@@ -291,6 +291,36 @@ function DAAobstacles.new()
         return nil
     end
 
+    -- Every horizontal fence category, for nearest_fence_clearance_m() below.  Not built from
+    -- is_fence_obstacle() at call time (that would mean scanning every OBSTACLE_TYPE value on
+    -- every call) - listed once, matching is_fence_obstacle()'s own scope exactly.
+    local FENCE_TYPES = {
+        OBSTACLE_TYPE.FENCE_HOME,
+        OBSTACLE_TYPE.FENCE_CIRCLE_INCLUSION,
+        OBSTACLE_TYPE.FENCE_CIRCLE_EXCLUSION,
+        OBSTACLE_TYPE.FENCE_POLYGON_INCLUSION,
+        OBSTACLE_TYPE.FENCE_POLYGON_EXCLUSION,
+        OBSTACLE_TYPE.FENCE_LUA,
+    }
+
+    -- Nearest horizontal fence clearance (m), independent of whatever obstacle actually won
+    -- the single-obstacle sweep this cycle - diagnostic only (DAAR logging), so a fence that
+    -- is present but currently masked by a closer moving obstacle is still visible.  Loops
+    -- every fence category and asks C++ for its real edge distance, keeping the closest;
+    -- nil if there is no fence of any category. Not on the hot sweep path - once per cycle,
+    -- same cost class as obstacle_report_distance()'s own fence_distance() call.
+    local function nearest_fence_clearance_m(loc)
+        if loc == nil then return nil end
+        local nearest_m = nil
+        for _, t in ipairs(FENCE_TYPES) do
+            local d = OAScripting:fence_distance(loc, t)
+            if d ~= nil and (nearest_m == nil or d < nearest_m) then
+                nearest_m = d
+            end
+        end
+        return nearest_m
+    end
+
     -- Keep-out ("well clear") radius (m) for the CPA conflict test, per obstacle type. This is the
     -- miss distance below which a moving obstacle is treated as a conflict; because the range check in
     -- assess_obstacle_motion uses the same value, it is also the range inside which avoidance is
@@ -368,6 +398,7 @@ function DAAobstacles.new()
     self.pretty_obstacle_type     = pretty_obstacle_type
     self.populate_obstacle        = populate_obstacle
     self.obstacle_report_distance = obstacle_report_distance
+    self.nearest_fence_clearance_m = nearest_fence_clearance_m
     self.get_standoff             = get_standoff
     self.find_closest_obstacle    = find_closest_obstacle
     self.is_fence_obstacle        = is_fence_obstacle
