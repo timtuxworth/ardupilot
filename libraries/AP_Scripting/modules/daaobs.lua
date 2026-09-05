@@ -17,7 +17,7 @@
 
 local DAAobstacles = {}
 
-DAAobstacles.SCRIPT_VERSION = "4.8.0-005"
+DAAobstacles.SCRIPT_VERSION = "4.8.0-006"
 DAAobstacles.SCRIPT_NAME = "DAA obstacles"
 DAAobstacles.SCRIPT_NAME_SHORT = "DAAobs"
 
@@ -336,41 +336,36 @@ function DAAobstacles.new()
         return standoff_by_type[obstacle_type] or well_clear_xy
     end
 
-    local function find_closest_obstacle(loc1, loc2, lookahead_m, wind_ms)
-        -- By projecting 1m along the line we avoid a problem with the
-        -- exclusion avoidance being happy to skirt along a line parallel
-        -- to an exclusion zone
-        local bearing_deg   = math.deg(loc1:get_bearing(loc2))
-        local loc1_shifted  = location_project(loc1, bearing_deg, 1, loc2)
-        local obstacle
-
-        local distance_m, any_obstacle =
-                OAScripting:find_threats(loc1_shifted, loc2, lookahead_m)
-
-        if distance_m == nil then
-            return FLT_MAX, nil
-        end
-
-        if any_obstacle == nil then
+    -- Shared by find_closest_obstacle() and find_closest_fence(): applies the
+    -- margin/wind-widening logic to a raw C++ threat-search result and either drops it
+    -- (still outside the range we care about) or wraps it as a populated obstacle.
+    --
+    -- What distance_m already accounts for differs by where the obstacle came from, so the
+    -- margin added here does too:
+    --  * AP_Avoidance contacts (crewed aircraft, drones) - distance_to_obstacle() has ALREADY
+    --    subtracted the protected radius for that emitter type (AVD_WCLR_XY / AVD_UAV_XY), so
+    --    distance_m is clearance to the edge of the protected volume and only the extra margin
+    --    belongs here.  Adding the radius back made the real trigger 2 x radius + margin: 1269 m
+    --    for a crewed aircraft on defaults against the 660 m this file and planedaa.md document,
+    --    and it disagreed with find_aircraft(), which passes the full standoff against a raw
+    --    centre distance.
+    --  * AP_OADatabase objects (AIS, proximity) - _distance_to_object() subtracts the object's
+    --    own PHYSICAL radius, so a standoff still has to be added on top here.
+    -- The per-type values are in detect_margin_by_type, built by configure(); a type that is
+    -- not in it needs no margin.  Zero is a legitimate margin and stays one - only a missing
+    -- entry falls through, because 0 is truthy in Lua.
+    --
+    -- NOTE: a breached fence is not dropped here.  OAScripting:find_threats()/
+    -- find_fence_threats() already leave the breached fence categories out of their own
+    -- search, because a breached fence reports a large negative clearance and would
+    -- otherwise mask every other obstacle - including traffic - for as long as the
+    -- breach lasted.
+    local function classify_threat(distance_m, any_obstacle, wind_ms)
+        if distance_m == nil or any_obstacle == nil then
             return FLT_MAX, nil
         end
 
         local obstacle_type_val = any_obstacle:obstacle_type()
-
-        -- What distance_m already accounts for differs by where the obstacle came from, so the
-        -- margin added here does too:
-        --  * AP_Avoidance contacts (crewed aircraft, drones) - distance_to_obstacle() has ALREADY
-        --    subtracted the protected radius for that emitter type (AVD_WCLR_XY / AVD_UAV_XY), so
-        --    distance_m is clearance to the edge of the protected volume and only the extra margin
-        --    belongs here.  Adding the radius back made the real trigger 2 x radius + margin: 1269 m
-        --    for a crewed aircraft on defaults against the 660 m this file and planedaa.md document,
-        --    and it disagreed with find_aircraft(), which passes the full standoff against a raw
-        --    centre distance.
-        --  * AP_OADatabase objects (AIS, proximity) - _distance_to_object() subtracts the object's
-        --    own PHYSICAL radius, so a standoff still has to be added on top here.
-        -- The per-type values are in detect_margin_by_type, built by configure(); a type that is
-        -- not in it needs no margin.  Zero is a legitimate margin and stays one - only a missing
-        -- entry falls through, because 0 is truthy in Lua.
         local obstacle_margin = detect_margin_by_type[obstacle_type_val] or 0
         -- widen the fence standoff in wind so the controller has buffer to absorb cross-track
         -- drift and is less likely to be blown across the boundary (DAA_WIND_MARG = 0 disables)
@@ -383,13 +378,31 @@ function DAAobstacles.new()
             return FLT_MAX, nil
         end
 
-        -- NOTE: a breached fence is not dropped here.  OAScripting:find_threats() already
-        -- leaves the breached fence categories out of its search, because a breached fence
-        -- reports a large negative clearance and would otherwise mask every other obstacle -
-        -- including traffic - for as long as the breach lasted.
+        return distance_m, populate_obstacle(distance_m, any_obstacle)
+    end
 
-        obstacle = populate_obstacle(distance_m, any_obstacle)
-        return distance_m, obstacle
+    local function find_closest_obstacle(loc1, loc2, lookahead_m, wind_ms)
+        -- By projecting 1m along the line we avoid a problem with the
+        -- exclusion avoidance being happy to skirt along a line parallel
+        -- to an exclusion zone
+        local bearing_deg   = math.deg(loc1:get_bearing(loc2))
+        local loc1_shifted  = location_project(loc1, bearing_deg, 1, loc2)
+        local distance_m, any_obstacle =
+                OAScripting:find_threats(loc1_shifted, loc2, lookahead_m)
+        return classify_threat(distance_m, any_obstacle, wind_ms)
+    end
+
+    -- Fence-only variant of find_closest_obstacle() - immune to being masked by a
+    -- moving obstacle (ADS-B/MAVLink traffic) that happens to be closer along the same
+    -- line. detect_impl()'s fence-only sweep and release validation use this so a
+    -- fence never silently loses out just because a dismissible moving obstacle was
+    -- this cycle's single winner.
+    local function find_closest_fence(loc1, loc2, lookahead_m, wind_ms)
+        local bearing_deg   = math.deg(loc1:get_bearing(loc2))
+        local loc1_shifted  = location_project(loc1, bearing_deg, 1, loc2)
+        local distance_m, any_obstacle =
+                OAScripting:find_fence_threats(loc1_shifted, loc2, lookahead_m)
+        return classify_threat(distance_m, any_obstacle, wind_ms)
     end
 
     -- the taxonomy is exposed on the instance as well as the class, so a caller that has
@@ -405,6 +418,7 @@ function DAAobstacles.new()
     self.nearest_fence_clearance_m = nearest_fence_clearance_m
     self.get_standoff             = get_standoff
     self.find_closest_obstacle    = find_closest_obstacle
+    self.find_closest_fence       = find_closest_fence
     self.is_fence_obstacle        = is_fence_obstacle
 
     return self
