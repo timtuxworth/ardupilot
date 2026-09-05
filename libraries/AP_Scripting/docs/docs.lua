@@ -4622,19 +4622,6 @@ function OAScripting:find_aircraft(vehicle_loc, lookahead_m, vertical_lookahead_
 ---@return number|nil distance_m -- signed clearance in m to the nearest matching fence boundary edge - positive is clear, negative means already in breach of that boundary - or nil if none is loaded
 function OAScripting:fence_distance(loc, fence_type) end
 
--- Breach-inclusive twin of find_fence_threats(): a fence AC_Fence itself has flagged as
--- breached is NOT skipped here (find_threats()/find_fence_threats() skip it - see their
--- own binding comment). For recovery scoring while a breach is active or being
--- approached, where the true (possibly negative) clearance is the signal needed.
--- start_loc == end_loc is a valid point-only "current clearance" query.
----@param start_loc Location_ud -- Location of the start of the line
----@param end_loc Location_ud -- Location of the end of the line to check (may equal start_loc)
----@param lookahead_m number -- the furthest distance out from the line to check
----@return number|nil min_path_m -- worst (minimum) clearance found anywhere along the whole line, or nil if no fence loaded
----@return number|nil endpoint_m -- clearance at end_loc alone, from the same governing fence category
----@return OAObstacle_ud|nil obstacle -- the fence responsible for min_path_m
-function OAScripting:find_fence_clearance(start_loc, end_loc, lookahead_m) end
-
 -- OAObstacle is a userdata object that holds obstacle information managed by OAScripting
 -- it is returned by calls to OAScripting methods, it can't be created or manipulated in Lua
 -- fields are accessed as getter/setter methods, eg obstacle:obstacle_type() to read
