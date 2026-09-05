@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-016"
+DAAcore.SCRIPT_VERSION = "4.8.0-017"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -1369,6 +1369,26 @@ function DAAcore.new(deps)
         return best_bearing_deg, best_distance_m, false
     end
 
+    -- Project a real continuation of the aircraft's CURRENT bank for VALIDATE_PROJECTION_S
+    -- seconds - not location_after_course_change()'s instantaneous-bank assumption the
+    -- sweep's own candidates use, and not a bearing-specific stub. Shared by
+    -- validate_horizontal_release() and the DAAR diagnostics' final-bearing remeasure in
+    -- detect_impl(), so both look at the same physically-honest "where is the aircraft
+    -- actually about to be" point rather than two different approximations of it.
+    local function project_current_trajectory(target_loc)
+        local current_sign = bank_sign(current_roll_deg)
+        if current_sign ~= 0 and roll_rate_dps > 0 then
+            local ground_speed_ms = effective_groundspeed(airspeed_ms, ground_course_deg, wind_dir_rad, wind_speed)
+            return arc_projection(current_loc, ground_course_deg, current_sign,
+                    VALIDATE_PROJECTION_S, airspeed_ms, ground_speed_ms,
+                    math.abs(current_roll_deg), target_loc)
+        end
+        -- Wings-level (or no usable roll-rate bound): continuing straight is the honest
+        -- projection.
+        return location_project(current_loc, ground_course_deg,
+                math.max(airspeed_ms, 1.0) * VALIDATE_PROJECTION_S, target_loc)
+    end
+
     -- One shared release-validation path for every way a horizontal avoidance can lapse
     -- this cycle - the sweep finding nothing at all, or a moving obstacle opening up -
     -- called from detect_impl() only once obstacle_avoiding has actually become nil,
@@ -1389,36 +1409,25 @@ function DAAcore.new(deps)
     -- outranked an active fence avoidance, the drone's own release went unchecked
     -- against the fence, and the aircraft - still banked from avoiding the drone - flew
     -- into the fence 1-2 s later.
+    -- Fourth return value `held` is for DAAR diagnostics only (see log_resolve_diagnostics) -
+    -- nothing in the resolution logic itself reads it.
     local function validate_horizontal_release(target_loc, candidate_bearing_deg, candidate_distance_m)
         if fence_hold_bearing_deg == nil then
-            return candidate_bearing_deg, candidate_distance_m, nil
+            return candidate_bearing_deg, candidate_distance_m, nil, false
         end
 
-        local current_sign = bank_sign(current_roll_deg)
-        local near_loc
-        if current_sign ~= 0 and roll_rate_dps > 0 then
-            local ground_speed_ms = effective_groundspeed(airspeed_ms, ground_course_deg, wind_dir_rad, wind_speed)
-            near_loc = arc_projection(current_loc, ground_course_deg, current_sign,
-                    VALIDATE_PROJECTION_S, airspeed_ms, ground_speed_ms,
-                    math.abs(current_roll_deg), target_loc)
-        else
-            -- Wings-level (or no usable roll-rate bound): continuing straight is the
-            -- honest projection.
-            near_loc = location_project(current_loc, ground_course_deg,
-                    math.max(airspeed_ms, 1.0) * VALIDATE_PROJECTION_S, target_loc)
-        end
-
+        local near_loc = project_current_trajectory(target_loc)
         local hold_distance_m, hold_obstacle = find_closest_obstacle(current_loc, near_loc, detect_m, wind_speed)
         if hold_obstacle == nil then
             -- Genuinely clear on the path the aircraft is actually flying: the fence
             -- episode is really over.
             fence_hold_bearing_deg = nil
-            return candidate_bearing_deg, candidate_distance_m, nil
+            return candidate_bearing_deg, candidate_distance_m, nil, false
         end
 
         -- Still too close on the real trajectory: keep the fence's last committed
         -- bearing for one more cycle rather than accepting this cycle's release.
-        return fence_hold_bearing_deg, hold_distance_m, hold_obstacle
+        return fence_hold_bearing_deg, hold_distance_m, hold_obstacle, true
     end
 
     -- detect flying objects or fences when flying towards navigation_target_loc
@@ -1442,6 +1451,12 @@ function DAAcore.new(deps)
         best_distance_m, best_bearing_deg =
                 sweep_for_heading(bearing_deg, distance_to_target_m, target_loc,
                                   best_distance_m, best_bearing_deg)
+
+        -- Raw sweep answer, captured before any fence-hold/side-commit/slew adjustment -
+        -- DAAR's RawB/RawD (see log_resolve_diagnostics).  detect_aircraft() below only
+        -- ever touches aircraft_avoiding, never best_bearing_deg/best_distance_m, so this
+        -- is genuinely what the sweep alone found.
+        local raw_bearing_deg, raw_distance_m = best_bearing_deg, best_distance_m
 
         -- we need to independently detect aircraft because even if an aircraft may not be the closest obstacle found by bendy ruler, we may still need to deal with it
         -- in other words, sometimes aircraft have higher priority than any other obstacles
@@ -1471,6 +1486,7 @@ function DAAcore.new(deps)
             end
         end
 
+        local held = false
         if obstacle_avoiding == nil then
             -- Either the sweep found nothing this cycle, or a moving obstacle just
             -- opened up - both are a horizontal release, and neither can be trusted on
@@ -1479,8 +1495,41 @@ function DAAcore.new(deps)
             -- single-obstacle choice for the last cycle or two can silently outrank a
             -- fence that is still close.  validate_horizontal_release() is the one
             -- place both are checked against reality before being accepted.
-            best_bearing_deg, best_distance_m, obstacle_avoiding =
+            best_bearing_deg, best_distance_m, obstacle_avoiding, held =
                     validate_horizontal_release(target_loc, best_bearing_deg, best_distance_m)
+        end
+
+        -- DAAR diagnostics - every cycle that reaches here, regardless of whether we end
+        -- up avoiding anything, so a fence masked by traffic the whole encounter (never
+        -- winning, so never reaching DAAD at all) is still visible after the fact. Only
+        -- remeasures the final bearing (an extra find_closest_obstacle probe) while
+        -- something is actually being avoided - the same cost-bound the release
+        -- validator itself already accepts, and there is nothing to remeasure otherwise.
+        local final_distance_m = best_distance_m
+        if obstacle_avoiding ~= nil then
+            local near_loc = project_current_trajectory(target_loc)
+            final_distance_m = find_closest_obstacle(current_loc, near_loc, detect_m, wind_speed)
+        end
+        -- Inlined rather than a separate local function: DAAcore.new() is already near
+        -- Lua's 200-local-per-function ceiling (confirmed the hard way - a nested
+        -- function here pushed it over and failed to load at all), and this has exactly
+        -- one call site.
+        local fence_clearance_m = obstacles.nearest_fence_clearance_m(current_loc)
+        local status, err = pcall(logger.write, logger, "DAAR",
+            'RawB,RawD,FenceD,FinalB,FinalD,Held,ObjT',
+            'fffffBI',                      -- Formats
+            'dmmdm--',                      -- Units (d=degrees, m=meter)
+            '-------',                      -- Multipliers (none needed - no lat/lng here)
+            wrap_360(raw_bearing_deg),       -- RawB - sweep's own bearing, before adjustment
+            math.max(math.min(raw_distance_m, LOG_CLEARANCE_MAX_M), -LOG_CLEARANCE_MAX_M),
+            (fence_clearance_m == nil) and LOG_CLEARANCE_MAX_M
+                or math.max(math.min(fence_clearance_m, LOG_CLEARANCE_MAX_M), -LOG_CLEARANCE_MAX_M),
+            wrap_360(best_bearing_deg),      -- FinalB - bearing actually being commanded
+            math.max(math.min(final_distance_m, LOG_CLEARANCE_MAX_M), -LOG_CLEARANCE_MAX_M),
+            held and 1 or 0,
+            (obstacle_avoiding ~= nil and obstacle_avoiding.type) or 0)
+        if not status then
+            gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " log resolve:" .. tostring(err))
         end
 
         if obstacle_avoiding == nil then
