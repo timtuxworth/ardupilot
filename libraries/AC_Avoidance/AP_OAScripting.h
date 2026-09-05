@@ -76,6 +76,16 @@ public:
                                                 OAObstacle  &any_obstacle
                                                 ) const;
 
+    // As find_threats(), but fences only - never masked by a moving obstacle (ADS-B/
+    // MAVLink traffic, AP_OADatabase objects) that happens to be closer along the same
+    // segment. Shares find_threats()'s line-query fence checks (_find_fence_threats_NE
+    // below) so a fence-only caller sees the same clearance-along-the-whole-segment
+    // answer, not just the endpoint.
+    bool find_fence_threats(const Location &start_loc, const Location &end_loc, float lookahead_m,
+                                                // Return values
+                                                float       &distance_m,
+                                                OAObstacle  &any_obstacle
+                                                ) const;
 
     bool find_aircraft(const Location &vehicle_loc, const float lookahead_m, const float vertical_lookahead_m,
                                     float       &distance_m,
@@ -97,6 +107,11 @@ private:
     static AP_OAScripting *_singleton;
 
     float _distance_to_avoidance(const Vector3f &start_NED_cm, const Vector3f &end_NED_cm, OAObstacle &script_obstacle) const;
+    // Shared by find_threats() and find_fence_threats(): the fence-only portion of the
+    // search (every polygon/circle fence category), taking NE offsets in CENTIMETRES
+    // (the fence loader's native units) rather than Locations, since both callers
+    // already have to do that conversion once for their own start/end points.
+    float _find_fence_threats_NE(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm, float lookahead_m, OAObstacle &obstacle) const;
 #if AP_OA_SCRIPTING_OADB_ENABLED
     float _distance_to_object(const Vector3f &start_NED_m, const Vector3f end_NED_m, OAObstacle &script_obstacle) const;
 #endif
