@@ -17,7 +17,7 @@
 
 local DAAobstacles = {}
 
-DAAobstacles.SCRIPT_VERSION = "4.8.0-004"
+DAAobstacles.SCRIPT_VERSION = "4.8.0-005"
 DAAobstacles.SCRIPT_NAME = "DAA obstacles"
 DAAobstacles.SCRIPT_NAME_SHORT = "DAAobs"
 
@@ -281,7 +281,9 @@ function DAAobstacles.new()
         if is_fence_obstacle(t) then
             -- horizontal fences carry no single usable "location"; ask C++ for the real edge distance
             -- to a fence of THIS type (so an "Excl. Circle" label reports the nearest exclusion
-            -- circle, not a nearer polygon).  Returns the distance in metres, or nil if none.
+            -- circle, not a nearer polygon).  SIGNED - positive while clear, negative if this fence
+            -- is already breached (rare, but then a true negative distance beats a misleading
+            -- positive one). Returns nil if none.
             return OAScripting:fence_distance(current_loc, t)
         elseif t ~= OBSTACLE_TYPE.FENCE_ALT_MAX and t ~= OBSTACLE_TYPE.FENCE_ALT_MIN
                 and obstacle.location ~= nil then
@@ -303,12 +305,14 @@ function DAAobstacles.new()
         OBSTACLE_TYPE.FENCE_LUA,
     }
 
-    -- Nearest horizontal fence clearance (m), independent of whatever obstacle actually won
-    -- the single-obstacle sweep this cycle - diagnostic only (DAAR logging), so a fence that
-    -- is present but currently masked by a closer moving obstacle is still visible.  Loops
-    -- every fence category and asks C++ for its real edge distance, keeping the closest;
-    -- nil if there is no fence of any category. Not on the hot sweep path - once per cycle,
-    -- same cost class as obstacle_report_distance()'s own fence_distance() call.
+    -- Most severe horizontal fence clearance (m) at loc, independent of whatever obstacle
+    -- actually won the single-obstacle sweep this cycle - diagnostic only (DAAR logging), so
+    -- a fence that is present but currently masked by a closer moving obstacle is still
+    -- visible.  SIGNED (positive clear, negative breached) - loops every fence category and
+    -- asks C++ for its real edge clearance, keeping the smallest (most severe: a breach
+    -- anywhere dominates a merely-close boundary elsewhere); nil if there is no fence of any
+    -- category. Not on the hot sweep path - once per cycle, same cost class as
+    -- obstacle_report_distance()'s own fence_distance() call.
     local function nearest_fence_clearance_m(loc)
         if loc == nil then return nil end
         local nearest_m = nil

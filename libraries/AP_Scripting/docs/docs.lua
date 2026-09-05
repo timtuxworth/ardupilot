@@ -4609,7 +4609,7 @@ function OAScripting:find_aircraft(vehicle_loc, lookahead_m, vertical_lookahead_
 -- closest distance to the nearest fence boundary edge of the given fence category
 ---@param loc Location_ud -- Location to measure the distance from
 ---@param fence_type integer -- OBSTACLE_TYPE FENCE_* value to scope the search to that fence category; 0 or any non-fence value searches all polygon/circle fences
----@return number|nil distance_m -- distance in m to the nearest matching fence boundary edge, or nil if none is loaded
+---@return number|nil distance_m -- signed clearance in m to the nearest matching fence boundary edge - positive is clear, negative means already in breach of that boundary - or nil if none is loaded
 function OAScripting:fence_distance(loc, fence_type) end
 
 -- OAObstacle is a userdata object that holds obstacle information managed by OAScripting
