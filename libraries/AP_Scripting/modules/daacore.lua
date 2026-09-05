@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-020"
+DAAcore.SCRIPT_VERSION = "4.8.0-021"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -66,6 +66,10 @@ local LOG_CLEARANCE_MAX_M = 9999.0
 -- before deciding a fence is genuinely clear - long enough to matter physically, short
 -- enough to stay a "where am I actually about to be" check rather than a second sweep.
 local VALIDATE_PROJECTION_S = 2.0
+-- AC_FENCE_TYPE_CIRCLE (2) | AC_FENCE_TYPE_POLYGON (4): the horizontal fence breach bits
+-- in fence:get_breaches(), as opposed to AC_FENCE_TYPE_ALT_MAX (1) / ALT_MIN (8), which are
+-- handled separately (detect_altitude_fence()) and must not force horizontal recovery mode.
+local HORIZONTAL_BREACH_MASK = 6
 
 function DAAcore.new(deps)
     local self = {}
@@ -1399,81 +1403,164 @@ function DAAcore.new(deps)
     -- called from detect_impl() only once obstacle_avoiding has actually become nil,
     -- never while a fence or an unresolved moving obstacle is still the live winner.
     --
-    -- Always runs the check below, regardless of whether a fence previously won this
-    -- cycle's single-obstacle choice: a moving obstacle being dismissed as
-    -- non-conflicting only clears THAT contact, not necessarily the fence geometry
-    -- underneath it. FENCE-SPECIFIC (obstacles.find_closest_fence(), not the generic
-    -- find_closest_obstacle()) so a still-open moving obstacle elsewhere on the same
-    -- projected path cannot mask the fence all over again. Confirmed live 2026-09-05
-    -- (logs 00000187.BIN, 00000188.BIN): the sweep's own raw result was already
-    -- negative (genuinely blocked) when the winning moving obstacle was dismissed as
-    -- non-conflicting, but nothing checked that sign before accepting the release -
-    -- fence_hold_bearing_deg was nil (the fence had never won before), so the old
-    -- fence_hold_bearing_deg == nil early-return this replaced skipped the check
-    -- entirely.
+    -- RECOVERY MODE (2026-09-05 rework, live SITL: two breaches in 00000191.BIN even
+    -- with the fence-vs-drone handoff fix above already in place). obstacles.
+    -- find_closest_fence() shares find_threats()'s breach-skip: AC_Fence itself stops
+    -- reporting a fence the moment it flags a breach, "so a bendy ruler cannot be
+    -- trapped trying to get back" (see _find_fence_threats_NE()'s own comment) - correct
+    -- for ordinary threat dispatch, but this function had been treating that same nil as
+    -- "genuinely clear" and releasing avoidance at exactly the worst instant. Confirmed
+    -- live: ObjT went 5->0 within 1-2 cycles of FncD crossing zero in BOTH 191 breaches
+    -- and in the earlier 189 one (ObjT=0 throughout its own negative-FncD window too -
+    -- that episode's bank-reversal bug and this breach-skip vanish are independent and
+    -- coexist). Worse, in 191's second breach the escape/held-bearing logic had already
+    -- committed to a losing heading a full cycle BEFORE AC_Fence's own breach bit
+    -- latched: FPrD (the bank-aware commanded path) read -8.14 m while this function's
+    -- old straight-ray held-bearing check still read clear.
+    --
+    -- OAScripting:find_fence_clearance() (score_fence_path()/fence_path_clearance()
+    -- below) never applies that breach-skip, so it stays honest through and after a
+    -- crossing. But a plain segment-minimum comparison still cannot rank recovery
+    -- candidates against each other: every one of them starts at current_loc, so a
+    -- shared, possibly deep-negative start point dominates the minimum identically for
+    -- all of them. What actually differs is the ENDPOINT - does this heading's far end
+    -- read better than where we are now, or worse - so every path below is scored as
+    -- (min_path_m, endpoint_m): minimum first (never accept a path that dips below
+    -- current clearance if a non-worsening one exists), endpoint as the tiebreak/
+    -- progress signal.
+    --
+    -- recovery_mode (current position already inside the protected margin, OR AC_Fence's
+    -- own horizontal breach bits set) is a hard latch on the RELEASE decision only: while
+    -- it holds, this function may not report clear, may not clear fence_hold_bearing_deg,
+    -- and may not return a nil obstacle, no matter how good some candidate's own score
+    -- looks - clearing the breach bits lifts the latch, but ordinary margin-based release
+    -- validation (below) still has to pass on its own before avoidance actually ends.
     --
     -- fence_hold_bearing_deg carries "a fence was recently relevant" independently of
-    -- whichever obstacle actually won - see its declaration - and this is the only
-    -- place that clears it. It is reused only if its OWN complete path also still
-    -- clears - never blindly: the aircraft has moved on since it was set, and a stale
-    -- hold can itself now cross the fence. Confirmed live 2026-09-05 (log
-    -- 00000187.BIN): a retained bearing took the aircraft within 0.7 m of a fence
-    -- while a fresh solution had already moved ~177 degrees away. When there is no
-    -- usable held bearing, the general sweep cannot be trusted to supply one either -
-    -- it can be dominated or boxed in by a moving obstacle with nothing to do with
-    -- this fence - so sweep_for_fence() above searches for an escape against the
-    -- fence specifically, and that is what gets the usual hysteresis applied to it.
-    --
-    -- The checks themselves project a real continuation of the aircraft's CURRENT bank
-    -- for VALIDATE_PROJECTION_S seconds - not location_after_course_change()'s
-    -- instantaneous-bank assumption the sweep's own candidates use, and not the 1 m
-    -- stub this originally replaced - so they reflect where a turn already in progress
-    -- will actually put the aircraft before committing to the release.
-    -- Fourth return value `held` is for DAAR diagnostics only (see detect_impl()'s own
-    -- DAAR block) - nothing in the resolution logic itself reads it.
+    -- whichever obstacle actually won - see its declaration - and this is the only place
+    -- that clears it (in normal mode; recovery_mode never lets it clear). It is reused
+    -- only if its OWN bank-aware path - the turn transition to location_for_candidate(),
+    -- then the outgoing leg, NOT a straight ray from current_loc (that mismatch is
+    -- exactly what let 191's -8.14 m commanded path through) - is non-worsening AND its
+    -- endpoint improves. When there is no usable held bearing, the general sweep cannot
+    -- be trusted to supply one either - it can be dominated or boxed in by a moving
+    -- obstacle with nothing to do with this fence - so the escape search below hunts for
+    -- one against the fence specifically, and that is what gets the usual hysteresis
+    -- (resolve_fence_bearing()) applied to it.
+    -- Fourth and fifth return values (`held`, `selected_end_m`) are for DAAR/DAAB
+    -- diagnostics only (see detect_impl()'s own logging block) - nothing in the
+    -- resolution logic itself reads them. horizontal_breach/current_clearance_m are NOT
+    -- threaded out here even though this function computes them for its own gating:
+    -- detect_impl() logs its own copies unconditionally, every cycle, not just release
+    -- candidates - the breach STATE and current position clearance are meaningful facts
+    -- regardless of whether a release check happened to run this cycle.
     local function validate_horizontal_release(target_loc, candidate_bearing_deg, candidate_distance_m)
-        local near_loc = project_current_trajectory(target_loc)
-        local _, fence_obstacle =
-                obstacles.find_closest_fence(current_loc, near_loc, detect_m, wind_speed)
-
-        if fence_obstacle == nil then
-            -- Genuinely clear of every fence on the path actually being flown.
-            fence_hold_bearing_deg = nil
-            return candidate_bearing_deg, candidate_distance_m, nil, false
+        -- Path-scoring helper shared by all three decisions below (current trajectory,
+        -- held bearing, escape-search candidates) - declared HERE, not as another
+        -- DAAcore.new() local: that function is already near Lua's 200-local-per-function
+        -- ceiling (hit it three times already this session) and this has three call
+        -- sites, all within this one function, so nesting it costs nothing there.
+        -- waypoints describes the path actually flown, e.g. {current_loc, near_loc} for a
+        -- straight continuation, or {current_loc, adjusted_loc, leg_loc} for a turn onto
+        -- a candidate bearing followed by its outgoing leg. Returns min_path_m (the worst
+        -- clearance anywhere along the WHOLE path, current position included) and
+        -- endpoint_m (the clearance at the far end alone), both breach-inclusive.
+        local function score_fence_path(waypoints)
+            local min_path_m, _, obstacle = obstacles.fence_path_clearance(waypoints[1], waypoints[1], detect_m)
+            local endpoint_m = min_path_m
+            for i = 1, #waypoints - 1 do
+                local seg_start, seg_end = waypoints[i], waypoints[i + 1]
+                -- same 1m-shift-toward-the-endpoint trick find_closest_fence() uses, so a
+                -- segment running parallel to an exclusion edge cannot skirt along it
+                local seg_start_shifted = location_project(
+                        seg_start, math.deg(seg_start:get_bearing(seg_end)), 1, seg_end)
+                local seg_min_m, seg_end_m, seg_obstacle =
+                        obstacles.fence_path_clearance(seg_start_shifted, seg_end, detect_m)
+                if seg_obstacle ~= nil and seg_min_m < min_path_m then
+                    min_path_m, obstacle = seg_min_m, seg_obstacle
+                end
+                endpoint_m = seg_end_m
+            end
+            -- fence_path_clearance() hands back the RAW OAObstacle userdata (never
+            -- populate_obstacle()'d) - a fence-type one carries a bogus (0,0) .location
+            -- rather than nil (see populate_obstacle()'s own comment), which
+            -- obstacle_report_distance() and everything else downstream of
+            -- obstacle_avoiding assumes is either a real point or genuinely nil. Wrap it
+            -- here, the one place every caller of score_fence_path() funnels through, so
+            -- a value this function hands back is never the odd one out.
+            if obstacle ~= nil then
+                obstacle = obstacles.populate_obstacle(min_path_m, obstacle)
+            end
+            return min_path_m, endpoint_m, obstacle
         end
 
+        -- Breach-inclusive clearance AT the aircraft's actual current position.
+        local current_clearance_m = obstacles.fence_path_clearance(current_loc, current_loc, detect_m)
+        -- AC_FENCE_TYPE_CIRCLE|POLYGON only - altitude fences are handled separately
+        -- (detect_altitude_fence()) and must never force this horizontal latch.
+        local horizontal_breach = fence ~= nil and (fence:get_breaches() & HORIZONTAL_BREACH_MASK) ~= 0
+        local recovery_mode     = horizontal_breach or current_clearance_m < 0
+
+        local near_loc = project_current_trajectory(target_loc)
+        -- Normal-mode margin/wind-widened decision (unchanged rules) - still computed
+        -- even in recovery_mode, purely as a fallback obstacle identity below; it may
+        -- not be used to declare clear while recovery_mode holds.
+        local _, margin_fence_obstacle =
+                obstacles.find_closest_fence(current_loc, near_loc, detect_m, wind_speed)
+
+        if not recovery_mode and margin_fence_obstacle == nil then
+            -- Genuinely clear of every fence on the path actually being flown, and no
+            -- horizontal breach latch to honour.
+            fence_hold_bearing_deg = nil
+            return candidate_bearing_deg, candidate_distance_m, nil, false, candidate_distance_m
+        end
+
+        local _, _, traj_obstacle = score_fence_path({current_loc, near_loc})
+        local fallback_obstacle = traj_obstacle or margin_fence_obstacle
+
+        -- Held bearing: only continue it if its bank-aware path is non-worsening and its
+        -- endpoint improves on current_clearance_m.
         if fence_hold_bearing_deg ~= nil then
-            local held_loc = location_project(current_loc, fence_hold_bearing_deg, detect_m, target_loc)
-            local held_distance_m, held_obstacle =
-                    obstacles.find_closest_fence(current_loc, held_loc, detect_m, wind_speed)
-            if held_obstacle == nil then
-                return fence_hold_bearing_deg, held_distance_m, fence_obstacle, true
+            local held_adjusted_loc = location_for_candidate(fence_hold_bearing_deg, target_loc)
+            local held_leg_loc = location_project(
+                    held_adjusted_loc, fence_hold_bearing_deg, detect_m, target_loc)
+            local held_min_m, held_end_m, held_obstacle =
+                    score_fence_path({current_loc, held_adjusted_loc, held_leg_loc})
+            if held_min_m >= current_clearance_m and held_end_m > current_clearance_m then
+                return fence_hold_bearing_deg, held_min_m, held_obstacle or fallback_obstacle, true, held_end_m
             end
         end
 
-        -- Fence-only escape search, inlined rather than a separate function (DAAcore.new()
-        -- is already near Lua's 200-local-per-function ceiling - confirmed the hard way,
-        -- twice now - and this has exactly one call site). No turn-lead modeling, no
-        -- step-2 dead-end check like the general sweep (sweep_for_heading()/
-        -- coarse_sweep()) - this only has to hand resolve_fence_bearing() A safe bearing,
-        -- not the bendy-ruler's full sophistication, and it only runs here: when the held
-        -- bearing above was either never armed or its own path is now also blocked, so the
-        -- general sweep cannot be trusted to supply one (it can be dominated or boxed in
-        -- by a moving obstacle with nothing to do with this fence). Searches alternating
-        -- either side of candidate_bearing_deg, same "least deviation first" order the
-        -- general sweep uses, and stops at the first fence-clear heading found.
-        -- Seed the search from fence_hold_bearing_deg when there is one, even though
-        -- its own path is what just failed the check above - it is still a far better
-        -- anchor than candidate_bearing_deg, which after a moving-obstacle dismissal
-        -- (Gon=1 in DAAR) is whatever noisy bearing THAT sweep produced, arbitrary and
-        -- unstable from a fence's point of view. Seeding from it produced wide,
-        -- discontinuous swings with no relation to the fence avoidance actually in
-        -- progress - confirmed live 2026-09-05 (log 00000189.BIN): FnlB jumped from
-        -- 53 to 289 degrees in one cycle. candidate_bearing_deg remains the only
+        -- Fence-only escape search, inlined rather than a separate function (see this
+        -- function's own local score_fence_path() above for why). No turn-lead
+        -- modeling, no step-2 dead-end check like the general sweep
+        -- (sweep_for_heading()/coarse_sweep()) - this only has to hand
+        -- resolve_fence_bearing() a safe bearing, not the bendy-ruler's full
+        -- sophistication, and it only runs here: when the held bearing above was either
+        -- never armed or its own path is now also blocked. Searches alternating either
+        -- side of the seed bearing, same "least deviation first" order the general sweep
+        -- uses. Seed the search from fence_hold_bearing_deg when there is one, even
+        -- though its own path is what just failed the check above - it is still a far
+        -- better anchor than candidate_bearing_deg, which after a moving-obstacle
+        -- dismissal (Gon=1 in DAAR) is whatever noisy bearing THAT sweep produced,
+        -- arbitrary and unstable from a fence's point of view (confirmed live
+        -- 2026-09-05, log 00000189.BIN: FnlB jumped 53->289 degrees in one cycle when
+        -- seeded from candidate_bearing_deg). candidate_bearing_deg remains the only
         -- option on a genuinely first-ever encounter with this fence.
+        --
+        -- Each candidate is scored (min_path_m, endpoint_m): a non-worsening candidate
+        -- (its own minimum no worse than current_clearance_m) always beats a worsening
+        -- one, and among non-worsening candidates the best endpoint wins - the actual
+        -- "does this direction make progress" signal. If every candidate worsens (truly
+        -- boxed in: even the turn transition itself has to cut closer before it can turn
+        -- away), falls back to the plain lexicographic (highest min_path_m, then best
+        -- endpoint_m) order across all of them.
         local seed_bearing_deg  = fence_hold_bearing_deg or candidate_bearing_deg
-        local fresh_bearing_deg = seed_bearing_deg
-        local fresh_distance_m  = -FLT_MAX
+        local best_bearing_deg  = seed_bearing_deg
+        local best_min_m        = -FLT_MAX
+        local best_end_m        = -FLT_MAX
+        local best_obstacle     = nil
+        local best_nonworsening = false
         local coarse_inc_deg    = bearing_inc_deg * COARSE_SWEEP_MULT
         for i = 0, math.floor(360 / coarse_inc_deg) do
             local delta_deg = i * coarse_inc_deg / 2.0
@@ -1481,20 +1568,31 @@ function DAAcore.new(deps)
                 delta_deg = -delta_deg
             end
             local test_deg = wrap_180(seed_bearing_deg + delta_deg)
-            local test_loc = location_project(current_loc, test_deg, detect_m, target_loc)
-            local distance_m, obstacle = obstacles.find_closest_fence(current_loc, test_loc, detect_m, wind_speed)
-            if obstacle == nil then
-                fresh_bearing_deg, fresh_distance_m = test_deg, FLT_MAX
-                break
+            local adjusted_loc = location_for_candidate(test_deg, target_loc)
+            local leg_loc = location_project(adjusted_loc, test_deg, detect_m, target_loc)
+            local min_m, end_m, obstacle = score_fence_path({current_loc, adjusted_loc, leg_loc})
+            local nonworsening = min_m >= current_clearance_m
+
+            local better
+            if best_nonworsening then
+                better = nonworsening and end_m > best_end_m
+            else
+                better = nonworsening
+                        or min_m > best_min_m
+                        or (min_m == best_min_m and end_m > best_end_m)
             end
-            if distance_m > fresh_distance_m then
-                fresh_bearing_deg, fresh_distance_m = test_deg, distance_m
+            if better then
+                best_bearing_deg, best_min_m, best_end_m, best_obstacle, best_nonworsening =
+                        test_deg, min_m, end_m, obstacle, nonworsening
+            end
+            if nonworsening and end_m >= detect_m then
+                break -- genuinely clear escape found, stop searching
             end
         end
 
         local resolved_bearing_deg, resolved_distance_m =
-                resolve_fence_bearing(target_loc, fresh_bearing_deg, fresh_distance_m)
-        return resolved_bearing_deg, resolved_distance_m, fence_obstacle, true
+                resolve_fence_bearing(target_loc, best_bearing_deg, best_min_m)
+        return resolved_bearing_deg, resolved_distance_m, best_obstacle or fallback_obstacle, true, best_end_m
     end
 
     -- detect flying objects or fences when flying towards navigation_target_loc
@@ -1561,6 +1659,10 @@ function DAAcore.new(deps)
         -- reassign obstacle_avoiding below.
         local was_release_candidate = (obstacle_avoiding == nil)
         local held = false
+        -- DAAB's SelE: only meaningful alongside `held` (the path validate_horizontal_
+        -- release() actually selected) - defaults to "nothing to report" on every other
+        -- cycle, same scoping as TrjD/CmdD/FPrD below.
+        local selected_end_m = LOG_CLEARANCE_MAX_M
         if was_release_candidate then
             -- Either the sweep found nothing this cycle, or a moving obstacle just
             -- opened up - both are a horizontal release, and neither can be trusted on
@@ -1569,9 +1671,17 @@ function DAAcore.new(deps)
             -- single-obstacle choice for the last cycle or two can silently outrank a
             -- fence that is still close.  validate_horizontal_release() is the one
             -- place both are checked against reality before being accepted.
-            best_bearing_deg, best_distance_m, obstacle_avoiding, held =
+            best_bearing_deg, best_distance_m, obstacle_avoiding, held, selected_end_m =
                     validate_horizontal_release(target_loc, best_bearing_deg, best_distance_m)
         end
+        -- DAAB's HBrc/CurC: unlike SelM/SelE above, these are meaningful every cycle
+        -- regardless of was_release_candidate - the breach STATE and the aircraft's own
+        -- current clearance exist whether or not a release check happened to run this
+        -- cycle. Same breach-inclusive queries validate_horizontal_release() uses
+        -- internally for its own recovery_mode gating (duplicated here rather than
+        -- threaded out of it, so this is accurate on every cycle, not just its own).
+        local horizontal_breach = fence ~= nil and (fence:get_breaches() & HORIZONTAL_BREACH_MASK) ~= 0
+        local current_clearance_m = obstacles.fence_path_clearance(current_loc, current_loc, detect_m)
 
         -- DAAR diagnostics - only on a release candidate (was_release_candidate), the
         -- one moment these actually matter: not every idle cruise cycle (nothing to
@@ -1634,6 +1744,27 @@ function DAAcore.new(deps)
             gone and 1 or 0)                 -- Gon - did resolve_moving_bearing() dismiss it
         if not status then
             gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " log resolve:" .. tostring(err))
+        end
+
+        -- DAAB: validate_horizontal_release()'s recovery-mode diagnostics, a separate
+        -- record from DAAR purely because DAAR's own label string is already at Lua's
+        -- 57-char logger.write() limit (confirmed the hard way twice) with no room left.
+        --   HBrc - horizontal breach bits set (fence:get_breaches() & 6) this cycle
+        --   CurC - breach-inclusive clearance AT the aircraft's actual current position
+        --   SelM - min clearance anywhere along whichever path validate_horizontal_
+        --          release() selected (also its 2nd return value, best_distance_m above)
+        --   SelE - clearance at that same path's far endpoint alone
+        local status_b, err_b = pcall(logger.write, logger, "DAAB",
+            'HBrc,CurC,SelM,SelE',
+            'Bfff',
+            '-mmm',
+            '----',
+            horizontal_breach and 1 or 0,
+            math.max(math.min(current_clearance_m, LOG_CLEARANCE_MAX_M), -LOG_CLEARANCE_MAX_M),
+            math.max(math.min(best_distance_m, LOG_CLEARANCE_MAX_M), -LOG_CLEARANCE_MAX_M),
+            math.max(math.min(selected_end_m, LOG_CLEARANCE_MAX_M), -LOG_CLEARANCE_MAX_M))
+        if not status_b then
+            gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " log daab:" .. tostring(err_b))
         end
 
         if obstacle_avoiding == nil then
