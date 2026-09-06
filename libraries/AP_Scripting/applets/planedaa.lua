@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-104"
+SCRIPT_VERSION      = "4.8.0-105"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -514,27 +514,31 @@ end
 -- call rather than a table index inside the candidate-heading sweep.
 -- assigned once get_mode_string exists, which it needs; configure_modules() below
 -- refers to it, so it has to be in scope from here
+--
+-- geometry/obstacles/core/loiteralt are forward-declared here but not required/
+-- instantiated until init_modules() runs from Delayed_Startup() (see that function) -
+-- moving all four modules' heap allocations off the chunk's immediate, synchronous
+-- top-level execution (which runs within the first second or two of boot) and out to
+-- STARTUP_DELAY later, so they stop racing AP_Terrain's own first allocation attempt
+-- for the same contiguous space at the point the heap is most fragmented. Found live,
+-- log 00000095.BIN.
 local loiteralt
 local core
-
--- daageo is stateless (every function is a pure function of its arguments, see that file),
--- so it is required directly rather than instantiated - there is no shared state to keep
--- consistent between this file, daacore and daaobs.
-local geometry  = need("daageo")
-local obstacles = need("daaobs").new()
+local geometry
+local obstacles
 
 -- The obstacle taxonomy belongs to the module that classifies obstacles, so it is defined
 -- there and read back here.  This file only names the four members it actually uses, which
 -- keeps the other twelve - and the whole twenty-member ADSB_EMITTER table - out of this
 -- chunk's parser budget.  See planedaa.md, "Distinct names are a budget".
-local OBSTACLE_TYPE = obstacles.OBSTACLE_TYPE
+local OBSTACLE_TYPE
 
-local max_turn_rate_dps         = geometry.max_turn_rate_dps
-local turn_radius_m             = geometry.turn_radius_m
-local wrap_180                  = geometry.wrap_180
-local locations_equal           = geometry.locations_equal
-local pretty_obstacle_type      = obstacles.pretty_obstacle_type
-local obstacle_report_distance  = obstacles.obstacle_report_distance
+local max_turn_rate_dps
+local turn_radius_m
+local wrap_180
+local locations_equal
+local pretty_obstacle_type
+local obstacle_report_distance
 
 -- Real achievable turn radius at ROLL_LIMIT_DEG and AIRSPEED_CRUISE - the physical margin
 -- "DAA_MARGIN_FENCE = 0" promises ("use the turn radius so the fence standoff = one turn").
@@ -551,12 +555,13 @@ local function fence_margin_fallback_m()
     if achievable_turn_radius_m <= 0 then achievable_turn_radius_m = wp_loiter_rad_m end
     return achievable_turn_radius_m
 end
-if margin_fence_m <= 0 then margin_fence_m = fence_margin_fallback_m() end
+-- The fallback CALL below (and the roll_rate_dps calc, which also needs geometry) moved
+-- into init_modules() - both need turn_radius_m/geometry, which do not exist until then.
 
 -- See daageo's roll_rate_dps() for the rationale (RLL2SRV_RMAX, falling back to
 -- roll_limit_deg / RLL2SRV_TCONST since RMAX ships at 0).  Refreshed alongside
 -- roll_limit_deg every 5 s below, since the fallback depends on it.
-local roll_rate_dps = geometry.roll_rate_dps(PARAM.RLL2SRV_RMAX:get(), roll_limit_deg, PARAM.RLL2SRV_TCONST:get())
+local roll_rate_dps
 
 local bearing_inc_deg = PARAM.HEADING_INC:get() or DEFAULT_HEADING_INC_DEG
 if bearing_inc_deg <= 0 then
@@ -763,26 +768,54 @@ end
 -- The avoidance MECHANISM.  It answers "where can I safely go?" and decides nothing about
 -- what to do with the answer - alerting, commanding and the failsafes all stay in this
 -- file, which is what keeps this the only file an integrator has to edit.
-core = need("daacore").new({
-    obstacles           = obstacles,
-    MAV_SEVERITY        = MAV_SEVERITY,
-})
+-- Instantiates every DAA module and everything that depends on one: daageo/daaobs (moved
+-- here from chunk top-level so their heap allocations happen at STARTUP_DELAY instead of
+-- racing AP_Terrain's own first allocation attempt at the most fragmented point in boot -
+-- see the forward-declaration comment above), the taxonomy/geometry aliases, the
+-- margin_fence_m fallback and roll_rate_dps calc (both need geometry), then daacore and
+-- daaltr, which need obstacles. Called once, from the top of Delayed_Startup() - MUST run
+-- before DAA.enable(), which calls DAA.warnings(), which itself calls max_turn_rate_dps()
+-- and fence_margin_fallback_m() (-> turn_radius_m()) and would otherwise call a nil value.
+local function init_modules()
+    -- daageo is stateless (every function is a pure function of its arguments, see that
+    -- file), so it is required directly rather than instantiated - there is no shared
+    -- state to keep consistent between this file, daacore and daaobs.
+    geometry  = need("daageo")
+    obstacles = need("daaobs").new()
 
--- The altitude loiter is a POLICY implementation living behind a small seam: five members
--- (.active, start, stop, update, aircraft_seen).  Point this at a different module - your
--- own daaltr2 - and nothing else in this file changes.  See planedaa.md.
-loiteralt = need("daaltr").new({
-    PLANE_MODE              = PLANE_MODE,
-    ALT_FRAME               = ALT_FRAME,
-    MAV_DO_REPOSITION_FLAGS = MAV_DO_REPOSITION_FLAGS,
-    MAV_SEVERITY            = MAV_SEVERITY,
-    get_mode_string         = get_mode_string,
-    mavlink_wrappers        = mavlink_wrappers,
-})
+    OBSTACLE_TYPE = obstacles.OBSTACLE_TYPE
 
--- Now that every module exists, push the cached parameter values into all of them.  The
--- 5 s refresh in get_vehicle_state() calls this again whenever a parameter changes.
-configure_modules()
+    max_turn_rate_dps        = geometry.max_turn_rate_dps
+    turn_radius_m            = geometry.turn_radius_m
+    wrap_180                 = geometry.wrap_180
+    locations_equal          = geometry.locations_equal
+    pretty_obstacle_type     = obstacles.pretty_obstacle_type
+    obstacle_report_distance = obstacles.obstacle_report_distance
+
+    if margin_fence_m <= 0 then margin_fence_m = fence_margin_fallback_m() end
+    roll_rate_dps = geometry.roll_rate_dps(PARAM.RLL2SRV_RMAX:get(), roll_limit_deg, PARAM.RLL2SRV_TCONST:get())
+
+    core = need("daacore").new({
+        obstacles           = obstacles,
+        MAV_SEVERITY        = MAV_SEVERITY,
+    })
+
+    -- The altitude loiter is a POLICY implementation living behind a small seam: five
+    -- members (.active, start, stop, update, aircraft_seen).  Point this at a different
+    -- module - your own daaltr2 - and nothing else in this file changes.  See planedaa.md.
+    loiteralt = need("daaltr").new({
+        PLANE_MODE              = PLANE_MODE,
+        ALT_FRAME               = ALT_FRAME,
+        MAV_DO_REPOSITION_FLAGS = MAV_DO_REPOSITION_FLAGS,
+        MAV_SEVERITY            = MAV_SEVERITY,
+        get_mode_string         = get_mode_string,
+        mavlink_wrappers        = mavlink_wrappers,
+    })
+
+    -- Now that every module exists, push the cached parameter values into all of them.
+    -- The 5 s refresh in get_vehicle_state() calls this again whenever a parameter changes.
+    configure_modules()
+end
 
 -------------------------------------------------------------------------------
 --- DAA (Detect, Alert, Avoid) management class
@@ -1801,6 +1834,10 @@ end
 
 function Delayed_Startup()
     gcs:send_text(MAV_SEVERITY.INFO, string.format("%s %s script loaded", SCRIPT_NAME, SCRIPT_VERSION) )
+    -- Every DAA module (daageo/daaobs/daacore/daaltr) is instantiated HERE, not at chunk
+    -- load time - see init_modules()'s own comment. Must run before DAA.enable() below,
+    -- which calls DAA.warnings(), which needs turn_radius_m/max_turn_rate_dps to exist.
+    init_modules()
     -- DAA defaults to on but can be disabled using a scripting aux function
     DAA.enable()
     return Protected_Wrapper()
