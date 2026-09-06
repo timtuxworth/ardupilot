@@ -66,6 +66,9 @@ void AP_Mount_SkyDroid::update()
     }
     _last_req_current_info_ms = now_ms;
 
+    // warn if the gimbal never confirmed our last record_video() request
+    check_recording_confirmed();
+
     // push our own attitude to the gimbal
     send_attitude_to_gimbal();
 
@@ -176,10 +179,33 @@ bool AP_Mount_SkyDroid::record_video(bool start_recording)
     // "REC": record video, data bytes: 00:stop, 01:start.  sample command: #TPUD2wREC01
     if (send_fixedlen_packet(AddressByte::SYSTEM_AND_IMAGE, "REC", true, start_recording ? 1 : 0)) {
         // SkyDroid does not push unsolicited recording-state changes to us so track our own request locally
+        // until (if ever) the gimbal's own "REC" echo confirms or contradicts it - see
+        // gimbal_record_analyse()/check_recording_confirmed()
         _recording = start_recording;
+        _recording_requested = start_recording;
+        _recording_confirm_pending = true;
+        _recording_confirm_deadline_ms = AP_HAL::millis() + AP_MOUNT_SKYDROID_RECORD_CONFIRM_TIMEOUT_MS;
         return true;
     }
     return false;
+}
+
+// warn if the gimbal never confirmed our last record_video() request within
+// AP_MOUNT_SKYDROID_RECORD_CONFIRM_TIMEOUT_MS.  A confirming or contradicting "REC" echo
+// clears _recording_confirm_pending as soon as it arrives (see gimbal_record_analyse()),
+// so by the time this timeout fires it means no echo arrived at all - most likely the
+// command was lost (e.g. UDP packet loss, or another client currently has the gimbal's
+// attention - see this file's header comment on SkyDroid's single-active-client behaviour)
+void AP_Mount_SkyDroid::check_recording_confirmed()
+{
+    if (!_recording_confirm_pending) {
+        return;
+    }
+    if (AP_HAL::millis() < _recording_confirm_deadline_ms) {
+        return;
+    }
+    _recording_confirm_pending = false;
+    GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "%s %s recording not confirmed", send_message_prefix, _recording_requested ? "start" : "stop");
 }
 
 // set zoom specified as a rate.  SkyDroid's digital zoom is stepped, not continuous:
@@ -503,6 +529,16 @@ void AP_Mount_SkyDroid::gimbal_record_analyse()
         return;
     }
     _recording = (_msg_buff[AP_MOUNT_TPFRAME_MSGOFS_DATA + 1] == '1');
+
+    // this is the gimbal's own echo of our last record_video() request (see that
+    // function's comment) - if we were waiting on one, it's answered now, whether or
+    // not it agrees with what we asked for
+    if (_recording_confirm_pending) {
+        _recording_confirm_pending = false;
+        if (_recording != _recording_requested) {
+            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "%s failed to %s recording", send_message_prefix, _recording_requested ? "start" : "stop");
+        }
+    }
 }
 
 // information analysis of gimbal storage card

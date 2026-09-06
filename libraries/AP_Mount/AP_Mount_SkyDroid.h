@@ -78,6 +78,7 @@
 #include <AP_Common/AP_Common.h>
 
 #define AP_MOUNT_SKYDROID_PACKETLEN_MAX     28      // maximum number of bytes in a packet sent to or received from the gimbal
+#define AP_MOUNT_SKYDROID_RECORD_CONFIRM_TIMEOUT_MS  2000   // how long to wait for the gimbal's "REC" echo before warning that a record_video() request was never confirmed
 
 class AP_Mount_SkyDroid : public AP_Mount_Backend_TPFrame
 {
@@ -297,8 +298,16 @@ private:
     // both send_target_retracted() and send_target_neutral() - see their comments
     bool send_center_command();
 
+    // check whether the gimbal has confirmed (or contradicted) our last record_video()
+    // request within AP_MOUNT_SKYDROID_RECORD_CONFIRM_TIMEOUT_MS, and warn if not -
+    // see record_video()/gimbal_record_analyse()
+    void check_recording_confirmed();
+
     // members
-    bool _recording;                                            // recording status, tracked locally from commands we've sent
+    bool _recording;                                            // recording status: the gimbal's last-reported actual state if we've heard a "REC" reply, otherwise our own last request (see record_video())
+    bool _recording_requested;                                  // recording state last requested via record_video(), valid only while _recording_confirm_pending
+    bool _recording_confirm_pending;                             // true while waiting for the gimbal's "REC" echo to confirm (or contradict) our last record_video() request
+    uint32_t _recording_confirm_deadline_ms;                     // system time by which we expect the gimbal to have echoed our last record_video() request, valid only while _recording_confirm_pending
     SDCardState _sdcard_state = SDCardState::UNKNOWN;           // memory card state, as last reported by the gimbal (see SDCardState)
     bool _last_lock;                                            // last lock mode sent to gimbal, only meaningful once _lock_sent
     bool _lock_sent;                                            // true once set_gimbal_lock() has sent a mode at least once
