@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-022"
+DAAcore.SCRIPT_VERSION = "4.8.0-023"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -1396,8 +1396,11 @@ function DAAcore.new(deps)
 
     -- One shared release-validation path for every way a horizontal avoidance can lapse
     -- this cycle - the sweep finding nothing at all, or a moving obstacle opening up -
-    -- called from detect_impl() only once obstacle_avoiding has actually become nil,
-    -- never while a fence or an unresolved moving obstacle is still the live winner.
+    -- and, since round ten (00000196.BIN), also called every cycle a moving obstacle is
+    -- STILL the live winner, so a fence eroding underneath a long-running moving-obstacle
+    -- avoidance is not invisible until whatever cycle that avoidance happens to end on.
+    -- Never called while a fence is the live winner - resolve_fence_bearing() already
+    -- applies its own hysteresis in that case.
     --
     -- Always runs the check below, regardless of whether a fence previously won this
     -- cycle's single-obstacle choice: a moving obstacle being dismissed as
@@ -1598,25 +1601,50 @@ function DAAcore.new(deps)
         -- is what dismissed it - captured here, before validate_horizontal_release() can
         -- reassign obstacle_avoiding below.
         local was_release_candidate = (obstacle_avoiding == nil)
+        -- Round ten (00000196.BIN, 2026-09-06): a moving obstacle can keep winning the
+        -- single-obstacle choice for many seconds straight while a fence quietly erodes
+        -- to a breach underneath it - the release check below used to run only at the
+        -- INSTANT the moving obstacle stopped winning, so a fence that never got that
+        -- instant (this one didn't: the drone was dismissed for good only after the
+        -- aircraft had already crossed the boundary) was never checked at all. Run the
+        -- same fence-reality check while a moving obstacle is still actively being
+        -- avoided too - it is one line query, the same cost validate_horizontal_release()
+        -- already pays at every ordinary release, not the full sweep.
+        local was_moving_avoidance = obstacle_avoiding ~= nil and not is_fence and not gone
         local held = false
-        if was_release_candidate then
-            -- Either the sweep found nothing this cycle, or a moving obstacle just
-            -- opened up - both are a horizontal release, and neither can be trusted on
-            -- its own: the sweep's "clear" verdict assumes the aircraft has ALREADY
-            -- turned onto the chosen bearing, and a moving obstacle winning the
-            -- single-obstacle choice for the last cycle or two can silently outrank a
-            -- fence that is still close.  validate_horizontal_release() is the one
-            -- place both are checked against reality before being accepted.
-            best_bearing_deg, best_distance_m, obstacle_avoiding, held =
+        if was_release_candidate or was_moving_avoidance then
+            -- Either the sweep found nothing this cycle, a moving obstacle just opened
+            -- up, or a moving obstacle is still being avoided - none of those can be
+            -- trusted alone to mean the fence is not a problem: the sweep's "clear"
+            -- verdict assumes the aircraft has ALREADY turned onto the chosen bearing,
+            -- and a moving obstacle winning the single-obstacle choice can silently
+            -- outrank a fence that is still close, for one cycle or for the whole
+            -- encounter.  validate_horizontal_release() is the one place this is
+            -- checked against reality before being accepted.
+            local resolved_bearing_deg, resolved_distance_m, resolved_obstacle
+            resolved_bearing_deg, resolved_distance_m, resolved_obstacle, held =
                     validate_horizontal_release(target_loc, best_bearing_deg, best_distance_m)
+            if was_release_candidate or resolved_obstacle ~= nil then
+                -- A genuine release (fence confirmed clear too - resolved_obstacle is
+                -- nil), a release the fence just vetoed, OR the fence overriding an
+                -- ongoing moving-obstacle avoidance because the path being flown is no
+                -- longer safe: all three replace best_bearing_deg/best_distance_m and
+                -- reassign obstacle_avoiding to whatever validate_horizontal_release()
+                -- decided. The one case that must NOT overwrite obstacle_avoiding with
+                -- nil is "still avoiding a moving obstacle and the fence check found
+                -- the path clear" (was_release_candidate false, resolved_obstacle nil) -
+                -- that is excluded by this same condition, leaving
+                -- resolve_moving_bearing()'s own answer untouched below.
+                best_bearing_deg, best_distance_m, obstacle_avoiding =
+                        resolved_bearing_deg, resolved_distance_m, resolved_obstacle
+            end
         end
 
-        -- DAAR diagnostics - only on a release candidate (was_release_candidate), the
-        -- one moment these actually matter: not every idle cruise cycle (nothing to
-        -- remeasure - FinalB is just the direct-to-target bearing the sweep already
-        -- validated), and not while continuing an ordinary ongoing avoidance either
-        -- (this is the exact moment breach evidence showed hidden before: a release
-        -- that lands back on ObjT=0 used to compute none of these).
+        -- DAAR diagnostics - only when validate_horizontal_release() actually ran this
+        -- cycle (was_release_candidate or was_moving_avoidance): not every idle cruise
+        -- cycle (nothing to remeasure - FinalB is just the direct-to-target bearing the
+        -- sweep already validated), and not while resolving a fence directly either
+        -- (resolve_fence_bearing() already applied its own hysteresis to FinalB).
         --   TrjD - clearance of continuing the CURRENT bank/heading, unrelated to what is
         --          actually being commanded - "what happens if I fly on as I am".
         --   CmdD - clearance of the trajectory actually needed to REACH FinalB
@@ -1630,7 +1658,7 @@ function DAAcore.new(deps)
         local traj_distance_m  = best_distance_m
         local cmd_distance_m   = best_distance_m
         local fence_proj_m     = nil
-        if was_release_candidate then
+        if was_release_candidate or was_moving_avoidance then
             local traj_loc = project_current_trajectory(target_loc)
             traj_distance_m = find_closest_obstacle(current_loc, traj_loc, detect_m, wind_speed)
             local cmd_loc = location_for_candidate(best_bearing_deg, target_loc)
