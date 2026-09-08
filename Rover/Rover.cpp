@@ -319,9 +319,6 @@ void Rover::ahrs_update()
     
 #if AP_FOLLOW_ENABLED
     g2.follow.update_estimates();
-#if HAL_MOUNT_ENABLED
-    push_follow_estimate_to_mount();
-#endif
 #endif
 
 #if HAL_LOGGING_ENABLED
