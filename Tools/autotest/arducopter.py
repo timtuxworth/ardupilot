@@ -8342,6 +8342,83 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
                     "home-relative one which assumes a shared home "
                     "(expected pitch %f, got %f)" % (expected_pitch, got_pitch))
 
+            self.progress("Testing mount holds once the raw altitude-override source goes stale")
+            # a real target that switches from GLOBAL_POSITION_INT to
+            # FOLLOW_TARGET (AP_Follow prefers FOLLOW_TARGET and stops
+            # using GLOBAL_POSITION_INT once it sees one) typically stops
+            # sending GLOBAL_POSITION_INT entirely once it does - but
+            # AP_Mount's own raw handler (which the altitude override
+            # above depends on) is only ever fed by GLOBAL_POSITION_INT,
+            # so the override's altitude source can go stale forever
+            # unless it expires the same way the raw path below does
+            self.set_parameters({"FOLL_ENABLE": 1})
+            (stale_ovr_lat, stale_ovr_lon) = mavextra.gps_offset(start.lat, start.lng, 0, 20)
+            stale_ovr_abs_alt_m = start.get_alt_m(AltFrame.ABSOLUTE) + 10
+            self.mav.mav.global_position_int_send(
+                int(self.get_sim_time_cached() * 1000), # time boot ms
+                int(stale_ovr_lat * 1e7),
+                int(stale_ovr_lon * 1e7),
+                int(stale_ovr_abs_alt_m * 1000), # mm alt amsl
+                40 * 1000, # mm above home
+                0, 0, 0, 0,
+            )
+            self.delay_sim_time(0.5, reason="let the mount settle on the fresh estimate")
+            stale_ovr_held_pitch = poll_mount_pitch_deg()
+
+            # switch to FOLLOW_TARGET at the *same* position, sending no
+            # further GLOBAL_POSITION_INT: the raw altitude-override source
+            # (only ever fed by GLOBAL_POSITION_INT) is now frozen, but
+            # since the target hasn't moved yet, the commanded pitch can't
+            # tell a fixed build (soon holding) apart from a buggy one
+            # (still re-deriving from an unchanged position) - this phase
+            # only lets AP_MOUNT_SYSID_TIMEOUT_MS actually elapse on the raw
+            # side while AP_Follow's own estimate, fed by these messages,
+            # stays valid throughout
+            tstart = self.get_sim_time()
+            while self.get_sim_time_cached() - tstart < 3.5:
+                self.mav.mav.follow_target_send(
+                    int(self.get_sim_time_cached() * 1000), # timestamp (ms)
+                    1,  # est_capabilities: bit0 = position estimate present
+                    int(stale_ovr_lat * 1e7),
+                    int(stale_ovr_lon * 1e7),
+                    stale_ovr_abs_alt_m,  # alt (m, AMSL) - irrelevant, the raw override replaces it
+                    [0, 0, 0],  # vel
+                    [0, 0, 0],  # acc
+                    [1, 0, 0, 0],  # attitude_q
+                    [0, 0, 0],  # rates
+                    [0, 0, 0],  # position_cov
+                    0,  # custom_state
+                )
+                self.delay_sim_time(0.8, reason="let the raw override go stale, keeping AP_Follow's estimate valid")
+
+            # *now* move the target via FOLLOW_TARGET, well after the raw
+            # override source went stale: a fixed build holds the last
+            # commanded angle regardless (the whole kinematic branch is
+            # skipped once stale); a buggy one keeps re-deriving the angle
+            # from AP_Follow's fresh, moved kinematic estimate combined with
+            # the still-frozen altitude, so the pitch would visibly change
+            (stale_ovr_lat2, stale_ovr_lon2) = mavextra.gps_offset(start.lat, start.lng, 0, 40)
+            self.mav.mav.follow_target_send(
+                int(self.get_sim_time_cached() * 1000), # timestamp (ms)
+                1,  # est_capabilities: bit0 = position estimate present
+                int(stale_ovr_lat2 * 1e7),
+                int(stale_ovr_lon2 * 1e7),
+                stale_ovr_abs_alt_m,  # alt (m, AMSL) - irrelevant, the raw override replaces it
+                [0, 0, 0],  # vel
+                [0, 0, 0],  # acc
+                [1, 0, 0, 0],  # attitude_q
+                [0, 0, 0],  # rates
+                [0, 0, 0],  # position_cov
+                0,  # custom_state
+            )
+            got_pitch = poll_mount_pitch_deg()
+            if abs(got_pitch - stale_ovr_held_pitch) > 3:
+                raise NotAchievedException(
+                    "Mount should hold once its raw altitude-override source "
+                    "goes stale, not keep re-deriving the angle from "
+                    "AP_Follow's kinematic estimate with an indefinitely "
+                    "old altitude (held pitch %f, got %f)" % (stale_ovr_held_pitch, got_pitch))
+
             self.context_pop()
 
             self.set_mount_mode(mavutil.mavlink.MAV_MOUNT_MODE_NEUTRAL)

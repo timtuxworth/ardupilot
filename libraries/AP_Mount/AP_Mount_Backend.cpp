@@ -1247,13 +1247,20 @@ bool AP_Mount_Backend::get_angle_target_to_sysid(MountAngleTarget& angle_rad) co
             Location loc;
             if (AP::ahrs().get_location_from_origin_offset_NED(loc, pos_ned_m)) {
                 _target_sysid_kinematic_had_estimate = true;
-                if (_target_sysid_location.initialised()) {
-                    // AP_Follow's location may be expressed in a home-relative
-                    // altitude frame that doesn't match our own home (eg its
-                    // ABOVE_HOME handling assumes a shared home with the
-                    // target, which isn't guaranteed) - override with our own
-                    // independently-tracked absolute altitude, which has no
-                    // such ambiguity
+                // AP_Follow's location may be expressed in a home-relative
+                // altitude frame that doesn't match our own home (eg its
+                // ABOVE_HOME handling assumes a shared home with the target,
+                // which isn't guaranteed) - override with our own
+                // independently-tracked absolute altitude, which has no such
+                // ambiguity. That override source is populated only by our
+                // own handle_global_position_int(), which stops being called
+                // at all once a target switches to sending FOLLOW_TARGET
+                // instead (AP_Follow accepts both) - so require it to still
+                // be fresh by the same staleness window that guards the raw
+                // path below, not just present, or the override could keep
+                // using an arbitrarily old altitude forever
+                if (_target_sysid_location.initialised() &&
+                    AP_HAL::millis() - _target_sysid_update_ms <= AP_MOUNT_SYSID_TIMEOUT_MS) {
                     loc.set_alt_cm(_target_sysid_location.alt, Location::AltFrame::ABSOLUTE);
                     if (get_angle_target_to_location(loc, angle_rad)) {
                         return true;
@@ -1263,10 +1270,10 @@ bool AP_Mount_Backend::get_angle_target_to_sysid(MountAngleTarget& angle_rad) co
                     // through to the timeout-based path below rather than
                     // just failing outright
                 } else {
-                    // we have no independently-tracked absolute altitude to
-                    // override with yet (eg the target was only just set and
-                    // our own handle_global_position_int() hasn't seen a
-                    // packet for it); using AP_Follow's own altitude frame
+                    // we have no fresh, independently-tracked absolute
+                    // altitude to override with (eg the target was only
+                    // just set, or its raw telemetry has gone stale/stopped
+                    // entirely); using AP_Follow's own altitude frame
                     // unchecked risks the exact altitude-reference bug the
                     // override exists to prevent, so hold rather than risk it
                     return false;
