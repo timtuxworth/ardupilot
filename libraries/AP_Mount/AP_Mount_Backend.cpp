@@ -403,7 +403,6 @@ void AP_Mount_Backend::set_target_sysid(uint8_t sysid)
         // reported as the new target's (still-fresh) position
         _target_sysid_location.zero();
         _target_sysid_update_ms = 0;
-        _target_sysid_kinematic_had_estimate = false;
     }
     _target_sysid = sysid;
 
@@ -1246,7 +1245,6 @@ bool AP_Mount_Backend::get_angle_target_to_sysid(MountAngleTarget& angle_rad) co
         if (follow->get_target_pos_vel_accel_NED_m(pos_ned_m, vel_ned_ms, accel_ned_mss)) {
             Location loc;
             if (AP::ahrs().get_location_from_origin_offset_NED(loc, pos_ned_m)) {
-                _target_sysid_kinematic_had_estimate = true;
                 // AP_Follow's location may be expressed in a home-relative
                 // altitude frame that doesn't match our own home (eg its
                 // ABOVE_HOME handling assumes a shared home with the target,
@@ -1259,9 +1257,11 @@ bool AP_Mount_Backend::get_angle_target_to_sysid(MountAngleTarget& angle_rad) co
                 // be fresh by the same staleness window that guards the raw
                 // path below, not just present, or the override could keep
                 // using an arbitrarily old altitude forever
+                int32_t override_alt_cm;
                 if (_target_sysid_location.initialised() &&
-                    AP_HAL::millis() - _target_sysid_update_ms <= AP_MOUNT_SYSID_TIMEOUT_MS) {
-                    loc.set_alt_cm(_target_sysid_location.alt, Location::AltFrame::ABSOLUTE);
+                    AP_HAL::millis() - _target_sysid_update_ms <= AP_MOUNT_SYSID_TIMEOUT_MS &&
+                    _target_sysid_location.get_alt_cm(Location::AltFrame::ABSOLUTE, override_alt_cm)) {
+                    loc.set_alt_cm(override_alt_cm, Location::AltFrame::ABSOLUTE);
                     if (get_angle_target_to_location(loc, angle_rad)) {
                         return true;
                     }
@@ -1279,19 +1279,19 @@ bool AP_Mount_Backend::get_angle_target_to_sysid(MountAngleTarget& angle_rad) co
                     return false;
                 }
             }
-        } else if (_target_sysid_kinematic_had_estimate) {
-            // AP_Follow gave us a usable estimate before but doesn't
-            // currently have one - hold the last commanded angle rather than
-            // falling back to the raw, differently-timed location below,
-            // which would cause a visible snap back to a less current
-            // position
-            return false;
         }
-        // else: AP_Follow is configured and enabled for this sysid but has
-        // never yet supplied a usable estimate (eg it's still acquiring, or
-        // its own validity checks are rejecting the data) - there is
-        // nothing to hold or snap back from, so fall through to the
-        // raw-location path below rather than refusing to point at all
+        // else: AP_Follow is configured and enabled for this sysid but
+        // doesn't currently have a usable estimate (eg it's still
+        // acquiring, its own validity checks are rejecting the data, or
+        // the target is beyond FOLL_DIST_MAX - 100m by default on
+        // Copter/Rover, a routine distance for a tracked target, not an
+        // edge case) - fall through to the raw-location path below, which
+        // has its own freshness check and can keep tracking correctly
+        // using GLOBAL_POSITION_INT alone. A previous version held here
+        // instead (latched on ever having had an AP_Follow estimate), but
+        // that meant losing the estimate for any reason - including this
+        // very common one - froze the mount indefinitely even though raw
+        // telemetry kept arriving and the raw path would have worked fine
     }
 #endif  // AP_FOLLOW_ENABLED
 

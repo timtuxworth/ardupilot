@@ -8156,6 +8156,76 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
 
             self.progress("Testing mount uses AP_Follow's kinematic estimate when sysids match")
             self.context_push()
+
+            self.progress("Testing mount ignores AP_Follow when FOLL_SYSID differs from our target sysid")
+            # AP_Follow enabled and given a genuinely valid, fresh estimate,
+            # but for a different sysid than the mount's SYSID_TARGET - the
+            # sysid-match guard should keep the mount on the raw-location
+            # path exclusively. Impersonate the other sysid as the source
+            # of a target at a *different horizontal offset* (5m, vs 20m
+            # for the real target below) - deliberately not just a
+            # different altitude, since the override logic always replaces
+            # whatever altitude AP_Follow reports with our own raw one, so
+            # only a horizontal difference would actually show through a
+            # broken guard
+            other_sysid = self.mav.source_system + 1
+            self.set_parameters({
+                "FOLL_ENABLE": 1,
+                "FOLL_SYSID": other_sysid,
+                "FOLL_ALT_TYPE": 1,
+            })
+            (other_lat, other_lon) = mavextra.gps_offset(start.lat, start.lng, 0, 5)
+            other_abs_alt_m = start.get_alt_m(AltFrame.ABSOLUTE) + 10
+            (mismatch_lat, mismatch_lon) = mavextra.gps_offset(start.lat, start.lng, 0, 20)
+            mismatch_abs_alt_m = start.get_alt_m(AltFrame.ABSOLUTE) + 10
+            mismatch_pitch_deg = math.degrees(math.atan2(10, 20))
+
+            def send_other_sysid_target():
+                self.mav.mav.srcSystem = other_sysid
+                try:
+                    self.mav.mav.global_position_int_send(
+                        int(self.get_sim_time_cached() * 1000), # time boot ms
+                        int(other_lat * 1e7),
+                        int(other_lon * 1e7),
+                        int(other_abs_alt_m * 1000), # mm alt amsl
+                        40 * 1000, # mm above home
+                        0, 0, 0, 0,
+                    )
+                finally:
+                    self.mav.mav.srcSystem = self.mav.source_system
+
+            def send_real_sysid_target():
+                self.mav.mav.global_position_int_send(
+                    int(self.get_sim_time_cached() * 1000), # time boot ms
+                    int(mismatch_lat * 1e7),
+                    int(mismatch_lon * 1e7),
+                    int(mismatch_abs_alt_m * 1000), # mm alt amsl
+                    40 * 1000, # mm above home
+                    0, 0, 0, 0,
+                )
+
+            send_other_sysid_target()
+            self.delay_sim_time(0.5, reason="let AP_Follow settle on the other sysid's estimate")
+            send_real_sysid_target()
+
+            # keep re-sending both throughout the check window - AP_Follow's
+            # own estimate for the other sysid would otherwise expire on
+            # its own FOLL_TIMEOUT partway through, masking a broken guard
+            # behind a transient rather than a sustained wrong reading
+            tstart = self.get_sim_time()
+            while self.get_sim_time_cached() - tstart < 3:
+                send_other_sysid_target()
+                send_real_sysid_target()
+                self.delay_sim_time(0.3, reason="keep both estimates fresh through the check window")
+
+            self.test_mount_pitch(
+                mismatch_pitch_deg,
+                3,
+                mavutil.mavlink.MAV_MOUNT_MODE_SYSID_TARGET,
+                hold=1,
+                constrained=constrain_sysid_target,
+            )
+
             self.set_parameters({
                 "FOLL_ENABLE": 1,
                 "FOLL_SYSID": self.mav.source_system,
@@ -8237,63 +8307,57 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
                     "while the target is moving and telemetry is temporarily stale "
                     "(pitch was %f before gap, %f after)" % (pre_gap_pitch, post_gap_pitch))
 
-            self.progress("Testing mount doesn't keep re-deriving AP_Follow's stale estimate")
-            # establish a fresh, non-saturating kinematic estimate so its
-            # timestamp is recent when we invalidate it below, giving the
-            # bug (if not fixed) its full AP_MOUNT_SYSID_TIMEOUT_MS window
-            # to show through rather than racing it
-            (staleness_lat, staleness_lon) = mavextra.gps_offset(start.lat, start.lng, 0, 20)
-            staleness_abs_alt_m = start.get_alt_m(AltFrame.ABSOLUTE) + 10
+            self.progress("Testing mount falls through to raw tracking when AP_Follow's estimate is lost")
+            # establish a working AP_Follow-driven estimate first, so losing
+            # it below is a genuine transition rather than never having had
+            # one (that's the acquisition-window case tested above)
+            (lost_lat, lost_lon) = mavextra.gps_offset(start.lat, start.lng, 0, 20)
+            lost_abs_alt_m = start.get_alt_m(AltFrame.ABSOLUTE) + 10
             self.mav.mav.global_position_int_send(
                 int(self.get_sim_time_cached() * 1000), # time boot ms
-                int(staleness_lat * 1e7),
-                int(staleness_lon * 1e7),
-                int(staleness_abs_alt_m * 1000), # mm alt amsl
+                int(lost_lat * 1e7),
+                int(lost_lon * 1e7),
+                int(lost_abs_alt_m * 1000), # mm alt amsl
                 40 * 1000, # mm above home
                 0, 0, 0, 0,
             )
-            self.delay_sim_time(0.5, reason="let the mount settle on the fresh estimate")
-            held_pitch = poll_mount_pitch_deg()
+            self.delay_sim_time(0.5, reason="let the mount settle on the initial estimate")
 
-            # force AP_Follow's estimate invalid *immediately* rather than
-            # waiting out its own FOLL_TIMEOUT: FOLL_DIST_MAX rejects any
-            # target beyond this distance on every update, so setting it
-            # well under the target's actual ~20m distance flips
-            # _estimate_valid false on the very next AP_Follow update -
-            # deterministic, and fast enough that (if the bug were present)
-            # its own separate AP_MOUNT_SYSID_TIMEOUT_MS window can't have
-            # naturally elapsed yet either, unlike a real vehicle move would
-            # risk
+            # FOLL_DIST_MAX rejects any target beyond this distance on
+            # every AP_Follow update - setting it well under the target's
+            # actual ~20m distance deterministically invalidates the
+            # estimate on the next update, standing in for the many ways
+            # this can happen for real (AP_FOLLOW_DIST_MAX_DEFAULT is 100m
+            # on Copter/Rover - a routine tracking distance, not an edge
+            # case - or FOLL_TIMEOUT, or a lost link)
             self.set_parameter("FOLL_DIST_MAX", 1)
             self.delay_sim_time(0.2, reason="let AP_Follow's estimate go invalid")
 
-            # send a *raw* GLOBAL_POSITION_INT with a clearly different
-            # absolute altitude. AP_Mount's own handle_global_position_int()
-            # updates its raw location unconditionally, regardless of
-            # AP_Follow - but the (still frozen) kinematic location is
-            # unreachable by this message too, since AP_Follow rejects it
-            # (still >FOLL_DIST_MAX away). If the bug were present the
-            # mount would still be re-deriving the angle from the frozen
-            # kinematic location with this new override altitude every
-            # loop, producing a different pitch; correct behaviour holds
-            # the pre-invalidation angle untouched
-            (staleness_lat2, staleness_lon2) = mavextra.gps_offset(start.lat, start.lng, 0, 20)
-            staleness_abs_alt_m2 = start.get_alt_m(AltFrame.ABSOLUTE) + 18
+            # raw GLOBAL_POSITION_INT telemetry keeps arriving throughout -
+            # AP_Mount's own handle_global_position_int() is independent of
+            # AP_Follow - at a clearly different, non-saturating position.
+            # A correct build falls through to the raw path and tracks it;
+            # a build with the old sticky "ever had an estimate" latch
+            # freezes at the pre-loss angle forever instead, even though
+            # this fresh telemetry is right here
+            (regained_lat, regained_lon) = mavextra.gps_offset(start.lat, start.lng, 0, 25)
+            regained_abs_alt_m = start.get_alt_m(AltFrame.ABSOLUTE) + 5
+            regained_pitch_deg = math.degrees(math.atan2(5, 25))
             self.mav.mav.global_position_int_send(
                 int(self.get_sim_time_cached() * 1000), # time boot ms
-                int(staleness_lat2 * 1e7),
-                int(staleness_lon2 * 1e7),
-                int(staleness_abs_alt_m2 * 1000), # mm alt amsl - deliberately different
+                int(regained_lat * 1e7),
+                int(regained_lon * 1e7),
+                int(regained_abs_alt_m * 1000), # mm alt amsl
                 40 * 1000, # mm above home
                 0, 0, 0, 0,
             )
             self.test_mount_pitch(
-                held_pitch,
+                regained_pitch_deg,
                 3,
                 mavutil.mavlink.MAV_MOUNT_MODE_SYSID_TARGET,
                 timeout=5,
-                hold=2,
-                constrained=False,
+                hold=1,
+                constrained=constrain_sysid_target,
             )
             self.set_parameter("FOLL_DIST_MAX", 0)
 
@@ -8411,6 +8475,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
                 [0, 0, 0],  # position_cov
                 0,  # custom_state
             )
+            self.delay_sim_time(0.5, reason="let the mount actually process the moved target before reading it")
             got_pitch = poll_mount_pitch_deg()
             if abs(got_pitch - stale_ovr_held_pitch) > 3:
                 raise NotAchievedException(
