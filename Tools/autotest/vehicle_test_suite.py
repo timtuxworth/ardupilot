@@ -5561,11 +5561,9 @@ class TestSuite(abc.ABC):
         tstart = time.time()  # timeout in wallclock
         while True:
             m = mav.recv_match(type=type, blocking=True, timeout=0.05, condition=condition)
-            if instance is not None:
-                if getattr(m, m._instance_field) != instance:
-                    continue
             if m is not None:
-                break
+                if instance is None or getattr(m, m._instance_field) == instance:
+                    break
             elapsed_time = time.time() - tstart
             if elapsed_time > timeout:
                 raise NotAchievedException("Did not get %s after %s seconds" %
@@ -14341,6 +14339,8 @@ switch value'''
             })
             self.drain_mav()
             self.assert_capability(mavutil.mavlink.MAV_PROTOCOL_CAPABILITY_FLIGHT_TERMINATION)
+            # AFS_TERMINATE magically set-and-saved by code:
+            self.context_preserve_parameters(["AFS_TERMINATE"])
             self.set_parameter("AFS_TERM_ACTION", 42)
             self.load_sample_mission()
             self.context_collect("STATUSTEXT")
@@ -14417,6 +14417,8 @@ switch value'''
             "AFS_QNH_PRESSURE": 1000,
             "AFS_AMSL_ERR_GPS": 10,
         })
+        # AFS_TERMINATE magically set-and-saved by code:
+        self.context_preserve_parameters(["AFS_TERMINATE"])
         self.wait_ready_to_arm()
         self.start_subtest("Ensuring breaking baros doesn't terminate")
         self.set_parameters({
