@@ -29,6 +29,7 @@
 #include <RC_Channel/RC_Channel.h>
 #include <AP_Camera/AP_Camera_shareddefs.h>
 #include <SRV_Channel/SRV_Channel.h>
+#include <AP_Follow/AP_Follow_config.h>
 #include "AP_Mount.h"
 
 class AP_Mount_Backend
@@ -498,6 +499,8 @@ private:
     uint8_t _target_sysid;          // sysid to track
     Location _target_sysid_location;// sysid target location
     uint32_t _target_sysid_update_ms;// system time (ms) _target_sysid_location was last updated
+
+    mutable bool _target_sysid_kinematic_had_estimate;   // true once AP_Follow has supplied at least one usable estimate for _target_sysid; distinguishes "had one, lost it" (hold) from "never had one yet" (fall through to the raw location, which may already be usable). mutable: latched from the const get_angle_target_to_sysid() as it polls AP_Follow directly
 
     uint32_t _last_warning_ms;      // system time of last warning sent to GCS
 

@@ -9,6 +9,7 @@
 #include <AP_Logger/AP_Logger.h>
 #include <AP_Terrain/AP_Terrain.h>
 #include <AP_Vehicle/AP_Vehicle.h>
+#include <AP_Follow/AP_Follow.h>
 
 extern const AP_HAL::HAL& hal;
 
@@ -402,6 +403,7 @@ void AP_Mount_Backend::set_target_sysid(uint8_t sysid)
         // reported as the new target's (still-fresh) position
         _target_sysid_location.zero();
         _target_sysid_update_ms = 0;
+        _target_sysid_kinematic_had_estimate = false;
     }
     _target_sysid = sysid;
 
@@ -1236,11 +1238,79 @@ bool AP_Mount_Backend::get_angle_target_to_wpnext_offset(MountAngleTarget& angle
 // returns true on success, false on failure
 bool AP_Mount_Backend::get_angle_target_to_sysid(MountAngleTarget& angle_rad) const
 {
-    // exit immediately if sysid is not set or no location available
+    // exit immediately if sysid is not set
+    if (!_target_sysid) {
+        return false;
+    }
+
+#if AP_FOLLOW_ENABLED
+    // if AP_Follow is tracking the same vehicle we are, prefer its
+    // kinematically-extrapolated estimate: it copes with a target that is
+    // genuinely slow-moving (rather than just lagging) far better than the
+    // bare timeout below. Reached into directly (rather than have vehicle
+    // code push it to us) per PR #34237 dev call discussion
+    const AP_Follow *follow = AP_Follow::get_singleton();
+    if (follow != nullptr && follow->enabled() && (uint8_t)follow->get_target_sysid() == _target_sysid) {
+        Vector3p pos_ned_m;
+        Vector3f vel_ned_ms, accel_ned_mss;
+        if (follow->get_target_pos_vel_accel_NED_m(pos_ned_m, vel_ned_ms, accel_ned_mss)) {
+            Location loc;
+            if (AP::ahrs().get_location_from_origin_offset_NED(loc, pos_ned_m)) {
+                _target_sysid_kinematic_had_estimate = true;
+                // AP_Follow's location may be expressed in a home-relative
+                // altitude frame that doesn't match our own home (eg its
+                // ABOVE_HOME handling assumes a shared home with the target,
+                // which isn't guaranteed) - override with our own
+                // independently-tracked absolute altitude, which has no such
+                // ambiguity. That override source is populated only by our
+                // own handle_global_position_int(), which stops being called
+                // at all once a target switches to sending FOLLOW_TARGET
+                // instead (AP_Follow accepts both) - so require it to still
+                // be fresh by the same staleness window that guards the raw
+                // path below, not just present, or the override could keep
+                // using an arbitrarily old altitude forever
+                if (_target_sysid_location.initialised() &&
+                    AP_HAL::millis() - _target_sysid_update_ms <= AP_MOUNT_SYSID_TIMEOUT_MS) {
+                    loc.set_alt_cm(_target_sysid_location.alt, Location::AltFrame::ABSOLUTE);
+                    if (get_angle_target_to_location(loc, angle_rad)) {
+                        return true;
+                    }
+                    // AP_Follow has a usable estimate but we couldn't turn it
+                    // into an angle (eg terrain data unavailable); fall
+                    // through to the timeout-based path below rather than
+                    // just failing outright
+                } else {
+                    // we have no fresh, independently-tracked absolute
+                    // altitude to override with (eg the target was only
+                    // just set, or its raw telemetry has gone stale/stopped
+                    // entirely); using AP_Follow's own altitude frame
+                    // unchecked risks the exact altitude-reference bug the
+                    // override exists to prevent, so hold rather than risk it
+                    return false;
+                }
+            }
+        } else if (_target_sysid_kinematic_had_estimate) {
+            // AP_Follow gave us a usable estimate before but doesn't
+            // currently have one - hold the last commanded angle rather than
+            // falling back to the raw, differently-timed location below,
+            // which would cause a visible snap back to a less current
+            // position
+            return false;
+        }
+        // else: AP_Follow is configured and enabled for this sysid but has
+        // never yet supplied a usable estimate (eg it's still acquiring, or
+        // its own validity checks are rejecting the data) - there is
+        // nothing to hold or snap back from, so fall through to the
+        // raw-location path below rather than refusing to point at all
+    }
+#endif  // AP_FOLLOW_ENABLED
+
+    // exit immediately if no location available
     if (!_target_sysid_location.initialised()) {
         return false;
     }
-    if (!_target_sysid) {
+    // exit if we haven't heard from the target recently, to avoid snapping to a stale location
+    if (AP_HAL::millis() - _target_sysid_update_ms > AP_MOUNT_SYSID_TIMEOUT_MS) {
         return false;
     }
     // exit if we haven't heard from the target recently, to avoid snapping to a stale location

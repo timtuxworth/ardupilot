@@ -7,7 +7,7 @@ void Copter::read_inertia()
     pos_control->update_estimates(vibration_check.high_vibes);
 #if MODE_FOLLOW_ENABLED
     g2.follow.update_estimates();
-#endif
+#endif  // MODE_FOLLOW_ENABLED
 
     // pull position from ahrs
     Location loc;
