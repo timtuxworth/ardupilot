@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-105"
+SCRIPT_VERSION      = "4.8.0-106"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -72,7 +72,7 @@ function bind_add_param(name, idx, default_value)
 end
 
 -- setup follow mode specific parameters
-assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 37), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
+assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 38), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
 
 -- Every parameter this applet binds lives in this one table rather than in a global each.
 -- The field name IS the string handed to bind_add_param, so the pair costs the parser a
@@ -416,6 +416,17 @@ PARAM.DETECT_M = bind_add_param('DETECT_M', 36, 1000)
 --]]
 PARAM.PLAN_M = bind_add_param('PLAN_M', 37, 250)
 
+--[[
+    // @Param: DAA_TAU_S
+    // @DisplayName: Crewed-aircraft modified-tau conflict threshold
+    // @Description: A crewed aircraft (not a drone/UAV) is treated as a conflict when its MEASURED range is predicted to cross the AVD_WCLR_XY keep-out radius within this many seconds, using RTCA DO-365C style modified-tau (time to keep-out, not time to zero range). Unlike the drone/general moving-obstacle conflict test, this uses the aircraft's actual measured closing trend rather than its instantaneous velocity, so a contact that is genuinely loitering nearby - whose instantaneous heading sweeps toward you for part of every circle without it ever really closing - is not mistaken for an inbound conflict. An aircraft already inside AVD_WCLR_XY is always a conflict regardless of this setting.
+    // @Units: s
+    // @Range: 5 120
+    // @Increment: 1
+    // @User: Advanced
+--]]
+PARAM.TAU_S = bind_add_param('TAU_S', 38, 30)
+
 PARAM.AVD_ENABLE                  = bind_param("AVD_ENABLE")
 PARAM.AVD_WCLR_XY                 = bind_param("AVD_WCLR_XY")
 PARAM.AVD_WCLR_Z                  = bind_param("AVD_WCLR_Z")
@@ -607,6 +618,7 @@ local function configure_modules()
         side_hold_s       = side_hold_s,
         slew_dps          = slew_dps,
         slew_urg_s        = PARAM.SLEW_URG:get(),
+        tau_s             = PARAM.TAU_S:get(),
         well_clear_xy     = well_clear_xy,
         well_clear_z      = well_clear_z,
         wp_loiter_rad_m   = wp_loiter_rad_m,
@@ -1431,12 +1443,16 @@ local DAA = {
         -- DAA_AVD_ALT = 0 disables the loiter-to-altitude (see above).  Tested before
         -- assess_obstacle_motion() so the CPA work is skipped when the loiter is off.
         elseif aircraft_avoiding ~= nil and crewed_avoid_alt_m > 0
-                and core.assess_obstacle_motion(aircraft_avoiding).is_conflict then
-            -- CONSERVATIVE CPA gate on the loiter trigger: an aircraft inside the well-clear
-            -- radius is always a conflict (assess_obstacle_motion's range check), so the loiter
-            -- still fires unconditionally at close range - safer-first. Only a plane in the outer
-            -- detection band that will miss beyond well-clear AND is not closing is skipped, and it
-            -- then falls through to normal monitoring. A missing/uncertain velocity => conflict.
+                and core.assess_aircraft_conflict(aircraft_avoiding).is_conflict then
+            -- CONSERVATIVE modified-tau gate on the loiter trigger (see
+            -- assess_aircraft_conflict()'s own comment for why this is tau-based rather
+            -- than assess_obstacle_motion()'s instantaneous CPA): an aircraft inside the
+            -- well-clear radius is always a conflict (the same unconditional close-range
+            -- floor as before), so the loiter still fires unconditionally at close range -
+            -- safer-first. Only a plane in the outer detection band that is not, on
+            -- average, closing fast enough to cross that radius within DAA_TAU_S is
+            -- skipped, and it then falls through to normal monitoring. A missing/uncertain
+            -- closure trend => conflict.
             if loiteralt.start(crewed_avoid_alt_m, crewed_avoid_alt_frame, true, airspeed_ms) then
                 gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITER AIRCRAFT: %s", aircraft_avoiding.label))
 
