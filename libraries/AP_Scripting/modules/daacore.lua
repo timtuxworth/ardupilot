@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-023"
+DAAcore.SCRIPT_VERSION = "4.8.0-024"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -62,6 +62,11 @@ local MIN_TURN_CHORD_M    = 5.0
 -- Clamp for the clearances written to DAAD: "no obstacle at all" is FLT_MAX internally and
 -- would wreck the autoscaling of any plot it shares an axis with.
 local LOG_CLEARANCE_MAX_M = 9999.0
+-- assess_aircraft_conflict()'s filter constants - module scope, not inside DAAcore.new(),
+-- since they are true constants with no per-instance state (see the 100-local-per-function
+-- ceiling note in project_lua_binding_gotchas in memory).
+local AIRCRAFT_TAU_FILTER_S = 8.0
+local AIRCRAFT_TAU_GAP_S    = 5.0
 -- How far ahead validate_horizontal_release() projects the aircraft's CURRENT bank
 -- before deciding a fence is genuinely clear - long enough to matter physically, short
 -- enough to stay a "where am I actually about to be" check rather than a second sweep.
@@ -108,6 +113,21 @@ function DAAcore.new(deps)
     local aircraft_avoiding         = nil
     local last_aircraft_obstacle    = nil
     local last_aircraft_ts_ms       = nil
+    -- MEASURED range history for assess_aircraft_conflict()'s modified-tau test - see its
+    -- own comment for why this is tracked separately from assess_obstacle_motion()'s
+    -- instantaneous velocity-vector CPA. Reset alongside last_aircraft_obstacle whenever
+    -- the tracked aircraft changes or is lost, so history never leaks across encounters.
+    -- Bare GLOBALS, along with tau_s below (removed from the cached-parameters block
+    -- above) - not `local`, to stay under Lua's 100-per-function ceiling on this already
+    -- near-full function (see project_lua_binding_gotchas in memory). Same caveat as
+    -- assess_aircraft_conflict() itself: safe only because there is one DAAcore instance.
+    last_aircraft_range_m     = nil
+    aircraft_closure_rate_ms  = 0.0
+    -- False until the first genuine two-fix measurement exists. assess_aircraft_conflict()
+    -- treats "no measurement yet" as a conflict (safer-is-better, matching
+    -- assess_obstacle_motion()'s own "no geometry => conflict" default) rather than
+    -- silently reading the initial 0.0 as "not closing" for a brand new contact.
+    aircraft_closure_rate_valid = false
     local last_avoid_bearing_deg    = nil
     local last_cmd_bearing_ms       = nil
     local committed_side_sign       = 0
@@ -145,6 +165,7 @@ function DAAcore.new(deps)
         side_hold_s            = settings.side_hold_s
         slew_dps               = settings.slew_dps
         slew_urg_s             = settings.slew_urg_s
+        tau_s                  = settings.tau_s
         well_clear_xy          = settings.well_clear_xy
         well_clear_z           = settings.well_clear_z
         wp_loiter_rad_m        = settings.wp_loiter_rad_m
@@ -599,6 +620,85 @@ function DAAcore.new(deps)
             cpa_miss      = cpa_miss_h,
             ttc           = ttc_s,
             pass_behind   = pass_behind,
+        }
+    end
+
+    --[[
+    Modified-tau conflict test for a CREWED AIRCRAFT specifically (RTCA DO-365C style) -
+    NOT used for drones/UAVs, which keep assess_obstacle_motion()'s instantaneous
+    velocity-vector CPA test (appropriate for their close range and genuinely erratic
+    motion). A crewed aircraft is typically detected much further out, where a small error
+    in an ESTIMATED velocity DIRECTION swings a projected miss-distance by hundreds of
+    metres - and a circling/loitering aircraft's real instantaneous velocity genuinely does
+    point toward us for part of every lap without it ever actually closing (confirmed live,
+    log_130_2026-9-8: DstH held 590-660m the whole time a Brolga loitered, while the
+    velocity-vector CPA swung 370-660m and repeatedly tripped the loiter). Modified tau
+    sidesteps this by never estimating a velocity vector at all - it uses only range and the
+    MEASURED, FILTERED rate of change of range itself (aircraft_closure_rate_ms, updated in
+    detect_aircraft()), a scalar that is far less sensitive to the aircraft's instantaneous
+    heading than a projected miss-distance is.
+
+    tau_mod = (r^2 - dmod^2) / (r * closure_rate)   -- closure_rate > 0 means closing
+    r <= dmod            => already inside the keep-out radius: unconditional conflict,
+                            matching assess_obstacle_motion()'s own close-range floor.
+    closure_rate <= 0    => not closing on average: no conflict regardless of range.
+    tau_mod <= DAA_TAU_S => predicted to cross the keep-out radius soon enough to conflict.
+
+    Declared as a bare GLOBAL, not `local function`, specifically to avoid costing
+    DAAcore.new() one more of Lua's 100 per-function locals (see the "declare the new
+    helper as a bare global" note in project_lua_binding_gotchas in memory) - it is still
+    a real closure over this DAAcore instance's current_loc/aircraft_closure_rate_ms/etc,
+    exactly like a local function would be; only where the function VALUE is stored
+    differs. Safe here because this whole applet only ever constructs one DAAcore
+    instance - if that ever changes, a second instance would silently redefine this same
+    global over the first one's.
+    --]]
+    function assess_aircraft_conflict(obstacle)
+        if obstacle == nil or current_loc == nil or obstacle.location == nil then
+            return { is_conflict = true, tau_mod_s = 0.0, range_m = 0.0, closure_rate_ms = 0.0 }
+        end
+        -- Recomputed live from the CURRENT position, not obstacle.distance_xy (which is
+        -- frozen at whatever it was when this obstacle's last ADS-B fix arrived, ~1 Hz -
+        -- our own continued movement between fixes matters at cruise speed). The range
+        -- HISTORY used to derive aircraft_closure_rate_ms in detect_aircraft() is anchored
+        -- to real fix instants on purpose, which is unaffected by this.
+        local range_m    = current_loc:get_distance(obstacle.location)
+        local standoff_m = get_standoff(obstacle.type)
+
+        if range_m <= standoff_m then
+            return { is_conflict = true, tau_mod_s = 0.0, range_m = range_m,
+                     closure_rate_ms = aircraft_closure_rate_ms }
+        end
+        if not aircraft_closure_rate_valid then
+            -- No two-fix measurement yet for this contact (it just appeared - at ~1 Hz
+            -- ADS-B fix rate this lasts about one cycle). Fall back to the existing
+            -- instantaneous velocity-vector test rather than hardcoding a conflict here:
+            -- that briefly reintroduces the noise this function exists to avoid, but only
+            -- for one short-lived warm-up cycle, and it is what already correctly told a
+            -- genuinely diverging aircraft (declared velocity available from its very
+            -- first report) apart from a converging one before this function existed.
+            -- Confirmed the hard way: hardcoding "conflict" here engaged the loiter once
+            -- during warm-up and then never released it, because do_loitering()'s own
+            -- release condition is proximity-only, not conflict-based, and was never
+            -- designed to correct an early wrong answer (PlaneDAAAircraftCpaGate,
+            -- 2026-09-08). Re-shaped into this function's own return table (not
+            -- assess_obstacle_motion()'s) so callers - including the DAAT logging above -
+            -- see a consistent set of fields regardless of which branch answered.
+            local fallback = assess_obstacle_motion(obstacle)
+            return { is_conflict = fallback.is_conflict, tau_mod_s = -1.0, range_m = range_m,
+                     closure_rate_ms = aircraft_closure_rate_ms }
+        end
+        if aircraft_closure_rate_ms <= 0.0 then
+            return { is_conflict = false, tau_mod_s = FLT_MAX, range_m = range_m,
+                     closure_rate_ms = aircraft_closure_rate_ms }
+        end
+        local tau_mod_s = (range_m * range_m - standoff_m * standoff_m)
+                / (range_m * aircraft_closure_rate_ms)
+        return {
+            is_conflict     = tau_mod_s <= tau_s,
+            tau_mod_s       = tau_mod_s,
+            range_m         = range_m,
+            closure_rate_ms = aircraft_closure_rate_ms,
         }
     end
 
@@ -1119,6 +1219,9 @@ function DAAcore.new(deps)
             aircraft_avoiding = nil
             last_aircraft_obstacle = nil
             last_aircraft_ts_ms = nil
+            last_aircraft_range_m = nil
+            aircraft_closure_rate_ms = 0.0
+            aircraft_closure_rate_valid = false
             return
         end
 
@@ -1134,6 +1237,9 @@ function DAAcore.new(deps)
             aircraft_avoiding       = nil
             last_aircraft_obstacle  = nil
             last_aircraft_ts_ms     = nil
+            last_aircraft_range_m   = nil
+            aircraft_closure_rate_ms = 0.0
+            aircraft_closure_rate_valid = false
             return
         end
 
@@ -1150,11 +1256,46 @@ function DAAcore.new(deps)
 
         local obstacle = populate_obstacle(distance_m, aircraft_obstacle)
 
+        -- Update assess_aircraft_conflict()'s MEASURED range-rate filter from this fresh
+        -- fix, before last_aircraft_range_m/last_aircraft_ts_ms are overwritten below - see
+        -- that function's own comment for why this is tracked instead of a velocity vector.
+        if last_aircraft_range_m ~= nil and last_aircraft_ts_ms ~= nil then
+            -- OAObstacle's timestamp_ms is bound as int32_t (a plain Lua number), NOT the
+            -- boxed uint32_t_ud millis() returns - no :tofloat() here, that is a userdata
+            -- method and this is a plain number.
+            local dt_s = (ts_ms - last_aircraft_ts_ms) / 1000.0
+            if dt_s > 0.0 and dt_s < AIRCRAFT_TAU_GAP_S then
+                local raw_rate_ms = (last_aircraft_range_m - obstacle.distance_xy) / dt_s
+                local alpha = math.min(1.0, dt_s / AIRCRAFT_TAU_FILTER_S)
+                aircraft_closure_rate_ms = aircraft_closure_rate_ms
+                        + alpha * (raw_rate_ms - aircraft_closure_rate_ms)
+                aircraft_closure_rate_valid = true
+            else
+                aircraft_closure_rate_ms = 0.0     -- gap too large to trust
+                aircraft_closure_rate_valid = false
+            end
+        end
+        last_aircraft_range_m  = obstacle.distance_xy
+
         aircraft_avoiding       = obstacle
         last_aircraft_obstacle  = obstacle
         last_aircraft_ts_ms     = ts_ms
 
         log_detect_aircraft(aircraft_avoiding)
+
+        local motion = assess_aircraft_conflict(obstacle)
+        local status, err = pcall(logger.write, logger, "DAAT",
+            'TauS,ClsR,Rng,Con',
+            'fffB',
+            'snm-',
+            '----',
+            math.min(motion.tau_mod_s, 999.0),   -- TauS - modified-tau time to keep-out (capped)
+            motion.closure_rate_ms,              -- ClsR - filtered measured closure rate
+            motion.range_m,                      -- Rng  - current horizontal range
+            motion.is_conflict and 1 or 0)        -- Con  - conflict verdict this cycle
+        if not status then
+            gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " log tau:" .. tostring(err) )
+        end
     end
 
 
@@ -1746,7 +1887,8 @@ function DAAcore.new(deps)
     self.clamp_alt_to_fence = clamp_alt_to_fence
     -- the aircraft-loiter policy asks whether a contact is actually converging before it
     -- commits to a loiter, so the CPA assessment is part of the mechanism's public face
-    self.assess_obstacle_motion = assess_obstacle_motion
+    self.assess_obstacle_motion  = assess_obstacle_motion
+    self.assess_aircraft_conflict = assess_aircraft_conflict
 
     return self
 end
