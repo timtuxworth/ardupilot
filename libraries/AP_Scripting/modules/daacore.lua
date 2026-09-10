@@ -96,6 +96,7 @@ function DAAcore.new(deps)
     local find_closest_obstacle     = obstacles.find_closest_obstacle
     local populate_obstacle         = obstacles.populate_obstacle
     local get_standoff              = obstacles.get_standoff
+    local is_grounded_traffic       = obstacles.is_grounded_traffic
 
     -- cached parameters, pushed in by configure()
     local alt_cool_ms, alt_hyst_m, bearing_inc_deg, bendy_angle
@@ -1232,6 +1233,15 @@ function DAAcore.new(deps)
         -- horizontal gate is well_clear_xy + margin_crewed_m, the vertical gate is
         -- well_clear_z + margin_vertical_m
         local distance_m, aircraft_obstacle = OAScripting:find_aircraft(current_loc, well_clear_xy + margin_crewed_m, well_clear_z + margin_vertical_m)
+
+        -- a parked/taxiing aircraft (DAA_GND_ALT_M/DAA_GND_SPD_MS) is not a threat regardless of
+        -- range - treated the same as no aircraft found, so it never latches the loiter/NMAC
+        -- state below. See is_grounded_traffic() in daaobs.lua for why this exists.
+        if distance_m ~= nil and aircraft_obstacle ~= nil
+                and is_grounded_traffic(aircraft_obstacle:obstacle_type(), aircraft_obstacle) then
+            distance_m = nil
+            aircraft_obstacle = nil
+        end
 
         if distance_m == nil or aircraft_obstacle == nil then
             aircraft_avoiding       = nil
