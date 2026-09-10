@@ -109,6 +109,7 @@ function DAAobstacles.new()
     -- it is read straight from the settings table and never becomes an upvalue.
     local well_clear_xy
     local wind_min_ms, wind_margin_per_ms
+    local ground_alt_cm, ground_speed_ms
     -- pushed in by update_state()
     local current_loc
 
@@ -122,6 +123,8 @@ function DAAobstacles.new()
         well_clear_xy        = settings.well_clear_xy
         wind_min_ms          = settings.wind_min_ms
         wind_margin_per_ms   = settings.wind_margin_per_ms
+        ground_alt_cm        = settings.ground_alt_m * 100
+        ground_speed_ms      = settings.ground_speed_ms
 
         standoff_by_type = {
             [OBSTACLE_TYPE.MAV_SYSID]               = settings.uav_clear_xy,   -- drone/UAV: AVD_UAV_XY
@@ -142,9 +145,38 @@ function DAAobstacles.new()
     end
 
     -- the live vehicle position, pushed once per cycle: populate_obstacle() and
-    -- obstacle_report_distance() report ranges from the aircraft, not from the probe origin
+    -- obstacle_report_distance() report ranges from the aircraft, not from the probe origin.
+    -- home_alt_cm is refreshed here too - once per cycle, not per probe - for
+    -- is_grounded_traffic() below, which classify_threat() calls on every candidate.
     local function update_state(loc)
-        current_loc = loc
+        current_loc  = loc
+        home_alt_cm  = ahrs:get_home():alt()
+    end
+
+    -- True if a traffic contact (crewed aircraft or MAVLink drone) is parked/taxiing rather
+    -- than flying: its own altitude is within DAA_GND_ALT_M of home AND its groundspeed is
+    -- below DAA_GND_SPD_MS. Both AP_Avoidance obstacle sources (ADS-B and GLOBAL_POSITION_INT)
+    -- populate location in Location::AltFrame::ABSOLUTE, same frame as home, so this is a plain
+    -- subtraction - no frame conversion, no extra allocation. Fences/AIS/proximity are never
+    -- "grounded" in this sense, so only the two traffic types are checked.
+    --
+    -- Without this, a stationary aircraft near the runway/pad reads as an airborne near-miss:
+    -- avoidance forces a mode change away, which brings the vehicle straight back toward home
+    -- and the same contact, re-triggers, and the vehicle never completes a landing or takeoff.
+    local function is_grounded_traffic(obstacle_type, any_obstacle)
+        if ground_alt_cm <= 0 then
+            return false  -- DAA_GND_ALT_M = 0 disables the exemption entirely
+        end
+        if obstacle_type ~= OBSTACLE_TYPE.CREWED_AIRCRAFT and obstacle_type ~= OBSTACLE_TYPE.MAV_SYSID then
+            return false
+        end
+        local loc = any_obstacle:location()
+        if loc == nil or math.abs(loc:alt() - home_alt_cm) > ground_alt_cm then
+            return false
+        end
+        local vel = any_obstacle:velocity_NED_ms()
+        local ground_speed = math.sqrt(vel:x() * vel:x() + vel:y() * vel:y())
+        return ground_speed <= ground_speed_ms
     end
 
     -- make obstacle labels a bit more meaningful for user especially for crewed aircraft and MAVLink vehicles
@@ -366,6 +398,9 @@ function DAAobstacles.new()
         end
 
         local obstacle_type_val = any_obstacle:obstacle_type()
+        if is_grounded_traffic(obstacle_type_val, any_obstacle) then
+            return FLT_MAX, nil
+        end
         local obstacle_margin = detect_margin_by_type[obstacle_type_val] or 0
         -- widen the fence standoff in wind so the controller has buffer to absorb cross-track
         -- drift and is less likely to be blown across the boundary (DAA_WIND_MARG = 0 disables)
@@ -414,6 +449,7 @@ function DAAobstacles.new()
     self.update_state             = update_state
     self.pretty_obstacle_type     = pretty_obstacle_type
     self.populate_obstacle        = populate_obstacle
+    self.is_grounded_traffic      = is_grounded_traffic
     self.obstacle_report_distance = obstacle_report_distance
     self.nearest_fence_clearance_m = nearest_fence_clearance_m
     self.get_standoff             = get_standoff

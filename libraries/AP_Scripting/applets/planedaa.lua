@@ -72,7 +72,7 @@ function bind_add_param(name, idx, default_value)
 end
 
 -- setup follow mode specific parameters
-assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 38), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
+assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 40), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
 
 -- Every parameter this applet binds lives in this one table rather than in a global each.
 -- The field name IS the string handed to bind_add_param, so the pair costs the parser a
@@ -427,6 +427,26 @@ PARAM.PLAN_M = bind_add_param('PLAN_M', 37, 250)
 --]]
 PARAM.TAU_S = bind_add_param('TAU_S', 38, 30)
 
+--[[
+    // @Param: DAA_GND_ALT_M
+    // @DisplayName: Ground contact altitude threshold
+    // @Description: A traffic contact (crewed aircraft or MAVLink drone) is exempt from avoidance while its own reported altitude is within this many metres of home AND its groundspeed is below DAA_GND_SPD_MS - i.e. it is parked or taxiing, not flying. Prevents a stationary aircraft near the runway/pad from being treated as an airborne near-miss, which would otherwise trap the vehicle in a land/detect/RTL loop that never completes a landing or a VTOL takeoff. 0 disables the exemption (every contact is always a potential threat).
+    // @Units: m
+    // @Range: 0 20
+    // @User: Standard
+--]]
+PARAM.GND_ALT_M = bind_add_param('GND_ALT_M', 39, 3)
+
+--[[
+    // @Param: DAA_GND_SPD_MS
+    // @DisplayName: Ground contact groundspeed threshold
+    // @Description: The groundspeed half of the DAA_GND_ALT_M ground-contact exemption - see that parameter. Both conditions must hold (low altitude AND low groundspeed) for a contact to be exempted, so a low, slow-moving aircraft that is genuinely flying (not simply parked) is still avoided.
+    // @Units: m/s
+    // @Range: 0 10
+    // @User: Standard
+--]]
+PARAM.GND_SPD_MS = bind_add_param('GND_SPD_MS', 40, 2)
+
 PARAM.AVD_ENABLE                  = bind_param("AVD_ENABLE")
 PARAM.AVD_WCLR_XY                 = bind_param("AVD_WCLR_XY")
 PARAM.AVD_WCLR_Z                  = bind_param("AVD_WCLR_Z")
@@ -599,6 +619,8 @@ local function configure_modules()
         uav_clear_xy        = uav_clear_xy,
         wind_min_ms         = PARAM.WIND_MIN:get(),
         wind_margin_per_ms  = PARAM.WIND_MARG:get(),
+        ground_alt_m        = PARAM.GND_ALT_M:get(),
+        ground_speed_ms     = PARAM.GND_SPD_MS:get(),
     })
     core.configure({
         alt_cool_ms       = PARAM.ALT_COOL_S:get() * 1000,
