@@ -112,6 +112,7 @@ function DAAobstacles.new()
     local ground_alt_cm, ground_speed_ms
     -- pushed in by update_state()
     local current_loc
+    local home_alt_cm
 
     -- Per-obstacle-type lookups rebuilt by configure().  These replace two long if-chains -
     -- one index instead of up to eight comparisons on every probe - and the table itself is
