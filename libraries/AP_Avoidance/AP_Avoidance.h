@@ -125,6 +125,13 @@ public:
     static bool is_adsb_uav(uint8_t emitter_type);
     // ADS-B surface (ground) vehicle categories - deliberately not avoided by an airborne vehicle
     static bool is_ground_vehicle(uint8_t emitter_type);
+    // true if this contact's own altitude and groundspeed say "parked/taxiing", regardless of
+    // what category it broadcasts as - real crewed aircraft near a runway keep reporting an
+    // airborne emitter type even stationary on the ground, so is_ground_vehicle() alone misses
+    // them. Excluded from the search entirely (not just skipped after being picked as closest):
+    // its keep-out radius is often larger than a genuinely airborne threat's, so leaving it in
+    // the candidate pool can let it win the single-closest-obstacle search and mask a real one.
+    bool is_parked(const Obstacle &obstacle) const;
 #endif
 
     // for holding parameters
@@ -239,6 +246,8 @@ private:
     AP_Float    _near_miss_z;
     AP_Float    _uav_xy;
     AP_Float    _uav_z;
+    AP_Float    _ground_alt_m;
+    AP_Float    _ground_speed_ms;
 #endif  // AP_OA_SCRIPTING_ENABLED
     // multi-thread support for avoidance
     mutable HAL_Semaphore _rsem;

@@ -172,6 +172,21 @@ const AP_Param::GroupInfo AP_Avoidance::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("UAV_Z",    18, AP_Avoidance, _uav_z, 25),
 
+    // @Param: GND_ALT
+    // @DisplayName: Ground contact altitude threshold
+    // @Description: A traffic contact (crewed aircraft or MAVLink drone) is excluded from avoidance while its own altitude is within this many metres of home AND its groundspeed is below AVD_GND_SPD - i.e. it is parked or taxiing, not flying. It is broadcasting an airborne emitter type is not evidence it is actually in the air: a real aircraft on the ground near a runway keeps reporting the same category it uses in flight, and is_ground_vehicle() only catches genuine ADS-B surface-vehicle categories. Without this, a stationary contact can win the single-closest-obstacle search purely because its keep-out radius (AVD_WCLR_XY for a crewed aircraft) is larger than a real threat's, masking that threat entirely. 0 disables the exemption (every contact is always a potential threat).
+    // @Units: m
+    // @Range: 0 20
+    // @User: Standard
+    AP_GROUPINFO("GND_ALT",    19, AP_Avoidance, _ground_alt_m, 3),
+
+    // @Param: GND_SPD
+    // @DisplayName: Ground contact groundspeed threshold
+    // @Description: The groundspeed half of the AVD_GND_ALT ground-contact exclusion - see that parameter. Both conditions must hold (low altitude AND low groundspeed) for a contact to be excluded, so a low, slow-moving aircraft that is genuinely flying (not simply parked) is still avoided.
+    // @Units: m/s
+    // @Range: 0 10
+    // @User: Standard
+    AP_GROUPINFO("GND_SPD",    20, AP_Avoidance, _ground_speed_ms, 2),
 
 #endif
 
@@ -784,6 +799,23 @@ bool AP_Avoidance::is_adsb_uav(uint8_t emitter_type)
     return false;
 }
 
+// True if this contact's own altitude and groundspeed say it is parked or taxiing, not flying -
+// see the header comment for why is_ground_vehicle() alone is not enough.
+bool AP_Avoidance::is_parked(const Obstacle &obstacle) const
+{
+    if (_ground_alt_m <= 0) {
+        return false;  // AVD_GND_ALT = 0 disables the exclusion entirely
+    }
+    const Location &home = AP::ahrs().get_home();
+    // AP_ADSB/AP_Avoidance obstacle locations are always Location::AltFrame::ABSOLUTE, same as
+    // home's own alt field, so this is a plain subtraction - no frame conversion needed.
+    if (fabsf((obstacle._location.alt - home.alt) * 0.01f) > _ground_alt_m) {
+        return false;
+    }
+    const float ground_speed_ms = obstacle._velocity_ned_ms.xy().length();
+    return ground_speed_ms <= _ground_speed_ms;
+}
+
 // ADS-B surface (ground) vehicle categories. We deliberately do not avoid these:
 // an airborne vehicle has no requirement to manoeuvre around a vehicle on the ground.
 bool AP_Avoidance::is_ground_vehicle(uint8_t emitter_type)
@@ -863,6 +895,12 @@ float AP_Avoidance::distance_to_obstacle(const Vector3f &start_NED_m, const Vect
         if (is_ground_vehicle(obstacle.emitter_type)) {
             continue;
         }
+        // ditto a contact that is parked/taxiing regardless of what it broadcasts as - see
+        // is_parked()'s header comment for why this can't just be left for the caller to
+        // reject after the fact
+        if (is_parked(obstacle)) {
+            continue;
+        }
         const Location obstacle_loc     = _obstacles[i]._location;
         Vector3f obstacle_NED_m;
 
@@ -922,6 +960,10 @@ float AP_Avoidance::distance_to_aircraft(const Vector3f &vehicle_NED_m, const fl
         const Obstacle obstacle         = _obstacles[i];
         // skip contacts that have gone quiet - see distance_to_obstacle()
         if (now_ms - obstacle.timestamp_ms > MAX_OBSTACLE_AGE_MS) {
+            continue;
+        }
+        // ditto a parked/taxiing contact - see is_parked() and distance_to_obstacle()
+        if (is_parked(obstacle)) {
             continue;
         }
         const Location obstacle_loc     = _obstacles[i]._location;
