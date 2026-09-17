@@ -8661,6 +8661,224 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         self.wait_current_waypoint(3, timeout=400)
         self.disarm_vehicle(force=True)
 
+    def PlaneDAAParkedAircraftDoesNotMaskDrone(self):
+        '''AP_Avoidance's find_threats()/find_aircraft() return a single closest obstacle,
+        compared by clearance to each obstacle's OWN keep-out radius (AVD_WCLR_XY for a
+        crewed aircraft, AVD_UAV_XY for a drone) - not raw range.  A crewed aircraft parked
+        near home, with its much larger AVD_WCLR_XY radius, can therefore win that search
+        and get excluded as parked (AVD_GND_ALT/AVD_GND_SPD) EVERY cycle - masking a real,
+        much closer drone that never gets a turn to be evaluated at all.  This reproduces
+        that exact scenario found live in the AreaXO demo (a stationary "Niska" stand-in
+        near home hid a hovering drone that passed within a few metres of the flight path)
+        and checks the drone still gets avoided.'''
+        self.install_planedaa_scripts()
+
+        self.set_parameters({
+            "SCR_ENABLE": 1,
+            "SCR_VM_I_COUNT": 1000000,
+            "ADSB_TYPE": 1,     # MAVLink: ingest ADSB_VEHICLE with no ADS-B hardware
+            "AVD_ENABLE": 1,    # required for AP_Avoidance to pull ADSB samples
+            "AVD_UAV_XY": 150,
+            "AVD_UAV_Z": 25,
+            "AVD_WCLR_XY": 600,  # exaggerate the radius gap so a masking regression is unambiguous
+            "AVD_GND_ALT": 3,
+            "AVD_GND_SPD": 2,
+        })
+
+        self.context_collect('STATUSTEXT')
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+
+        home = self.home_position_as_location()
+        # parked "crewed aircraft" sits 30 m from home, at home's own altitude, stationary -
+        # squarely inside AVD_GND_ALT/AVD_GND_SPD, and well within its own 600 m AVD_WCLR_XY
+        # radius for the whole flight
+        parked_loc = self.offset_location_ne(home, 30, 0)
+        parked_icao = 0xF00090
+        # the drone sits on the northbound leg, ~1 km ahead, directly on the path - same
+        # geometry as PlaneDAADroneAvoidance
+        drone_loc = self.offset_location_ne(home, 1000, 0)
+        drone_icao = 0xF00080
+
+        self.start_flying_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 50),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 2000, 0, 80),
+            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+        ])
+        self.wait_current_waypoint(2, timeout=120)
+        self.wait_text("Plane DAA", check_context=True, timeout=60)
+
+        tstart = self.get_sim_time()
+        avoided = False
+        while self.get_sim_time() - tstart < 120:
+            here = self.get_location()
+            self.mav.mav.adsb_vehicle_send(
+                parked_icao,
+                int(parked_loc.lat * 1e7),
+                int(parked_loc.lng * 1e7),
+                mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
+                int(home.get_alt_m(AltFrame.ABSOLUTE) * 1000),
+                0, 0, 0,       # heading, hor/vert velocity: stationary
+                "PARKED01".encode("ascii"),
+                mavutil.mavlink.ADSB_EMITTER_TYPE_SMALL,   # emitter 2 -> CREWED_AIRCRAFT
+                1, 65535, 1200,
+            )
+            self.mav.mav.adsb_vehicle_send(
+                drone_icao,
+                int(drone_loc.lat * 1e7),
+                int(drone_loc.lng * 1e7),
+                mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
+                int(here.get_alt_m(AltFrame.ABSOLUTE) * 1000 + 10000),   # 10 m up, inside the 25 m gate
+                0, 0, 0,
+                "SIMTL81".encode("ascii"),
+                mavutil.mavlink.ADSB_EMITTER_TYPE_UAV,     # emitter 14 -> MAV_SYSID
+                1, 65535, 1200,
+            )
+            m = self.mav.recv_match(type='STATUSTEXT', blocking=True, timeout=1)
+            # must specifically be avoiding the DRONE by its ICAO label - the parked aircraft
+            # is also nearby and, unfixed, can itself get treated as a real threat (its own
+            # "AVOIDING: PARKED01" would otherwise pass this check for the wrong reason)
+            if m is not None and ("AVOIDING: Drone:%06X" % (drone_icao & 0xFFFFFF)) in m.text:
+                avoided = True
+                break
+        if not avoided:
+            raise NotAchievedException(
+                "planedaa did not avoid the drone - masked by the parked aircraft?")
+
+        self.wait_current_waypoint(3, timeout=400)
+        self.disarm_vehicle(force=True)
+
+    def daa_watch_no_reaction(self, duration, forbidden_texts, inject):
+        '''Common body for the two ParkedXIgnored tests below: call inject() and check for
+        no STATUSTEXT containing any of forbidden_texts, repeatedly for duration seconds.'''
+        tstart = self.get_sim_time()
+        while self.get_sim_time() - tstart < duration:
+            inject()
+            m = self.mav.recv_match(type='STATUSTEXT', blocking=True, timeout=1)
+            if m is None:
+                continue
+            for text in forbidden_texts:
+                if text in m.text:
+                    raise NotAchievedException(
+                        "planedaa reacted to a parked contact: %s" % m.text)
+
+    def PlaneDAAParkedAircraftIgnored(self):
+        '''A crewed aircraft parked near home (within AVD_GND_ALT/AVD_GND_SPD) must never
+        itself trigger avoidance. This is the original bug found live in the AreaXO demo:
+        an unfixed vehicle read a stationary aircraft near the runway/pad as an airborne
+        near-miss and got stuck alternating between landing and RTL/loiter, never completing
+        a takeoff or landing. No second obstacle is injected here - this proves only the
+        exclusion itself, independent of PlaneDAAParkedAircraftDoesNotMaskDrone's masking
+        scenario, which needs a real drone in the picture too.'''
+        self.install_planedaa_scripts()
+
+        self.set_parameters({
+            "SCR_ENABLE": 1,
+            "SCR_VM_I_COUNT": 1000000,
+            "ADSB_TYPE": 1,
+            "AVD_ENABLE": 1,
+            "AVD_GND_ALT": 3,
+            "AVD_GND_SPD": 2,
+        })
+
+        self.context_collect('STATUSTEXT')
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+
+        home = self.home_position_as_location()
+        parked_loc = self.offset_location_ne(home, 30, 0)
+        parked_icao = 0xF00091
+
+        self.start_flying_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 50),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 500, 0, 80),
+            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+        ])
+        self.wait_current_waypoint(2, timeout=120)
+        self.wait_text("Plane DAA", check_context=True, timeout=60)
+
+        def inject():
+            self.mav.mav.adsb_vehicle_send(
+                parked_icao,
+                int(parked_loc.lat * 1e7),
+                int(parked_loc.lng * 1e7),
+                mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
+                int(home.get_alt_m(AltFrame.ABSOLUTE) * 1000),
+                0, 0, 0,       # heading, hor/vert velocity: stationary
+                "PARKED02".encode("ascii"),
+                mavutil.mavlink.ADSB_EMITTER_TYPE_SMALL,   # emitter 2 -> CREWED_AIRCRAFT
+                1, 65535, 1200,
+            )
+
+        self.daa_watch_no_reaction(60, [
+            "AVOIDING", "LOITERING", "LOITER AIRCRAFT", "TRAPPED",
+            "Near Miss", "Loss of Well Clear",
+        ], inject)
+
+        self.wait_current_waypoint(3, timeout=400)
+        self.disarm_vehicle(force=True)
+
+    def PlaneDAAParkedDroneIgnored(self):
+        '''As PlaneDAAParkedAircraftIgnored, but for a MAVLink drone (emitter type UAV)
+        parked near home rather than a crewed aircraft - is_parked() must apply to both
+        traffic types. This exercises AP_Avoidance::distance_to_obstacle (the general
+        bendy-ruler path), not just the crewed-aircraft-only find_aircraft() path
+        PlaneDAAParkedAircraftIgnored exercises.'''
+        self.install_planedaa_scripts()
+
+        self.set_parameters({
+            "SCR_ENABLE": 1,
+            "SCR_VM_I_COUNT": 1000000,
+            "ADSB_TYPE": 1,
+            "AVD_ENABLE": 1,
+            "AVD_UAV_XY": 150,
+            "AVD_UAV_Z": 25,
+            "AVD_GND_ALT": 3,
+            "AVD_GND_SPD": 2,
+        })
+
+        self.context_collect('STATUSTEXT')
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+
+        home = self.home_position_as_location()
+        parked_loc = self.offset_location_ne(home, 30, 0)
+        parked_icao = 0xF00092
+
+        # AVD_UAV_Z (25 m) is far tighter than a crewed aircraft's well-clear-Z (~76 m
+        # default), so keep the whole mission inside 20 m - a climb through 50-80 m like
+        # PlaneDAAParkedAircraftIgnored's would only be inside the drone's vertical gate for
+        # a few seconds after liftoff, making a regression here pass or fail by luck rather
+        # than by design.
+        self.start_flying_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 20),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 500, 0, 20),
+            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+        ])
+        self.wait_current_waypoint(2, timeout=120)
+        self.wait_text("Plane DAA", check_context=True, timeout=60)
+
+        def inject():
+            self.mav.mav.adsb_vehicle_send(
+                parked_icao,
+                int(parked_loc.lat * 1e7),
+                int(parked_loc.lng * 1e7),
+                mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
+                int(home.get_alt_m(AltFrame.ABSOLUTE) * 1000),
+                0, 0, 0,       # heading, hor/vert velocity: stationary
+                "PARKED03".encode("ascii"),
+                mavutil.mavlink.ADSB_EMITTER_TYPE_UAV,     # emitter 14 -> MAV_SYSID
+                1, 65535, 1200,
+            )
+
+        self.daa_watch_no_reaction(60, [
+            "AVOIDING", "LOITERING", "LOITER AIRCRAFT", "TRAPPED",
+            "Near Miss", "Loss of Well Clear",
+        ], inject)
+
+        self.wait_current_waypoint(3, timeout=400)
+        self.disarm_vehicle(force=True)
+
     def PlaneDAAStandoffNotDoubleCounted(self):
         '''The traffic standoff must be AVD_UAV_XY + DAA_MARGIN_UAV, as documented, not
         twice the radius plus the margin.
@@ -12170,6 +12388,9 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             Test(self.PlaneDAAFenceInclusionUnion),
             Test(self.PlaneDAABreachScopedToFenceType),
             Test(self.PlaneDAADroneAvoidance),
+            Test(self.PlaneDAAParkedAircraftDoesNotMaskDrone),
+            Test(self.PlaneDAAParkedAircraftIgnored),
+            Test(self.PlaneDAAParkedDroneIgnored),
             Test(self.PlaneDAAStandoffNotDoubleCounted),
             Test(self.PlaneDAADroneCrossing),
             Test(self.PlaneDAAAircraftLoiterNoFlip),
