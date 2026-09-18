@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-107"
+SCRIPT_VERSION      = "4.8.0-108"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -72,7 +72,7 @@ function bind_add_param(name, idx, default_value)
 end
 
 -- setup follow mode specific parameters
-assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 38), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
+assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 40), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
 
 -- Every parameter this applet binds lives in this one table rather than in a global each.
 -- The field name IS the string handed to bind_add_param, so the pair costs the parser a
@@ -427,6 +427,28 @@ PARAM.PLAN_M = bind_add_param('PLAN_M', 37, 250)
 --]]
 PARAM.TAU_S = bind_add_param('TAU_S', 38, 30)
 
+--[[
+    // @Param: DAA_NMAC_UAV_XY
+    // @DisplayName: Drone/UAV near-miss horizontal distance
+    // @Description: A drone/UAV (MAV_SYSID, not a crewed aircraft) closer than this horizontally is a genuine near-miss and, together with DAA_NMAC_UAV_Z, is treated as a compromise by the trapped-failsafe (DAA_TRAP_ACT) the same way a crewed-aircraft near-miss is - regardless of whether ordinary avoidance or the aircraft loiter currently has control of the vehicle. This is the hard danger line, not the normal drone avoidance standoff (AVD_UAV_XY/DAA_MARGIN_UAV) that ordinary avoidance tries to stay outside of - it should be smaller than both.
+    // @Units: m
+    // @Range: 5 100
+    // @Increment: 1
+    // @User: Advanced
+--]]
+PARAM.NMAC_UAV_XY = bind_add_param('NMAC_UAV_XY', 39, 15)
+
+--[[
+    // @Param: DAA_NMAC_UAV_Z
+    // @DisplayName: Drone/UAV near-miss vertical distance
+    // @Description: The vertical companion to DAA_NMAC_UAV_XY.
+    // @Units: m
+    // @Range: 2 50
+    // @Increment: 1
+    // @User: Advanced
+--]]
+PARAM.NMAC_UAV_Z = bind_add_param('NMAC_UAV_Z', 40, 8)
+
 PARAM.AVD_ENABLE                  = bind_param("AVD_ENABLE")
 PARAM.AVD_WCLR_XY                 = bind_param("AVD_WCLR_XY")
 PARAM.AVD_WCLR_Z                  = bind_param("AVD_WCLR_Z")
@@ -475,6 +497,8 @@ local well_clear_z          = PARAM.AVD_WCLR_Z:get()
 local uav_clear_xy          = PARAM.AVD_UAV_XY:get()
 local near_miss_xy          = PARAM.AVD_NMAC_XY:get()
 local near_miss_z           = PARAM.AVD_NMAC_Z:get()
+local near_miss_uav_xy      = PARAM.NMAC_UAV_XY:get()
+local near_miss_uav_z       = PARAM.NMAC_UAV_Z:get()
 local slew_dps              = PARAM.SLEW_DPS:get()
 local side_hold_s           = PARAM.SIDE_HOLD:get()
 local trap_act              = PARAM.TRAP_ACT:get()
@@ -750,6 +774,8 @@ local function get_vehicle_state()
         uav_clear_xy          = PARAM.AVD_UAV_XY:get()
         near_miss_xy          = PARAM.AVD_NMAC_XY:get()
         near_miss_z           = PARAM.AVD_NMAC_Z:get()
+        near_miss_uav_xy      = PARAM.NMAC_UAV_XY:get()
+        near_miss_uav_z       = PARAM.NMAC_UAV_Z:get()
         slew_dps              = PARAM.SLEW_DPS:get()
         side_hold_s           = PARAM.SIDE_HOLD:get()
         trap_act              = PARAM.TRAP_ACT:get()
@@ -1599,10 +1625,17 @@ local DAA = {
     --   * fence    -> an actual AC_Fence breach (the real boundary at FENCE_MARGIN, well inside
     --                 planedaa's DAA_MARGIN_FENCE standoff)
     --   * aircraft -> a real aircraft inside near-miss (AVD_NMAC_XY/Z), i.e. well-clear lost.
-    --                 NMAC is an aircraft-only boundary (matches alert_aircraft): drones,
-    --                 proximity, AIS and birds are avoided but do not trip the trap here.
+    --   * drone    -> a drone/UAV inside its own, tighter near-miss (DAA_NMAC_UAV_XY/Z).
+    --                 Needed because the aircraft loiter (loiteralt) holds the vehicle's
+    --                 target exclusively while it runs (see DAA.avoid()) - ordinary
+    --                 avoidance, which is what normally keeps drones clear, does not run at
+    --                 all during a loiter. Reproduced live: a drone nearly hit while the
+    --                 vehicle circled to avoid a crewed aircraft. Proximity, AIS and birds
+    --                 still do not trip the trap here - only aircraft and drones are common
+    --                 enough contacts, and close enough at typical demo/test ranges, to be
+    --                 worth the extra parameter.
     -- Sustained (DAA_TRAP_S) this is a genuine trap. Altitude fences are vertical
-    -- (clamp-and-continue) and are covered by get_breaches, not the aircraft near-miss check.
+    -- (clamp-and-continue) and are covered by get_breaches, not the near-miss checks.
     --   * hung     -> avoidance running with no progress toward the navigation target for
     --                 DAA_HUNG_ALRT_S (see hung_update).  Nothing has been penetrated at all -
     --                 that is the point: this is the failure the other two cannot see.
@@ -1635,6 +1668,18 @@ local DAA = {
             and aircraft_avoiding.distance_xy < near_miss_xy
             and aircraft_avoiding.distance_z < near_miss_z then
             return true, "moving"       -- a real aircraft can move away: recoverable trap
+        end
+        -- obstacle_avoiding is the bendy ruler's own closest-obstacle winner, computed by
+        -- core.detect() independently of aircraft_avoiding (see DAA.take_report()) - so it
+        -- is still tracked even while a crewed-aircraft loiter has aircraft_avoiding and
+        -- has taken over the vehicle's target. A drone is dynamic (can move away), so this
+        -- classifies the same as an aircraft near-miss.
+        if obstacle_avoiding ~= nil
+            and obstacle_avoiding.type == OBSTACLE_TYPE.MAV_SYSID
+            and obstacle_avoiding.distance_xy ~= nil
+            and obstacle_avoiding.distance_xy < near_miss_uav_xy
+            and obstacle_avoiding.distance_z < near_miss_uav_z then
+            return true, "moving"       -- a real drone can move away: recoverable trap
         end
         -- A hung avoidance is deliberately NOT stood down by the FENCE_ACTION/FENCE_OPTIONS
         -- pairing above: it never breaches, so the core fence library never acts and there is
