@@ -834,6 +834,14 @@ bool AP_Avoidance::is_adsb_aircraft(uint8_t emitter_type)
 {
     switch (static_cast<ADSB_EMITTER_TYPE>(emitter_type) )
     {
+    // NO_INFO (category 0, transponder never set an emitter category) is grouped here,
+    // not with the "false" types below: get_obstacle_radius_m()/get_obstacle_height_m()
+    // already treat it as a full crewed aircraft (AVD_WCLR_XY/Z), so leaving it out of
+    // is_adsb_aircraft() meant distance_to_aircraft() could never see one at all - no
+    // ALERT, no well-clear/near-miss tracking, no loiter-to-altitude - and it fell
+    // through to ObstacleType::GENERAL in AP_OAScripting, which has no detection margin
+    // of its own, so avoidance began only after well-clear was already lost.
+    case ADSB_EMITTER_TYPE_NO_INFO:
     case ADSB_EMITTER_TYPE_LIGHT:
     case ADSB_EMITTER_TYPE_SMALL:
     case ADSB_EMITTER_TYPE_LARGE:
@@ -850,7 +858,6 @@ bool AP_Avoidance::is_adsb_aircraft(uint8_t emitter_type)
     // 16 Unassigned
         return true;
 
-    case ADSB_EMITTER_TYPE_NO_INFO:
     case ADSB_EMITTER_TYPE_PARACHUTE:
     case ADSB_EMITTER_TYPE_UAV:         // Drones
 
