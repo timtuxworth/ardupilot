@@ -4669,17 +4669,16 @@ function OAObstacle_ud:emitter_type(value) end
 ---| '0'  # GENERAL
 ---| '1'  # MAV_SYSID
 ---| '2'  # CREWED_AIRCRAFT
----| '3'  # WEATHER
----| '4'  # BIRD_MIGRATORY
----| '5'  # BIRD_OF_PREY
----| '6'  # FENCE_HOME
----| '7'  # FENCE_CIRCLE_INCLUSION
----| '8'  # FENCE_CIRCLE_EXCLUSION
----| '9'  # FENCE_POLYGON_INCLUSION
----| '10' # FENCE_POLYGON_EXCLUSION
----| '11' # FENCE_LUA
----| '12' # PROXIMITY
----| '13' # AIS
+---| '3'  # FENCE_HOME
+---| '4'  # FENCE_CIRCLE_INCLUSION
+---| '5'  # FENCE_CIRCLE_EXCLUSION
+---| '6'  # FENCE_POLYGON_INCLUSION
+---| '7'  # FENCE_POLYGON_EXCLUSION
+---| '8'  # FENCE_LUA
+---| '9'  # PROXIMITY
+---| '10' # AIS
+---| '11' # FENCE_ALT_MAX
+---| '12' # FENCE_ALT_MIN
 function OAObstacle_ud:obstacle_type() end
 
 -- set obstacle_type field
