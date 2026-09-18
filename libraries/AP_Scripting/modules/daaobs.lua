@@ -5,9 +5,7 @@
     about what to do in response.  The applet keeps that, so an integrator adding their own
     avoidance action only has to edit planedaa.lua (see planedaa.md).
 
-    daageo is stateless (see that file), so it is required directly rather than injected -
-    only location_project() is needed here, and it takes no configured state.  Everything
-    else the applet knows is pushed in rather than reached for:
+    Everything the applet knows is pushed in rather than reached for:
       configure()    - cached parameter values and the OBSTACLE_TYPE / ADSB_EMITTER enums,
                        refreshed with the applet's other parameters
       update_state() - the current vehicle location, once per cycle
@@ -17,15 +15,13 @@
 
 local DAAobstacles = {}
 
-DAAobstacles.SCRIPT_VERSION = "4.8.0-008"
+DAAobstacles.SCRIPT_VERSION = "4.8.0-009"
 DAAobstacles.SCRIPT_NAME = "DAA obstacles"
 DAAobstacles.SCRIPT_NAME_SHORT = "DAAobs"
 
 -- Load-banner severity only - this module does no other logging, so no full severity
 -- table is needed; MAV_SEVERITY.INFO is a fixed MAVLink wire value (6).
 local BANNER_SEVERITY = 6
-
-local location_project = require("daageo").location_project
 
 -- The obstacle taxonomy this module classifies against.  Owned here rather than injected:
 -- AP_OAScripting returns these values, and this is the code that interprets them.
@@ -384,9 +380,15 @@ function DAAobstacles.new()
     local function find_closest_obstacle(loc1, loc2, lookahead_m, wind_ms)
         -- By projecting 1m along the line we avoid a problem with the
         -- exclusion avoidance being happy to skirt along a line parallel
-        -- to an exclusion zone
+        -- to an exclusion zone. A horizontal nudge only: NOT daageo's
+        -- location_project(), which also adopts its alt_target_loc argument's altitude
+        -- (correct for the eleven other call sites, which project forward to a candidate
+        -- point at a target altitude) - here that flattened the probe segment to loc2's
+        -- altitude, discarding loc1's real one and hiding real vertical separation from
+        -- find_threats(). copy() + offset_bearing() is a pure horizontal shift.
         local bearing_deg   = math.deg(loc1:get_bearing(loc2))
-        local loc1_shifted  = location_project(loc1, bearing_deg, 1, loc2)
+        local loc1_shifted  = loc1:copy()
+        loc1_shifted:offset_bearing(bearing_deg, 1)
         local distance_m, any_obstacle =
                 OAScripting:find_threats(loc1_shifted, loc2, lookahead_m)
         return classify_threat(distance_m, any_obstacle, wind_ms)
@@ -399,7 +401,8 @@ function DAAobstacles.new()
     -- this cycle's single winner.
     local function find_closest_fence(loc1, loc2, lookahead_m, wind_ms)
         local bearing_deg   = math.deg(loc1:get_bearing(loc2))
-        local loc1_shifted  = location_project(loc1, bearing_deg, 1, loc2)
+        local loc1_shifted  = loc1:copy()
+        loc1_shifted:offset_bearing(bearing_deg, 1)
         local distance_m, any_obstacle =
                 OAScripting:find_fence_threats(loc1_shifted, loc2, lookahead_m)
         return classify_threat(distance_m, any_obstacle, wind_ms)
