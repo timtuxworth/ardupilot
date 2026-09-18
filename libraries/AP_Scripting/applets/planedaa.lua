@@ -1664,14 +1664,14 @@ local DAA = {
             -- do not claim a failsafe that never engaged: trap_active would be released
             -- again next cycle by the mode-changed check, which would blame a pilot who
             -- never touched anything
-            gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(
+            gcs:send_text(MAV_SEVERITY.CRITICAL, SCRIPT_NAME_SHORT .. string.format(
                 ": TRAPPED - %s refused", get_mode_string(trap_fs_mode)))
             trap_prev_mode  = -1
             trap_since_ms   = uint32_t(0)
             return false
         end
         trap_active     = true
-        gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(
+        gcs:send_text(MAV_SEVERITY.CRITICAL, SCRIPT_NAME_SHORT .. string.format(
             ": TRAPPED (%s) -> %s", cause, get_mode_string(trap_fs_mode)))
         gcs:send_named_string("DAA-AVOID", "TRAPPED")
         return true
