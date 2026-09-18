@@ -205,8 +205,10 @@ Collision volumes, and the `FENCE_*` parameters for the altitude/geo fences.
 | `DAA_SIDE_HOLD` | 3 | s | Once a left/right avoidance side is committed for an obstacle, the opposite side must be preferred by the bendy ruler for at least this long before the aircraft is allowed to switch sides. Stops the left/right flip-flop when avoiding a moving obstacle. Set to 0 to disable side commitment. |
 | `DAA_CPA_MIN` | 2 | m/s | Minimum closing speed for a moving obstacle to be treated as a conflict. CPA (Closest Point of Approach) is the predicted minimum separation between the vehicle and a moving obstacle on their current tracks. An obstacle whose CPA stays beyond the well-clear distance and which is opening range faster than this is not avoided (it is leaving). Set to 0 to avoid regardless of closing speed. |
 | `DAA_STALE_S` | 3 | s | Traffic-feed staleness warning threshold. When avoiding a network-sourced moving obstacle (ADS-B drone/aircraft) whose position has not updated for longer than this, a `traffic stale Ns` warning is sent to the GCS (the DAA is acting on lagged data, e.g. from an intermittent telemetry/ADS-B link), and a `lost <label>` warning if it then disappears. Fences are on-board and never go stale. Set to 0 to disable. |
-| `DAA_TRAP_ACT` | 0 | | Trapped-failsafe action when avoidance cannot get the vehicle out of trouble — a sustained fence breach, a crewed aircraft inside the near-miss volume, or a hung avoidance (see `DAA_HUNG_ALRT_S`) — for `DAA_TRAP_S`. `0`: disabled (avoidance just keeps trying), `1`: RTL, `2`: QRTL, `3`: QLOITER, `4`: QLAND. QLOITER/QRTL/QLAND have zero turn radius (safest in a tight space); the VTOL options fall back to RTL if `Q_ENABLE=0`. See _Trapped failsafe_ below. |
+| `DAA_TRAP_ACT` | 0 | | Trapped-failsafe action when avoidance cannot get the vehicle out of trouble — a sustained fence breach, a crewed aircraft inside the near-miss volume, a drone inside its own near-miss volume (`DAA_NMAC_UAV_XY/Z`), or a hung avoidance (see `DAA_HUNG_ALRT_S`) — for `DAA_TRAP_S`. `0`: disabled (avoidance just keeps trying), `1`: RTL, `2`: QRTL, `3`: QLOITER, `4`: QLAND. QLOITER/QRTL/QLAND have zero turn radius (safest in a tight space); the VTOL options fall back to RTL if `Q_ENABLE=0`. See _Trapped failsafe_ below. |
 | `DAA_TRAP_S` | 5 | s | The vehicle must be compromised continuously for this long before `DAA_TRAP_ACT` fires. Rejects transient clutter. |
+| `DAA_NMAC_UAV_XY` | 15 | m | Drone/UAV near-miss horizontal distance. A drone (MAV_SYSID, not a crewed aircraft) this close is a compromise for `DAA_TRAP_ACT`, the same as a crewed-aircraft near-miss — needed because the aircraft loiter holds the vehicle's target exclusively while it runs, so ordinary avoidance (which normally keeps drones clear) does not run at all during a loiter. This is the hard danger line, smaller than the normal drone avoidance standoff (`AVD_UAV_XY`/`DAA_MARGIN_UAV`). |
+| `DAA_NMAC_UAV_Z` | 8 | m | Vertical companion to `DAA_NMAC_UAV_XY`. |
 | `DAA_TRAP_CLR_S` | 4 | s | For a trap caused by a MOVING obstacle (drone/aircraft), resume the previous mode this long after the failsafe fired (if the obstacle has not passed, forward flight simply re-triggers it). A trap caused by a fixed obstacle (fence) is not auto-recovered — it is held until the pilot changes mode. |
 | `DAA_HUNG_ALRT_S` | 60 | s | Avoidance is **hung** when it has been running this long without the vehicle getting any closer to its navigation target. The classic case is a waypoint inside an exclusion-fence standoff: it cannot be reached while avoiding, so the mission pull and the fence push never reconcile and the vehicle orbits indefinitely — without ever breaching anything, which is why neither the autopilot's `FENCE_ACTION` nor the other two trap causes can see it. A hung avoidance raises a `HUNG` alert and then counts as a compromise for `DAA_TRAP_ACT`, so with the default `DAA_TRAP_ACT=0` this is **alert-only**. Set 0 to disable. |
 | `DAA_TRAP_ESC_ACT` | 2 | | Escalation action for when `DAA_TRAP_ACT` would command the mode the aircraft is ALREADY in (e.g. trapped mid-RTL with `DAA_TRAP_ACT=RTL`) — commanding it again would do nothing, so it escalates to this. `1`: RTL, `2`: QRTL, `3`: QLOITER, `4`: QLAND (VTOL options fall back to RTL). Set equal to `DAA_TRAP_ACT` to disable escalation. |
@@ -424,14 +426,17 @@ what the feed was doing before an obstacle was acquired.
 
 ### Trapped failsafe
 
-If the vehicle stays compromised — a fence breach, a crewed aircraft inside the
-near-miss volume, or a hung avoidance — continuously for `DAA_TRAP_S` seconds,
-`DAA_TRAP_ACT` fires a failsafe mode. The recommended actions have zero turn radius so they get
+If the vehicle stays compromised — a fence breach, a crewed aircraft or a drone
+inside its own near-miss volume, or a hung avoidance — continuously for
+`DAA_TRAP_S` seconds, `DAA_TRAP_ACT` fires a failsafe mode. The recommended actions have zero turn radius so they get
 the aircraft out of a tight space without needing room to turn: `QLOITER` (stop
 and hover), `QRTL` (VTOL return) or `QLAND`. On a non-VTOL airframe (`Q_ENABLE=0`)
 these fall back to `RTL`. Set `DAA_TRAP_ACT=0` to disable the failsafe entirely
 (avoidance just keeps trying). The trap fires on a sustained fence breach, an
-aircraft near-miss, **or** a hung avoidance. Because the autopilot's own
+aircraft or drone near-miss, **or** a hung avoidance. The drone case
+(`DAA_NMAC_UAV_XY/Z`) exists specifically because the aircraft loiter holds the
+vehicle's target exclusively while it runs — ordinary avoidance, which normally
+keeps drones clear, does not run at all during a loiter. Because the autopilot's own
 `FENCE_ACTION` (if non-zero) acts
 first on a fence breach in every mode, it pre-empts the trap's fence case — leaving
 the trap as the nav-mode backstop for aircraft (and for fences too when
