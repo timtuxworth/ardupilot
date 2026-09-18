@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-106"
+SCRIPT_VERSION      = "4.8.0-107"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -1435,7 +1435,18 @@ local DAA = {
         end
 
         if loiteralt.active then
+            -- The aircraft loiter owns the vehicle's target exclusively while it runs:
+            -- without this return, avoid_obstacle() below still fires every cycle and
+            -- fights the loiter for the same GUIDED target via update_target_location()
+            -- (only the loiter's own FIRST cycle went through the elseif's return, below -
+            -- every cycle after that took this branch and fell through). Reproduced live
+            -- at the AreaXO site: LOITERING/AVOIDING alternated for minutes and altitude
+            -- oscillated 49-72m instead of settling at the 50m loiter target. The separate
+            -- NMAC trap (DAA.trap_update(), called before DAA.avoid() every cycle) is
+            -- unaffected by this return - it still escalates to DAA_TRAP_ACT regardless of
+            -- loiter state if the aircraft keeps closing.
             do_loitering()
+            return
         -- Crewed traffic outranks whatever we are already avoiding, so the loiter trigger is
         -- tested before falling through to ordinary bendy-ruler avoidance below.  An aircraft
         -- that appears while a fence or drone avoidance is already running must still be able
