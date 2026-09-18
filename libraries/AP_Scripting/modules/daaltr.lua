@@ -22,7 +22,7 @@
 
 local DAAloiter = {}
 
-DAAloiter.SCRIPT_VERSION = "4.8.0-002"
+DAAloiter.SCRIPT_VERSION = "4.8.0-003"
 DAAloiter.SCRIPT_NAME = "DAA loiter"
 DAAloiter.SCRIPT_NAME_SHORT = "DAAloiter"
 
@@ -37,6 +37,14 @@ local BANNER_SEVERITY = 6
 -- daageo is stateless (see that file) and wrap_360 needs no configured state, so it is
 -- required directly rather than injected.
 local wrap_360 = require("daageo").wrap_360
+
+-- A refused reposition (fence, sanitize, mode-change blocked, ...) used to be re-attempted
+-- every cycle at INFO severity forever - reproduced live: an enabled fence plus bad terrain
+-- data at a site rejected every crewed-aircraft loiter attempt, invisibly, for the whole
+-- flight. Escalate once it has been stuck a while, then repeat at a sane cadence instead of
+-- every cycle.
+local LOITER_FAIL_ESCALATE_MS = 3000
+local LOITER_FAIL_REPEAT_MS   = 5000
 
 function DAAloiter.new(deps)
     local self = { active = false }
@@ -55,6 +63,9 @@ function DAAloiter.new(deps)
     local current_loc, current_mode, now_ms
     -- the cool-down clock is ours alone: nothing outside this module reads it
     local aircraft_seen_now_ms = millis()
+    -- consecutive-refusal tracking, reset on any success: nothing outside this module reads it
+    local loiter_fail_since_ms = nil
+    local loiter_fail_notify_ms = nil
 
     local function configure(settings)
         loiter_cool_ms   = settings.loiter_cool_ms
@@ -123,8 +134,21 @@ function DAAloiter.new(deps)
                                                         yaw     = 0,
                                                         bitmask = MAV_DO_REPOSITION_FLAGS.CHANGE_MODE }) then
             self.active = true
+            loiter_fail_since_ms = nil
+            loiter_fail_notify_ms = nil
         else
-            gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": loiteralt set_vehicle FAILED" ))
+            if loiter_fail_since_ms == nil then
+                loiter_fail_since_ms = now_ms
+            end
+            local stuck_ms = now_ms - loiter_fail_since_ms
+            if stuck_ms >= LOITER_FAIL_ESCALATE_MS and
+                    (loiter_fail_notify_ms == nil or (now_ms - loiter_fail_notify_ms) >= LOITER_FAIL_REPEAT_MS) then
+                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(
+                        ": loiteralt set_vehicle FAILED for %.0f s - refused repeatedly", stuck_ms * 0.001))
+                loiter_fail_notify_ms = now_ms
+            else
+                gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": loiteralt set_vehicle FAILED" ))
+            end
             previous_mode = -1
         end
 
