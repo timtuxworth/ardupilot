@@ -1477,6 +1477,18 @@ local DAA = {
             -- trap (DAA.trap_update(), called before DAA.avoid() every cycle) is unaffected
             -- by this return - it still escalates to DAA_TRAP_ACT regardless of loiter state
             -- if the aircraft keeps closing.
+            --
+            -- Consequence, accepted deliberately: the loiter circle (see loiteralt.start(),
+            -- offset from the heading at the moment it engaged) has no fence awareness at
+            -- all, so this return also suppresses ordinary fence avoidance for as long as
+            -- the loiter runs - a fence that happens to sit near the loiter point can be
+            -- breached. Tim's call: separation from a real aircraft outranks a geofence: the
+            -- core AC_Fence library still handles a breach on its own (FENCE_ACTION), and
+            -- that recovery is a perfectly acceptable outcome here - not a gap to close.
+            -- Also unlikely in practice: a fence typically represents a real fixed hazard
+            -- (e.g. a tower), and a real crewed aircraft flying close enough to one to
+            -- provoke this loiter in the first place is a contrived scenario - mostly a
+            -- demo/test artifact rather than a realistic operational conflict.
             do_loitering()
             return
         -- Crewed traffic outranks whatever we are already avoiding, so the loiter trigger is
