@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-109"
+SCRIPT_VERSION      = "4.8.0-110"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -1722,6 +1722,21 @@ local DAA = {
         trap_prev_mode  = mode_now
         trap_fs_mode    = resolve_trap_mode(mode_now)
         trap_trigger_ms = now_ms
+        if trap_fs_mode == mode_now then
+            -- resolve_trap_mode() already tried escalating past a no-op once; if it still
+            -- lands on the mode already in force (e.g. Q_ENABLE=0 collapses every
+            -- DAA_TRAP_ACT/ESC_ACT to RTL), vehicle:set_mode() below would report success
+            -- without doing anything - Plane::set_mode() returns true when already in the
+            -- requested mode. That would claim a failsafe that never actually took control
+            -- and, worse, latches trap_active so DAA.avoid() stops running for the rest of
+            -- the flight while nothing is managing the situation. Report it and keep
+            -- avoiding instead.
+            gcs:send_text(MAV_SEVERITY.CRITICAL, SCRIPT_NAME_SHORT .. string.format(
+                ": TRAPPED - no escalation available, already in %s", get_mode_string(mode_now)))
+            trap_prev_mode  = -1
+            trap_since_ms   = uint32_t(0)
+            return false
+        end
         if not vehicle:set_mode(trap_fs_mode) then
             -- do not claim a failsafe that never engaged: trap_active would be released
             -- again next cycle by the mode-changed check, which would blame a pilot who
