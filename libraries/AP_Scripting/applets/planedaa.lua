@@ -1379,11 +1379,11 @@ local DAA = {
             if (now_ms - now_avoiding_ms) > 5000 and obstacle ~= nil and avoid_dist > 5 then
                 local report_dist = obstacle_report_distance(obstacle)
                 if report_dist ~= nil then
-                    gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s dist: %.0fm", obstacle.label, report_dist))
+                    gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s dist: %.0fm", obstacle.label, report_dist))
                     gcs:send_named_float("DAA-DIST", report_dist)
                 else
                     -- distance not simply knowable for this obstacle (e.g. Lua fence) - label only
-                    gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s", obstacle.label))
+                    gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. string.format(" AVOIDING: %s", obstacle.label))
                 end
                 avoiding_label = obstacle.label
                 gcs:send_named_string("DAA-AVOID", "obstacle")
@@ -1421,7 +1421,7 @@ local DAA = {
         if aircraft_avoiding ~= nil then
             loiteralt.aircraft_seen()
             if (now_ms - now_loitering_ms) > 5000 then
-                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITERING to %.0f m for AIRCRAFT: %s", crewed_avoid_alt_m, aircraft_avoiding.label))
+                gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. string.format(" LOITERING to %.0f m for AIRCRAFT: %s", crewed_avoid_alt_m, aircraft_avoiding.label))
                 now_loitering_ms = now_ms
             end
         end
