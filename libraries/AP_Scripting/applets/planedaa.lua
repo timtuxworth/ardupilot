@@ -856,6 +856,7 @@ local function init_modules()
         MAV_SEVERITY            = MAV_SEVERITY,
         get_mode_string         = get_mode_string,
         mavlink_wrappers        = mavlink_wrappers,
+        clamp_alt_to_fence      = core.clamp_alt_to_fence,
     })
 
     -- Now that every module exists, push the cached parameter values into all of them.

@@ -22,7 +22,7 @@
 
 local DAAloiter = {}
 
-DAAloiter.SCRIPT_VERSION = "4.8.0-003"
+DAAloiter.SCRIPT_VERSION = "4.8.0-004"
 DAAloiter.SCRIPT_NAME = "DAA loiter"
 DAAloiter.SCRIPT_NAME_SHORT = "DAAloiter"
 
@@ -54,6 +54,7 @@ function DAAloiter.new(deps)
     local SCRIPT_NAME_SHORT         = DAAloiter.SCRIPT_NAME_SHORT
     local get_mode_string           = deps.get_mode_string
     local mavlink_wrappers          = deps.mavlink_wrappers
+    local clamp_alt_to_fence        = deps.clamp_alt_to_fence
 
     -- pushed in by configure()
     local loiter_cool_ms, wp_loiter_rad_m
@@ -114,6 +115,23 @@ function DAAloiter.new(deps)
             direction = "left"
             loiteralt_loc:offset_bearing(wrap_360(pre_loiteralt_heading_deg - 90), radius_m)
         end
+
+        -- Every other commanded target goes through update_target_location(), which
+        -- clamps into the safe altitude-fence band (DAA_MARGIN_ALT inside FENCE_ALT_MAX/MIN)
+        -- before committing it - this is the one manoeuvre that deliberately changes
+        -- altitude and it alone bypassed that, able to command below FENCE_ALT_MIN or
+        -- above FENCE_ALT_MAX. Clamp the same way here, then re-read whatever frame/value
+        -- the clamp left it in.
+        if clamp_alt_to_fence ~= nil then
+            loiteralt_loc:set_alt_m(target_alt_m, target_alt_frame)
+            clamp_alt_to_fence(loiteralt_loc)
+            target_alt_frame = loiteralt_loc:get_alt_frame()
+            local clamped_alt_m = loiteralt_loc:get_alt_m(target_alt_frame)
+            if clamped_alt_m ~= nil then
+                target_alt_m = clamped_alt_m
+            end
+        end
+
         gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": LOITER %s to %.0f/%.0f(%.0f) alt radius %.0f m",
                 direction, target_alt_m, target_alt_frame, mavlink_wrappers.alt_frame_to_mavlink(target_alt_frame), radius_m ))
 
