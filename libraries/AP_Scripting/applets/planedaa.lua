@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-108"
+SCRIPT_VERSION      = "4.8.0-109"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -585,10 +585,18 @@ local obstacle_report_distance
 -- returns 0 for airspeed <= 0), so the standoff is never literally zero.  Shared by the
 -- initial value below, the 5 s parameter refresh, and DAA.warnings()'s own turn-radius
 -- sanity checks - one formula, not three copies of it.
+--
+-- The bare turn radius carries no allowance for reaction lag, an oblique (non head-on)
+-- approach, or the achieved bank angle falling short of ROLL_LIMIT_DEG in practice.
+-- FENCE_SAFETY_FACTOR pads it; 2.0 is a starting point. Applied only to the geometric
+-- estimate - wp_loiter_rad_m below is a real configured loiter radius already, not a
+-- bare-minimum physics number.
+local FENCE_SAFETY_FACTOR = 2.0
+
 local function fence_margin_fallback_m()
     local achievable_turn_radius_m = turn_radius_m(param:get('AIRSPEED_CRUISE') or 0, roll_limit_deg)
-    if achievable_turn_radius_m <= 0 then achievable_turn_radius_m = wp_loiter_rad_m end
-    return achievable_turn_radius_m
+    if achievable_turn_radius_m <= 0 then return wp_loiter_rad_m end
+    return achievable_turn_radius_m * FENCE_SAFETY_FACTOR
 end
 -- The fallback CALL below (and the roll_rate_dps calc, which also needs geometry) moved
 -- into init_modules() - both need turn_radius_m/geometry, which do not exist until then.
@@ -1465,12 +1473,10 @@ local DAA = {
             -- without this return, avoid_obstacle() below still fires every cycle and
             -- fights the loiter for the same GUIDED target via update_target_location()
             -- (only the loiter's own FIRST cycle went through the elseif's return, below -
-            -- every cycle after that took this branch and fell through). Reproduced live
-            -- at the AreaXO site: LOITERING/AVOIDING alternated for minutes and altitude
-            -- oscillated 49-72m instead of settling at the 50m loiter target. The separate
-            -- NMAC trap (DAA.trap_update(), called before DAA.avoid() every cycle) is
-            -- unaffected by this return - it still escalates to DAA_TRAP_ACT regardless of
-            -- loiter state if the aircraft keeps closing.
+            -- every cycle after that took this branch and fell through). The separate NMAC
+            -- trap (DAA.trap_update(), called before DAA.avoid() every cycle) is unaffected
+            -- by this return - it still escalates to DAA_TRAP_ACT regardless of loiter state
+            -- if the aircraft keeps closing.
             do_loitering()
             return
         -- Crewed traffic outranks whatever we are already avoiding, so the loiter trigger is
@@ -1629,11 +1635,10 @@ local DAA = {
     --                 Needed because the aircraft loiter (loiteralt) holds the vehicle's
     --                 target exclusively while it runs (see DAA.avoid()) - ordinary
     --                 avoidance, which is what normally keeps drones clear, does not run at
-    --                 all during a loiter. Reproduced live: a drone nearly hit while the
-    --                 vehicle circled to avoid a crewed aircraft. Proximity, AIS and birds
-    --                 still do not trip the trap here - only aircraft and drones are common
-    --                 enough contacts, and close enough at typical demo/test ranges, to be
-    --                 worth the extra parameter.
+    --                 all during a loiter. Proximity, AIS and birds still do not trip the
+    --                 trap here - only aircraft and drones are common enough contacts, and
+    --                 close enough at typical demo/test ranges, to be worth the extra
+    --                 parameter.
     -- Sustained (DAA_TRAP_S) this is a genuine trap. Altitude fences are vertical
     -- (clamp-and-continue) and are covered by get_breaches, not the near-miss checks.
     --   * hung     -> avoidance running with no progress toward the navigation target for

@@ -39,10 +39,8 @@ local BANNER_SEVERITY = 6
 local wrap_360 = require("daageo").wrap_360
 
 -- A refused reposition (fence, sanitize, mode-change blocked, ...) used to be re-attempted
--- every cycle at INFO severity forever - reproduced live: an enabled fence plus bad terrain
--- data at a site rejected every crewed-aircraft loiter attempt, invisibly, for the whole
--- flight. Escalate once it has been stuck a while, then repeat at a sane cadence instead of
--- every cycle.
+-- every cycle at INFO severity forever, invisible unless someone went grepping. Escalate
+-- once it has been stuck a while, then repeat at a sane cadence instead of every cycle.
 local LOITER_FAIL_ESCALATE_MS = 3000
 local LOITER_FAIL_REPEAT_MS   = 5000
 
