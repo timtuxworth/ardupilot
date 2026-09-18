@@ -359,9 +359,19 @@ float AC_PolyFence_loader::distance_line_to_inclusion(const Vector2f& start_NE_c
 
     for (uint8_t i=0; i<_num_loaded_circle_inclusion_boundaries; i++) {
         const InclusionCircle &circle = _loaded_circle_inclusion_boundary[i];
+        Vector2f centre_cm = circle.pos_cm;
+        if (circle.is_home_centered()) {
+            // Express home as an offset from EKF origin in the NE frame, matching
+            // start_NE_cm/end_NE_cm - see the identical pattern in get_inclusion_circle().
+            Location origin;
+            if (!AP::ahrs().get_origin(origin)) {
+                continue;   // cannot place this circle yet
+            }
+            centre_cm = origin.get_distance_NE(AP::ahrs().get_home()) * 100.0f;
+        }
         // the segment is closest to exiting the circle at whichever endpoint
         // lies farthest from the centre
-        const float far_cm = MAX((start_NE_cm - circle.pos_cm).length(), (end_NE_cm - circle.pos_cm).length());
+        const float far_cm = MAX((start_NE_cm - centre_cm).length(), (end_NE_cm - centre_cm).length());
         const float distance_m = circle.radius - far_cm * 0.01f;
         if (!found || (use_union ? (distance_m > distance_new_m) : (distance_m < distance_new_m))) {
             distance_new_m = distance_m;
@@ -372,7 +382,13 @@ float AC_PolyFence_loader::distance_line_to_inclusion(const Vector2f& start_NE_c
 
     for (uint8_t i=0; i<_num_loaded_inclusion_boundaries; i++) {
         const InclusionBoundary &boundary = _loaded_inclusion_boundary[i];
-        const float distance_m = Polygon_closest_distance_line(boundary.points, boundary.count, start_NE_cm, end_NE_cm) * 0.01f;
+        // Polygon_closest_distance_line() is signed only when the segment actually
+        // crosses the boundary; a segment wholly outside (or wholly inside) returns a
+        // positive nearest-edge distance either way. Establish the sign from the
+        // start point's own inside/outside test first, matching the pattern already
+        // used in AP_OABendyRuler.cpp's inclusion-polygon margin calculation.
+        const float sign = Polygon_outside(start_NE_cm, boundary.points, boundary.count) ? -1.0f : 1.0f;
+        const float distance_m = sign * Polygon_closest_distance_line(boundary.points, boundary.count, start_NE_cm, end_NE_cm) * 0.01f;
         if (!found || (use_union ? (distance_m > distance_new_m) : (distance_m < distance_new_m))) {
             distance_new_m = distance_m;
             fence_type = AC_PolyFenceType::POLYGON_INCLUSION;
@@ -409,7 +425,12 @@ float AC_PolyFence_loader::distance_line_to_polygon_exclusion(const Vector2f& st
     // check how far we are outside any polygon exclusion zone: Return the minimum distance;
     for (uint8_t i=0; i<_num_loaded_exclusion_boundaries; i++) {
         const ExclusionBoundary &boundary = _loaded_exclusion_boundary[i];
-        float distance_m =  Polygon_closest_distance_line(boundary.points, boundary.count, start_NE_cm, end_NE_cm) * 0.01f;
+        // Same signing issue as distance_line_to_inclusion() above: a segment wholly
+        // inside the exclusion (never crossing its boundary) would otherwise return an
+        // unsigned positive "outside" distance.  Currently masked by the poly_breached
+        // skip in AP_OAScripting's caller, but fix it here too rather than rely on that.
+        const float sign = Polygon_outside(start_NE_cm, boundary.points, boundary.count) ? 1.0f : -1.0f;
+        float distance_m = sign * Polygon_closest_distance_line(boundary.points, boundary.count, start_NE_cm, end_NE_cm) * 0.01f;
         distance_new_m = (distance_m < distance_new_m) ? distance_m : distance_new_m;
     }
 
