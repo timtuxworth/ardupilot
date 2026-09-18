@@ -121,7 +121,7 @@ private:
     static void _populate_scripting_obstacle(OAObstacle &scripting_obstacle, const AP_Avoidance::Obstacle *avoidance_obstacle);
     static void _populate_fence_obstacle(OAObstacle &fence_obstacle, AP_OAScripting::ObstacleType obstacle_type);
 
-    static ObstacleType _get_obstacle_type(uint8_t emitter_type, int32_t obstacle_id);
+    static ObstacleType _get_obstacle_type(uint8_t emitter_type);
 
     // Properties to work around Lua binding problem of the binding generator not being able
     // to pass in Locations and return a number of other values

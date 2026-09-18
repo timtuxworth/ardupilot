@@ -424,9 +424,15 @@ float AP_OAScripting::_distance_to_object(const Vector3f &start_NED_m, const Vec
 #endif  // AP_OA_SCRIPTING_OADB_ENABLED
 
 // translate an AP_Avoidance obstacle src_id into an enum for further processing in Lua
-AP_OAScripting::ObstacleType AP_OAScripting::_get_obstacle_type(uint8_t emitter_type, int32_t icao_code)
+AP_OAScripting::ObstacleType AP_OAScripting::_get_obstacle_type(uint8_t emitter_type)
 {
-    if (AP_Avoidance::is_adsb_uav(emitter_type) || icao_code <= 0x0BFFF) {
+    // A MAVLink GLOBAL_POSITION_INT contact (AP_Avoidance::handle_msg()) always forces
+    // emitter_type to ADSB_EMITTER_TYPE_UAV, so is_adsb_uav() alone is sufficient there -
+    // no need to also treat a low ICAO address as a drone. For a real ADS-B contact,
+    // icao_code is the aircraft's actual 24-bit address, and a low value there is a
+    // legitimately-registered crewed aircraft, not a drone: that clause mistyped it as
+    // MAV_SYSID, giving it the drone standoff/NMAC thresholds and no loiter-to-altitude.
+    if (AP_Avoidance::is_adsb_uav(emitter_type)) {
         return ObstacleType::MAV_SYSID;
     } else if (AP_Avoidance::is_adsb_aircraft(emitter_type)) {
         return ObstacleType::CREWED_AIRCRAFT;
@@ -455,9 +461,8 @@ void AP_OAScripting::_populate_scripting_obstacle(OAObstacle &script_obstacle, c
 {
     script_obstacle.timestamp_ms    = avoid_obstacle->timestamp_ms;
 
-    // icao_code must be set before _get_obstacle_type(): that helper classifies on it
     script_obstacle.icao_code       = avoid_obstacle->src_id & 0xFFFFFF;
-    script_obstacle.obstacle_type   = static_cast<uint8_t>(_get_obstacle_type(avoid_obstacle->emitter_type, script_obstacle.icao_code));
+    script_obstacle.obstacle_type   = static_cast<uint8_t>(_get_obstacle_type(avoid_obstacle->emitter_type));
     script_obstacle.src_id          = avoid_obstacle->src_id;
 
     script_obstacle.emitter_type    = avoid_obstacle->emitter_type;
