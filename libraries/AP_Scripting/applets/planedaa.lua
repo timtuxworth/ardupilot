@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-111"
+SCRIPT_VERSION      = "4.8.0-112"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -895,6 +895,7 @@ local DAA = {
     local trap_prev_mode        = -1            -- mode to restore on recovery
     local trap_fs_mode          = -1            -- the failsafe mode we commanded
     local trap_hung             = false         -- trap from a hung avoidance (released when the mission moves on)
+    local trap_noesc_warn_ms    = uint32_t(0)   -- throttle for the repeating "no escalation" CRITICAL
     local hung_active           = false         -- avoidance has made no progress for DAA_HUNG_ALRT_S
     local hung_best_m           = nil           -- closest we have been to the navigation target this episode
     local hung_since_ms         = uint32_t(0)   -- when that closest approach last improved
@@ -1732,8 +1733,13 @@ local DAA = {
             -- and, worse, latches trap_active so DAA.avoid() stops running for the rest of
             -- the flight while nothing is managing the situation. Report it and keep
             -- avoiding instead.
-            gcs:send_text(MAV_SEVERITY.CRITICAL, SCRIPT_NAME_SHORT .. string.format(
-                ": TRAPPED - no escalation available, already in %s", get_mode_string(mode_now)))
+            -- trap_since_ms restarts the dwell below, so this branch re-fires every DAA_TRAP_S
+            -- while the compromise persists; throttle the CRITICAL so it doesn't spam at that rate.
+            if (now_ms - trap_noesc_warn_ms) > 15000 then
+                gcs:send_text(MAV_SEVERITY.CRITICAL, SCRIPT_NAME_SHORT .. string.format(
+                    ": TRAPPED - no escalation available, already in %s", get_mode_string(mode_now)))
+                trap_noesc_warn_ms = now_ms
+            end
             trap_prev_mode  = -1
             trap_since_ms   = uint32_t(0)
             return false
