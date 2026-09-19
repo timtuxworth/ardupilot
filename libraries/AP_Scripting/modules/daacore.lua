@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-024"
+DAAcore.SCRIPT_VERSION = "4.8.0-025"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -71,6 +71,18 @@ local AIRCRAFT_TAU_GAP_S    = 5.0
 -- before deciding a fence is genuinely clear - long enough to matter physically, short
 -- enough to stay a "where am I actually about to be" check rather than a second sweep.
 local VALIDATE_PROJECTION_S = 2.0
+
+-- Clamp a possibly-nil clearance (m) to +/-LOG_CLEARANCE_MAX_M for logging, treating "no
+-- value at all" the same as "no obstacle" (LOG_CLEARANCE_MAX_M). Module scope like the
+-- constants above, for the same 200-local-per-function reason - and a real if/else here
+-- (rather than the `x == nil and A or B` idiom used elsewhere in this file) lets LuaLS
+-- narrow value_m to non-nil in the else branch instead of flagging math.min/math.max.
+local function clamp_log_m(value_m)
+    if value_m == nil then
+        return LOG_CLEARANCE_MAX_M
+    end
+    return math.max(math.min(value_m, LOG_CLEARANCE_MAX_M), -LOG_CLEARANCE_MAX_M)
+end
 
 function DAAcore.new(deps)
     local self = {}
@@ -1839,13 +1851,11 @@ function DAAcore.new(deps)
             -- FncD/FPrD are SIGNED (positive clear, negative breached) since the
             -- AP_OAScripting::fence_distance() fix - LOG_CLEARANCE_MAX_M is a "no fence
             -- loaded" sentinel, not a "very safe" one, same as every other field here.
-            (fence_clearance_m == nil) and LOG_CLEARANCE_MAX_M
-                or math.max(math.min(fence_clearance_m, LOG_CLEARANCE_MAX_M), -LOG_CLEARANCE_MAX_M),
+            clamp_log_m(fence_clearance_m),
             wrap_360(best_bearing_deg),      -- FnlB - bearing actually being commanded
             math.max(math.min(traj_distance_m, LOG_CLEARANCE_MAX_M), -LOG_CLEARANCE_MAX_M),
             math.max(math.min(cmd_distance_m, LOG_CLEARANCE_MAX_M), -LOG_CLEARANCE_MAX_M),
-            (fence_proj_m == nil) and LOG_CLEARANCE_MAX_M
-                or math.max(math.min(fence_proj_m, LOG_CLEARANCE_MAX_M), -LOG_CLEARANCE_MAX_M),
+            clamp_log_m(fence_proj_m),
             held and 1 or 0,
             (obstacle_avoiding ~= nil and obstacle_avoiding.type) or 0,
             obstacle_type or 0,              -- Sel - type selected BEFORE resolver processing
