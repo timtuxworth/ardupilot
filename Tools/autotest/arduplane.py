@@ -10935,7 +10935,9 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
             "SCR_VM_I_COUNT": 1000000,
             "ADSB_TYPE": 1,     # MAVLink: ingest ADSB_VEHICLE with no ADS-B hardware
             "AVD_ENABLE": 1,    # required for AP_Avoidance to pull ADSB samples
-            "AVD_UAV_XY": 150,
+            # generous horizontal radius - this test is about the VERTICAL gate, not a
+            # tight lateral margin; the climbing turn-onto-course leaves a little drift
+            "AVD_UAV_XY": 300,
             "AVD_UAV_Z": 25,
         })
 
@@ -10947,7 +10949,11 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         takeoff_alt_m = 30
         wp_alt_m = 300  # a steep, long climb so the vehicle is still well below this
         # for a good while after takeoff - the gap that exposes the flattened probe
-        drone_loc = self.offset_location_ne(home, 400, 0)  # on the path, early in the climb
+        # planedaa's own STARTUP_DELAY (25 s) means the vehicle can already be several
+        # hundred metres down the leg before the script evaluates anything at all - the
+        # drone must sit well beyond that so it is not already behind the vehicle by
+        # the time DAA starts, whatever this run's exact climb-out timing turns out to be
+        drone_loc = self.offset_location_ne(home, 900, 0)  # on the path, early in the climb
         icao = 0xF000A0
 
         def inject_drone():
@@ -10978,7 +10984,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
         avoided = False
         avoid_alt_m = None
         tstart = self.get_sim_time()
-        while self.get_sim_time() - tstart < 90:
+        while self.get_sim_time() - tstart < 150:
             inject_drone()
             m = self.mav.recv_match(type='STATUSTEXT', blocking=True, timeout=1)
             if m is not None and "AVOIDING" in m.text:
