@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-112"
+SCRIPT_VERSION      = "4.8.0-113"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -92,7 +92,7 @@ PARAM.ACT_FN = bind_add_param("ACT_FN", 1, 308)
 --[[
   // @Param: DAA_MARGIN_FENCE
   // @DisplayName: fence margin
-  // @Description: Avoidance margin (m) kept clear of fences. 0 (default) uses the turn radius WP_LOITER_RAD, so the standoff matches a single loiter circle and fences do not thrash.
+  // @Description: Avoidance margin (m) kept clear of fences. 0 (default) uses the achievable turn radius (from AIRSPEED_CRUISE/ROLL_LIMIT_DEG) with a safety factor, falling back to WP_LOITER_RAD only if no cruise speed is configured yet.
   // @Units: m
 --]]
 PARAM.MARGIN_FENCE = bind_add_param('MARGIN_FENCE', 2, 0)

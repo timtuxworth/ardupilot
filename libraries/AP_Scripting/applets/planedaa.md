@@ -177,7 +177,7 @@ Collision volumes, and the `FENCE_*` parameters for the altitude/geo fences.
 | Parameter | Default | Units | Description |
 |-----------|---------|-------|-------------|
 | `DAA_ACT_FN` | 308 | | RC option / scripting function used to activate the DAA capability. |
-| `DAA_MARGIN_FENCE` | 0 | m | Avoidance margin kept clear of the geofence. `0` (default) uses `WP_LOITER_RAD`, so the standoff equals one loiter circle and fences don't thrash; set a non-zero value to override. |
+| `DAA_MARGIN_FENCE` | 0 | m | Avoidance margin kept clear of the geofence. `0` (default) uses the achievable turn radius (from `AIRSPEED_CRUISE`/`ROLL_LIMIT_DEG`) doubled for reaction lag and an oblique approach, falling back to `WP_LOITER_RAD` only if no cruise speed is configured yet; set a non-zero value to override. |
 | `DAA_LKAHD_M` | 1000 | m | How far along each candidate heading the bendy ruler probes for a clear path (the second leg probes a further 2×). |
 | `DAA_DETECT_M` | 1000 | m | How far ahead obstacles are detected at all, and the range beyond which one is not announced. Shortening this costs detection — at 250 m the drone-avoidance and fence-alert autotests stop firing. Crewed traffic is unaffected: `detect_aircraft()` uses `AVD_WCLR_XY + DAA_MARGIN_CA`. |
 | `DAA_PLAN_M` | 1000 | m | Minimum distance along the chosen bearing at which the commanded avoidance target is placed — see _Where the commanded avoidance target is placed_. Raise before lowering. |
@@ -254,11 +254,14 @@ sluggish to re-plan.
 
 ### Margins and look-ahead
 
-The fence standoff (`DAA_MARGIN_FENCE`) defaults to `0`, which uses the turn
-radius `WP_LOITER_RAD` — one loiter circle, and never below the turn radius so
+The fence standoff (`DAA_MARGIN_FENCE`) defaults to `0`, which uses the
+achievable turn radius from `AIRSPEED_CRUISE`/`ROLL_LIMIT_DEG`, doubled for
+reaction lag and an oblique approach, and never below the bare turn radius so
 fences don't thrash (the startup check warns if a non-zero margin is set below
-the turn radius). To override, size it from how far the aircraft travels while
-reacting — i.e. from airspeed — but keep it at least the turn radius. Size
+the turn radius). It falls back to `WP_LOITER_RAD` — one loiter circle — only
+if no cruise speed is configured yet. To override, size it from how far the
+aircraft travels while reacting — i.e. from airspeed — but keep it at least
+the turn radius. Size
 `DAA_LKAHD_M` the same way and keep it at least a few times the turn radius (the
 startup check warns below 3×R); a very long look-ahead (10×+) can over-commit
 the far-field path. In wind, `DAA_WIND_MARG` widens the fence standoff
