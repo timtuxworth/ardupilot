@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-110"
+SCRIPT_VERSION      = "4.8.0-111"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -322,7 +322,7 @@ PARAM.CPA_MIN = bind_add_param('CPA_MIN', 27, 2)
     // @Values: 0:Disabled,1:RTL,2:QRTL,3:QLOITER,4:QLAND
     // @User: Standard
 --]]
-PARAM.TRAP_ACT = bind_add_param('TRAP_ACT', 28, 1)
+PARAM.TRAP_ACT = bind_add_param('TRAP_ACT', 28, 0)
 
 --[[
     // @Param: DAA_TRAP_S
