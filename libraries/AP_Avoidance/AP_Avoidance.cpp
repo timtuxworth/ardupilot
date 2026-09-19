@@ -361,9 +361,9 @@ void AP_Avoidance::get_adsb_samples()
                    MAV_COLLISION_SRC_ADSB,
                    src_id,
                    loc,
-                   vehicle.info.heading * 0.01,         // convert cm-up to m-down
+                   vehicle.info.heading * 0.01,
                    vehicle.info.hor_velocity * 0.01,
-                   -vehicle.info.ver_velocity * 0.01,
+                   -vehicle.info.ver_velocity * 0.01,   // convert cm-up to m-down
                    vehicle.info.emitter_type);
     }
 }
