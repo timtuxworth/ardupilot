@@ -17,7 +17,7 @@
 
 local DAAgeometry = {}
 
-DAAgeometry.SCRIPT_VERSION = "4.8.0-003"
+DAAgeometry.SCRIPT_VERSION = "4.8.0-004"
 DAAgeometry.SCRIPT_NAME = "DAA geometry"
 DAAgeometry.SCRIPT_NAME_SHORT = "DAAgeo"
 
