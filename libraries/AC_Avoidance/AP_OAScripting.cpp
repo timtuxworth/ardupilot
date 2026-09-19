@@ -490,6 +490,9 @@ float AP_OAScripting::_distance_to_avoidance(const Vector3f &start_NED_cm, const
                                                 ) const
 {
     AP_Avoidance *avoid = AP_Avoidance::get_singleton();
+    if (avoid == nullptr) {
+        return FLT_MAX;
+    }
     AP_Avoidance::Obstacle any_avoidance {};
 
     float distance_m = avoid->distance_to_obstacle(start_NED_cm, end_NED_cm, any_avoidance);
@@ -506,6 +509,9 @@ float AP_OAScripting::_distance_to_aircraft(const Vector3f &vehicle_NED_cm, cons
                                                 ) const
 {
     AP_Avoidance *avoid = AP_Avoidance::get_singleton();
+    if (avoid == nullptr) {
+        return lookahead_m;
+    }
     AP_Avoidance::Obstacle avoid_obstacle;
 
     float distance_m = avoid->distance_to_aircraft(vehicle_NED_cm, FLT_MAX, vertical_lookahead_m, avoid_obstacle);
