@@ -90,6 +90,7 @@ function DAAcore.new(deps)
     local wrap_360                  = geometry.wrap_360
     local wrap_180                  = geometry.wrap_180
     local location_project          = geometry.location_project
+    local copy_alt_from             = geometry.copy_alt_from
     local max_turn_rate_dps         = geometry.max_turn_rate_dps
     local arc_projection            = geometry.arc_projection
     local effective_groundspeed     = geometry.effective_groundspeed
@@ -1010,6 +1011,16 @@ function DAAcore.new(deps)
         -- bank direction from what the aircraft is currently, physically holding - see
         -- its own comment for why the plain single-arc model is not safe there.
         local adjusted_loc          = location_for_candidate(bearing_test_deg, target_loc)
+
+        -- location_for_candidate() routes through location_project(), which always adopts
+        -- target_loc's altitude - correct for a location that is really at the target, but
+        -- adjusted_loc is only just after the turn, still close to the aircraft's real
+        -- altitude. Restore it, so the step-1 segment below (adjusted_loc -> test_loc, which
+        -- stays at the target altitude) spans the real climb/descent instead of being
+        -- flattened to a level line - AP_Avoidance.cpp already interpolates altitude at the
+        -- horizontal closest point for exactly this reason, and a flattened probe segment
+        -- defeated it here.
+        copy_alt_from(adjusted_loc, current_loc)
 
         -- Position after one step from where we think we will be after turning to bearing_test_deg
         local avoidance_distance_m  = calc_avoidance_distance(avoid_step1_m, full_distance)
