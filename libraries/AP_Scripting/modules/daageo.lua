@@ -70,6 +70,7 @@ local function copy_alt_from(dest, src)
         dest:set_alt_m(alt_m, frame)
     end
 end
+DAAgeometry.copy_alt_from = copy_alt_from
 
 -- Project forward from loc1 to a newlocation in the direction bearing_deg and distance m
 -- the altitude of the new projected location should be based on alt_target_loc, including frame
