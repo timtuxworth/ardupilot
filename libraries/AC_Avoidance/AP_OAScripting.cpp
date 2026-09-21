@@ -483,8 +483,8 @@ void AP_OAScripting::_populate_scripting_obstacle(OAObstacle &script_obstacle, c
 // useful in AP_Avoidance (a lot), while overriding and parameterizing what is not.
 //
 
-// Distance to objects in the AP_Avoidance database from a line from START_NED_cm to  end_NED_cm
-float AP_OAScripting::_distance_to_avoidance(const Vector3f &start_NED_cm, const Vector3f &end_NED_cm,
+// Distance to objects in the AP_Avoidance database from a line from start_NED_m to end_NED_m
+float AP_OAScripting::_distance_to_avoidance(const Vector3f &start_NED_m, const Vector3f &end_NED_m,
                                                 // return values
                                                 OAObstacle &script_any_obstacle
                                                 ) const
@@ -495,7 +495,7 @@ float AP_OAScripting::_distance_to_avoidance(const Vector3f &start_NED_cm, const
     }
     AP_Avoidance::Obstacle any_avoidance {};
 
-    float distance_m = avoid->distance_to_obstacle(start_NED_cm, end_NED_cm, any_avoidance);
+    float distance_m = avoid->distance_to_obstacle(start_NED_m, end_NED_m, any_avoidance);
     if (distance_m < FLT_MAX) {
         _populate_scripting_obstacle(script_any_obstacle, &any_avoidance);
     }
@@ -503,7 +503,7 @@ float AP_OAScripting::_distance_to_avoidance(const Vector3f &start_NED_cm, const
 }
 
 // Closest Distance to aircraft in the AP_Avoidance database from a single point
-float AP_OAScripting::_distance_to_aircraft(const Vector3f &vehicle_NED_cm, const float lookahead_m, const float vertical_lookahead_m,
+float AP_OAScripting::_distance_to_aircraft(const Vector3f &vehicle_NED_m, const float lookahead_m, const float vertical_lookahead_m,
                                                 // return values
                                                 OAObstacle &script_obstacle
                                                 ) const
@@ -514,7 +514,7 @@ float AP_OAScripting::_distance_to_aircraft(const Vector3f &vehicle_NED_cm, cons
     }
     AP_Avoidance::Obstacle avoid_obstacle;
 
-    float distance_m = avoid->distance_to_aircraft(vehicle_NED_cm, FLT_MAX, vertical_lookahead_m, avoid_obstacle);
+    float distance_m = avoid->distance_to_aircraft(vehicle_NED_m, FLT_MAX, vertical_lookahead_m, avoid_obstacle);
     if (distance_m < lookahead_m) {
         _populate_scripting_obstacle(script_obstacle, &avoid_obstacle);
     }
