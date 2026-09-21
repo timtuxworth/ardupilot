@@ -17,7 +17,7 @@
 
 local DAAgeometry = {}
 
-DAAgeometry.SCRIPT_VERSION = "4.8.0-004"
+DAAgeometry.SCRIPT_VERSION = "4.8.0-005"
 DAAgeometry.SCRIPT_NAME = "DAA geometry"
 DAAgeometry.SCRIPT_NAME_SHORT = "DAAgeo"
 
@@ -82,6 +82,22 @@ function DAAgeometry.location_project(loc1, bearing_deg, distance, alt_target_lo
     copy_alt_from(loc2, alt_target_loc)
 
     return loc2
+end
+
+-- Set dest's altitude to the point distance_m/near_loc->far_loc fraction of the way from
+-- near_loc's altitude to far_loc's altitude. No-op if distance_m already reaches far_loc.
+function DAAgeometry.interpolate_alt(dest, near_loc, far_loc, distance_m)
+    local to_far_m = near_loc:get_distance(far_loc)
+    if to_far_m <= distance_m or to_far_m <= 0 then
+        return
+    end
+    local frame = far_loc:get_alt_frame()
+    local near_alt_m = near_loc:get_alt_m(frame)
+    local far_alt_m = far_loc:get_alt_m(frame)
+    if near_alt_m == nil or far_alt_m == nil then
+        return
+    end
+    dest:set_alt_m(near_alt_m + (far_alt_m - near_alt_m) * distance_m / to_far_m, frame)
 end
 
 -- Maximum achievable rate of turn (deg/s) in a level banked turn at roll_limit_deg:
