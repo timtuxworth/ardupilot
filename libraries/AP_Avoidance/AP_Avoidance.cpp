@@ -245,6 +245,7 @@ void AP_Avoidance::deinit(void)
         // _obstacle_count, so the count must reach zero before the array is freed
         WITH_SEMAPHORE(_rsem);
         _obstacle_count = 0;
+        _current_most_serious_threat = -1;
         if (_obstacles != nullptr) {
             delete [] _obstacles;
             _obstacles = nullptr;
@@ -259,6 +260,7 @@ void AP_Avoidance::deinit(void)
     }
 #else
     _obstacle_count = 0;
+    _current_most_serious_threat = -1;
     if (_obstacles != nullptr) {
         delete [] _obstacles;
         _obstacles = nullptr;
@@ -548,6 +550,11 @@ void AP_Avoidance::handle_threat_gcs_notify(AP_Avoidance::Obstacle *threat)
     }
     if (now - threat->last_gcs_report_time > _gcs_notify_interval * 1000) {
         send_collision_all(*threat, mav_avoidance_action());
+#if AP_OA_SCRIPTING_ENABLED
+        // the scripting queries copy the whole Obstacle under _rsem; take it here too,
+        // or their copy can race this write
+        WITH_SEMAPHORE(_rsem);
+#endif
         threat->last_gcs_report_time = now;
     }
 
