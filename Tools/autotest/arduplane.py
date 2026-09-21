@@ -8869,6 +8869,7 @@ return update()
         self.context_collect('STATUSTEXT')
         self.reboot_sitl()
         self.wait_ready_to_arm()
+        self.set_parameter("DAA_TRAP_ACT", 1)  # non-default, so the "TRAPPED" check below has teeth
 
         home = self.home_position_as_location()
         parked_loc = self.offset_location_ne(home, 30, 0)
@@ -8925,6 +8926,7 @@ return update()
         self.context_collect('STATUSTEXT')
         self.reboot_sitl()
         self.wait_ready_to_arm()
+        self.set_parameter("DAA_TRAP_ACT", 1)  # non-default, so the "TRAPPED" check below has teeth
 
         home = self.home_position_as_location()
         parked_loc = self.offset_location_ne(home, 30, 0)
@@ -10799,9 +10801,10 @@ return update()
             {"radius": 150, "loc": self.offset_location_ne(home, 520, 250)},
         )])
 
+        # collect before reboot so the script's start-up announcement is captured
+        self.context_collect('STATUSTEXT')
         self.reboot_sitl()
         self.wait_ready_to_arm()
-        self.context_collect('STATUSTEXT')
 
         # DAA_ params only register once the script has loaded post-boot.
         self.set_parameters({
@@ -11066,13 +11069,14 @@ return update()
         # inject repeatedly (obstacles prune after 5 s) until avoidance engages or the
         # vehicle has climbed almost all the way to the target - by which point the bug
         # and the fix become indistinguishable, so there is nothing more to prove
+        drone_label = "Drone:%06X" % (icao & 0xFFFFFF)  # pin the avoidance to this drone
         avoided = False
         avoid_alt_m = None
         tstart = self.get_sim_time()
         while self.get_sim_time() - tstart < 150:
             inject_drone()
             m = self.mav.recv_match(type='STATUSTEXT', blocking=True, timeout=1)
-            if m is not None and "AVOIDING" in m.text:
+            if m is not None and "AVOIDING" in m.text and drone_label in m.text:
                 avoided = True
                 avoid_alt_m = self.get_altitude(relative=True)
                 break
