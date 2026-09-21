@@ -106,7 +106,7 @@ private:
 
     static AP_OAScripting *_singleton;
 
-    float _distance_to_avoidance(const Vector3f &start_NED_cm, const Vector3f &end_NED_cm, OAObstacle &script_obstacle) const;
+    float _distance_to_avoidance(const Vector3f &start_NED_m, const Vector3f &end_NED_m, OAObstacle &script_obstacle) const;
     // Shared by find_threats() and find_fence_threats(): the fence-only portion of the
     // search (every polygon/circle fence category), taking NE offsets in CENTIMETRES
     // (the fence loader's native units) rather than Locations, since both callers
@@ -115,7 +115,7 @@ private:
 #if AP_OA_SCRIPTING_OADB_ENABLED
     float _distance_to_object(const Vector3f &start_NED_m, const Vector3f end_NED_m, OAObstacle &script_obstacle) const;
 #endif
-    float _distance_to_aircraft(const Vector3f &vehicle_NED_cm, const float lookahead_m, const float vertical_lookahead_m, OAObstacle &script_obstacle) const;
+    float _distance_to_aircraft(const Vector3f &vehicle_NED_m, const float lookahead_m, const float vertical_lookahead_m, OAObstacle &script_obstacle) const;
 
     // create a "Scripting Obstacle" to easily pass info about an obstacle to Lua
     static void _populate_scripting_obstacle(OAObstacle &scripting_obstacle, const AP_Avoidance::Obstacle *avoidance_obstacle);
