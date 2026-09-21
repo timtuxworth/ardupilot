@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-025"
+DAAcore.SCRIPT_VERSION = "4.8.0-026"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -103,6 +103,7 @@ function DAAcore.new(deps)
     local wrap_180                  = geometry.wrap_180
     local location_project          = geometry.location_project
     local copy_alt_from             = geometry.copy_alt_from
+    local interpolate_alt           = geometry.interpolate_alt
     local max_turn_rate_dps         = geometry.max_turn_rate_dps
     local arc_projection            = geometry.arc_projection
     local effective_groundspeed     = geometry.effective_groundspeed
@@ -869,6 +870,7 @@ function DAAcore.new(deps)
         for _, delta in ipairs(test_bearings) do
             local bearing_test  = wrap_180(bearing_to_dest_deg + delta)
             local loc_test2     = location_project(loc_test, bearing_test, distance2_m, destination_loc)
+            interpolate_alt(loc_test2, loc_test, destination_loc, distance2_m)
 
             local distance_m, obstacle = find_closest_obstacle(loc_test, loc_test2, detect_m, wind_speed)
 
@@ -1037,6 +1039,7 @@ function DAAcore.new(deps)
         -- Position after one step from where we think we will be after turning to bearing_test_deg
         local avoidance_distance_m  = calc_avoidance_distance(avoid_step1_m, full_distance)
         local test_loc              = location_project(adjusted_loc, bearing_test_deg, avoidance_distance_m, target_loc)
+        interpolate_alt(test_loc, adjusted_loc, target_loc, avoidance_distance_m)
 
         local distance_found_m, obstacle_found = find_closest_obstacle(adjusted_loc, test_loc, detect_m, wind_speed)
         if distance_found_m == nil then
