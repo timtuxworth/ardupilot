@@ -8860,10 +8860,11 @@ return update()
             ]),
         ]
         self.upload_fences_from_locations(fences)
+        # collect before reboot so the script's start-up announcement is captured
+        self.context_collect('STATUSTEXT')
         self.reboot_sitl()
         self.wait_ready_to_arm()
         self.set_parameter("DAA_MARGIN_FENCE", 50)
-        self.context_collect('STATUSTEXT')
         self.start_flying_simple_relhome_mission([
             (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 80),
             (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 600, 0, 80),     # 2 north run-in
@@ -10737,6 +10738,8 @@ return update()
             {"radius": excl_radius_m, "loc": excl_centre},
         )])
 
+        # collect before reboot so the script's start-up announcement is captured
+        self.context_collect('STATUSTEXT')
         self.reboot_sitl()
         self.wait_ready_to_arm()
         self.set_parameters({
@@ -10746,7 +10749,6 @@ return update()
             # run, which the trap would otherwise treat as a compromise and RTL for.
             "DAA_TRAP_ACT": 0,
         })
-        self.context_collect('STATUSTEXT')
 
         self.start_flying_simple_relhome_mission([
             (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 80),
