@@ -178,9 +178,9 @@ Collision volumes, and the `FENCE_*` parameters for the altitude/geo fences.
 |-----------|---------|-------|-------------|
 | `DAA_ACT_FN` | 308 | | RC option / scripting function used to activate the DAA capability. |
 | `DAA_MARGIN_FENCE` | 0 | m | Avoidance margin kept clear of the geofence. `0` (default) uses the achievable turn radius (from `AIRSPEED_CRUISE`/`ROLL_LIMIT_DEG`) doubled for reaction lag and an oblique approach, falling back to `WP_LOITER_RAD` only if no cruise speed is configured yet; set a non-zero value to override. |
-| `DAA_LKAHD_M` | 1000 | m | How far along each candidate heading the bendy ruler probes for a clear path (the second leg probes a further 2×). |
+| `DAA_LKAHD_M` | 500 | m | How far along each candidate heading the bendy ruler probes for a clear path (the second leg probes a further 2×). |
 | `DAA_DETECT_M` | 1000 | m | How far ahead obstacles are detected at all, and the range beyond which one is not announced. Shortening this costs detection — at 250 m the drone-avoidance and fence-alert autotests stop firing. Crewed traffic is unaffected: `detect_aircraft()` uses `AVD_WCLR_XY + DAA_MARGIN_CA`. |
-| `DAA_PLAN_M` | 1000 | m | Minimum distance along the chosen bearing at which the commanded avoidance target is placed — see _Where the commanded avoidance target is placed_. Raise before lowering. |
+| `DAA_PLAN_M` | 250 | m | Minimum distance along the chosen bearing at which the commanded avoidance target is placed — see _Where the commanded avoidance target is placed_. Raise before lowering. |
 | `DAA_UPDATE_RATE` | 10 | Hz | Rate at which avoidance is processed. |
 | `DAA_MARGIN_CA` | 50 | m | Avoidance margin for crewed aircraft (fixed wing, helicopter, eVTOL), over and above the Well Clear margin `AVD_WCLR_XY`. |
 | `DAA_MARGIN_CA_Z` | 30 | m | Vertical avoidance margin for crewed aircraft, over and above the Well Clear vertical separation `AVD_WCLR_Z`. An aircraft triggers the loiter-to-altitude only while its altitude difference from the vehicle is below `AVD_WCLR_Z + DAA_MARGIN_CA_Z`. The vertical mirror of `DAA_MARGIN_CA`. |
@@ -204,6 +204,7 @@ Collision volumes, and the `FENCE_*` parameters for the altitude/geo fences.
 | `DAA_SLEW_URG` | 4 | s | If the estimated time-to-conflict with a moving obstacle is below this, the `DAA_SLEW_DPS` slew limit is bypassed so the aircraft can turn at full authority. Set to 0 to always apply the slew limit. |
 | `DAA_SIDE_HOLD` | 3 | s | Once a left/right avoidance side is committed for an obstacle, the opposite side must be preferred by the bendy ruler for at least this long before the aircraft is allowed to switch sides. Stops the left/right flip-flop when avoiding a moving obstacle. Set to 0 to disable side commitment. |
 | `DAA_CPA_MIN` | 2 | m/s | Minimum closing speed for a moving obstacle to be treated as a conflict. CPA (Closest Point of Approach) is the predicted minimum separation between the vehicle and a moving obstacle on their current tracks. An obstacle whose CPA stays beyond the well-clear distance and which is opening range faster than this is not avoided (it is leaving). Set to 0 to avoid regardless of closing speed. |
+| `DAA_TAU_S` | 30 | s | Crewed-aircraft modified-tau conflict threshold — a crewed aircraft (not a drone/UAV) is treated as a conflict when its measured range is predicted to cross the `AVD_WCLR_XY` keep-out radius within this many seconds, using RTCA DO-365C style modified-tau (time to keep-out, not time to zero range). An aircraft already inside `AVD_WCLR_XY` is always a conflict regardless of this setting. |
 | `DAA_STALE_S` | 3 | s | Traffic-feed staleness warning threshold. When avoiding a network-sourced moving obstacle (ADS-B drone/aircraft) whose position has not updated for longer than this, a `traffic stale Ns` warning is sent to the GCS (the DAA is acting on lagged data, e.g. from an intermittent telemetry/ADS-B link), and a `lost <label>` warning if it then disappears. Fences are on-board and never go stale. Set to 0 to disable. |
 | `DAA_TRAP_ACT` | 0 | | Trapped-failsafe action when avoidance cannot get the vehicle out of trouble — a sustained fence breach, a crewed aircraft inside the near-miss volume, a drone inside its own near-miss volume (`DAA_NMAC_UAV_XY/Z`), or a hung avoidance (see `DAA_HUNG_ALRT_S`) — for `DAA_TRAP_S`. `0`: disabled (avoidance just keeps trying), `1`: RTL, `2`: QRTL, `3`: QLOITER, `4`: QLAND. QLOITER/QRTL/QLAND have zero turn radius (safest in a tight space); the VTOL options fall back to RTL if `Q_ENABLE=0`. See _Trapped failsafe_ below. |
 | `DAA_TRAP_S` | 5 | s | The vehicle must be compromised continuously for this long before `DAA_TRAP_ACT` fires. Rejects transient clutter. |
@@ -284,8 +285,8 @@ chosen bearing, at `max(distance_to_target, DAA_PLAN_M)`.
 
 Until 4.8.0-080 that floor was `DAA_LKAHD`, so it could not be set independently of how
 far the sweep probed — one parameter was doing three jobs (probe length, detection
-horizon and this). They are now `DAA_LKAHD_M`, `DAA_DETECT_M` and `DAA_PLAN_M`, all
-defaulting to 1000 m so the split changes nothing on its own.
+horizon and this). They are now `DAA_LKAHD_M`, `DAA_DETECT_M` and `DAA_PLAN_M`, each
+tuned to its own job rather than sharing one value.
 
 **Do not shorten `DAA_PLAN_M` casually.**
 
