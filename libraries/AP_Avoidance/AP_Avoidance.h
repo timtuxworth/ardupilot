@@ -64,7 +64,9 @@ public:
         uint32_t src_id;
         uint32_t timestamp_ms;
 
+#if AP_OA_SCRIPTING_ENABLED
         uint8_t  emitter_type;
+#endif
         Location _location;
         Vector3f _velocity_ned_ms;
 
@@ -83,8 +85,11 @@ public:
                       const MAV_COLLISION_SRC src,
                       uint32_t src_id,
                       const Location &loc,
-                      const Vector3f &vel_ned_ms,
-                      const uint8_t emitter_type);
+                      const Vector3f &vel_ned_ms
+#if AP_OA_SCRIPTING_ENABLED
+                      , const uint8_t emitter_type
+#endif
+                      );
 
     void add_obstacle(uint32_t obstacle_timestamp_ms,
                       const MAV_COLLISION_SRC src,
@@ -92,8 +97,11 @@ public:
                       const Location &loc,
                       float cog,
                       float hspeed,
-                      float vspeed,
-                      uint8_t emitter_type);
+                      float vspeed
+#if AP_OA_SCRIPTING_ENABLED
+                      , uint8_t emitter_type
+#endif
+                      );
 
     // update should be called at 10hz or higher
     void update();
@@ -112,7 +120,7 @@ public:
     // For AP_AOScripting to check for obstacles
     float get_obstacle_radius_m(uint8_t emitter_type) const;
     float get_obstacle_height_m(uint8_t emitter_type) const;
-    float distance_to_obstacle(const Vector3f &start_NED_cm, const Vector3f &end_NED_cm,
+    float distance_to_obstacle(const Vector3f &start_NED_m, const Vector3f &end_NED_m,
                                 Obstacle &avoid_obstacle
                                 ) const;
     float distance_to_aircraft(const Vector3f &vehicle_NED_m, const float lookahead_m, const float vertical_lookahead_m,
