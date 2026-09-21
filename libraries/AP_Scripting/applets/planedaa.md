@@ -305,7 +305,7 @@ Anything that shortens this has to beat two conditions, not one:
   the target reads as _Passed waypoint_.
 
 The visible cost of leaving it long is a wide excursion away from the route before the
-aircraft comes back to it, most pronounced at the 1000 m default on a short leg.
+aircraft comes back to it, most pronounced at the 250 m default on a short leg.
 
 ### Avoidance can skip a waypoint, and says so
 

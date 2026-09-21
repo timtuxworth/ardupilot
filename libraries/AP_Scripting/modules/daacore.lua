@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-026"
+DAAcore.SCRIPT_VERSION = "4.8.0-027"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -1029,11 +1029,11 @@ function DAAcore.new(deps)
         -- location_for_candidate() routes through location_project(), which always adopts
         -- target_loc's altitude - correct for a location that is really at the target, but
         -- adjusted_loc is only just after the turn, still close to the aircraft's real
-        -- altitude. Restore it, so the step-1 segment below (adjusted_loc -> test_loc, which
-        -- stays at the target altitude) spans the real climb/descent instead of being
-        -- flattened to a level line - AP_Avoidance.cpp already interpolates altitude at the
-        -- horizontal closest point for exactly this reason, and a flattened probe segment
-        -- defeated it here.
+        -- altitude. Restore it, so the step-1 segment below (adjusted_loc -> test_loc, whose
+        -- own altitude is interpolated to how far it actually reaches) spans the real
+        -- climb/descent instead of being flattened to a level line - AP_Avoidance.cpp already
+        -- interpolates altitude at the horizontal closest point for exactly this reason, and
+        -- a flattened probe segment defeated it here.
         copy_alt_from(adjusted_loc, current_loc)
 
         -- Position after one step from where we think we will be after turning to bearing_test_deg
@@ -1826,9 +1826,16 @@ function DAAcore.new(deps)
         local cmd_distance_m   = best_distance_m
         local fence_proj_m     = nil
         if was_release_candidate or was_moving_avoidance then
+            -- Both loc functions route through location_project(), which adopts target_loc's
+            -- altitude outright - the same near-end flattening probe_bearing() corrects for
+            -- adjusted_loc. Match that correction here so these diagnostic distances are
+            -- measured against the same real-altitude geometry the control path just used,
+            -- not a level line to the target.
             local traj_loc = project_current_trajectory(target_loc)
+            copy_alt_from(traj_loc, current_loc)
             traj_distance_m = find_closest_obstacle(current_loc, traj_loc, detect_m, wind_speed)
             local cmd_loc = location_for_candidate(best_bearing_deg, target_loc)
+            copy_alt_from(cmd_loc, current_loc)
             cmd_distance_m = find_closest_obstacle(current_loc, cmd_loc, detect_m, wind_speed)
             fence_proj_m = obstacles.find_closest_fence(current_loc, cmd_loc, detect_m, wind_speed)
         end
