@@ -3,6 +3,7 @@
 #if AP_FENCE_ENABLED
 
 #include <AP_Vehicle/AP_Vehicle_Type.h>
+#include <AP_Avoidance/AP_Avoidance_config.h>
 
 #ifndef AC_FENCE_DUMMY_METHODS_ENABLED
 #define AC_FENCE_DUMMY_METHODS_ENABLED  (!(APM_BUILD_TYPE(APM_BUILD_Rover) | APM_BUILD_COPTER_OR_HELI | APM_BUILD_TYPE(APM_BUILD_ArduPlane) | APM_BUILD_TYPE(APM_BUILD_ArduSub) | (AP_FENCE_ENABLED == 1)))
@@ -1224,6 +1225,7 @@ const AC_PolyFence_loader &AC_Fence::polyfence() const
     return _poly_loader;
 }
 
+#if AP_OA_SCRIPTING_ENABLED
 // returns the closest distance in meters from (start_NE_cm, end_NE_cm) and any "tincan" circle/home based inclusion fence.
 // the distance will be positive if inside the inclusion "tincan", or -ve if outside
 float AC_Fence::distance_line_to_home_inclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const
@@ -1278,6 +1280,12 @@ float AC_Fence::distance_line_to_polygon_exclusion(const Vector2f& start_NE_cm, 
 
     return _poly_loader.distance_line_to_polygon_exclusion(start_NE_cm, end_NE_cm) - get_margin_ne_m();
 }
+#else
+float AC_Fence::distance_line_to_home_inclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const { return FLT_MAX; }
+float AC_Fence::distance_line_to_inclusion(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm, AC_PolyFenceType &fence_type) const { return FLT_MAX; }
+float AC_Fence::distance_line_to_circle_exclusion(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm) const { return FLT_MAX; }
+float AC_Fence::distance_line_to_polygon_exclusion(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm) const { return FLT_MAX; }
+#endif  // AP_OA_SCRIPTING_ENABLED
 
 #else  // build type is not appropriate; provide a dummy implementation:
 const AP_Param::GroupInfo AC_Fence::var_info[] = { AP_GROUPEND };
