@@ -51,6 +51,7 @@ To confirm a binary has it, `Tools/scripts/extract_features.py <binary>` lists
 |-----------|-------|-------|
 | `SCR_ENABLE` | `1` | Enable Lua scripting (reboot required). |
 | `SCR_VM_I_COUNT` | `250000` | **Increase from the default.** `planedaa.lua` is large and the per-loop instruction budget must be raised or the VM will fault. The applet warns at startup below `150000`. |
+| `SCR_HEAP_SIZE` | `262144` | **Increase from the default** (200 kB on SITL/Linux, 100 kB on most flight-controller boards). `planedaa.lua` and its modules (`daacore`/`daageo`/`daaltr`/`daaobs`) need more heap than that to load and run; without raising it the script fails to load with an out-of-memory error. |
 
 Do not treat `SCR_VM_I_COUNT` as a value to trim. It is an _instruction_ budget,
 not a memory allocation — raising it costs no RAM. `1000000` is the top of the
