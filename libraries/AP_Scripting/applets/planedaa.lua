@@ -474,8 +474,6 @@ local lookahead_param_m     = PARAM.LKAHD_M:get()
 local detect_m              = PARAM.DETECT_M:get()
 -- daageo's turn_radius_m()/max_turn_rate_dps() are stateless and take this directly (see
 -- fence_margin_fallback_m() below, DAA.warnings(), hung_update(), and DAAV.TrR logging) -
--- no longer module-only now that this file is a direct consumer too, not just a forwarder
--- to a geometry.configure() call.
 local roll_limit_deg        = PARAM.ROLL_LIMIT_DEG:get()
 -- Fallback ("0 => use the turn radius") is resolved further down, once turn_radius_m
 -- exists - see fence_margin_fallback_m() and its call right after.
@@ -535,7 +533,6 @@ local function need(name)
     if file ~= nil then
         gcs:send_text(MAV_SEVERITY.CRITICAL, string.format("%s %s %s", line, file, rest))
     else
-        -- no file:line in it: a module that was not found, or one that would not fit.
         -- Report what Lua actually said rather than guessing - "not enough memory" and
         -- "module not found" need completely different answers from the operator.
         gcs:send_text(MAV_SEVERITY.CRITICAL, string.format("%s: %s", name, msg:sub(1, 40)))
@@ -544,19 +541,10 @@ local function need(name)
 end
 
 -- Geometry, airframe capability and obstacle lookup live in modules, so that THIS file
--- stays the one an integrator edits to change avoidance policy (see planedaa.md).  Each
--- is aliased into a local below: every call site stays unchanged, and stays a fast upvalue
--- call rather than a table index inside the candidate-heading sweep.
--- assigned once get_mode_string exists, which it needs; configure_modules() below
--- refers to it, so it has to be in scope from here
+-- stays the one an integrator edits to change avoidance policy (see planedaa.md).
 --
 -- geometry/obstacles/core/loiteralt are forward-declared here but not required/
 -- instantiated until init_modules() runs from Delayed_Startup() (see that function) -
--- moving all four modules' heap allocations off the chunk's immediate, synchronous
--- top-level execution (which runs within the first second or two of boot) and out to
--- STARTUP_DELAY later, so they stop racing AP_Terrain's own first allocation attempt
--- for the same contiguous space at the point the heap is most fragmented. Found live,
--- log 00000095.BIN.
 local loiteralt
 local core
 local geometry
@@ -615,11 +603,7 @@ end
 -- parameter refresh, so an operator changing a margin in flight reaches the modules
 -- exactly as it reaches the rest of the applet.
 -- Parameters read ONLY here (nowhere else in this file) are fetched straight from PARAM
--- inline rather than kept as a module-level cached local - one fewer distinct name for the
--- parser budget, at the cost of one :get() call every 5 s instead of an upvalue read
--- (measured: :get() is a C binding call, but this only runs on the 5 s parameter refresh,
--- never per-cycle or per-probe, so the runtime cost is immaterial).  See
--- project_planedaa_param_cache_cleanup in memory.
+-- inline rather than kept as a module-level cached local
 local function configure_modules()
     obstacles.configure({
         margin_fence_m      = margin_fence_m,
@@ -633,32 +617,32 @@ local function configure_modules()
         wind_margin_per_ms  = PARAM.WIND_MARG:get(),
     })
     core.configure({
-        alt_cool_ms       = PARAM.ALT_COOL_S:get() * 1000,
-        alt_hyst_m        = PARAM.ALT_HYST_M:get(),
-        bearing_inc_deg   = bearing_inc_deg,
-        bendy_angle       = PARAM.BR_ANGLE:get(),
-        bendy_ratio       = bendy_ratio,
-        cpa_min_ms        = PARAM.CPA_MIN:get(),
-        detect_m          = detect_m,
-        margin_alt_m      = PARAM.MARGIN_ALT:get(),
-        margin_crewed_m   = margin_crewed_m,
-        margin_fence_m    = margin_fence_m,
-        margin_vertical_m = PARAM.MARGIN_CA_Z:get(),
-        plan_m            = PARAM.PLAN_M:get(),
-        roll_limit_deg    = roll_limit_deg,
-        roll_rate_dps     = roll_rate_dps,
-        side_hold_s       = side_hold_s,
-        slew_dps          = slew_dps,
-        slew_urg_s        = PARAM.SLEW_URG:get(),
-        tau_s             = PARAM.TAU_S:get(),
-        well_clear_xy     = well_clear_xy,
-        well_clear_z      = well_clear_z,
-        wp_loiter_rad_m   = wp_loiter_rad_m,
-        lookahead_param_m = lookahead_param_m,
+        alt_cool_ms         = PARAM.ALT_COOL_S:get() * 1000,
+        alt_hyst_m          = PARAM.ALT_HYST_M:get(),
+        bearing_inc_deg     = bearing_inc_deg,
+        bendy_angle         = PARAM.BR_ANGLE:get(),
+        bendy_ratio         = bendy_ratio,
+        cpa_min_ms          = PARAM.CPA_MIN:get(),
+        detect_m            = detect_m,
+        margin_alt_m        = PARAM.MARGIN_ALT:get(),
+        margin_crewed_m     = margin_crewed_m,
+        margin_fence_m      = margin_fence_m,
+        margin_vertical_m   = PARAM.MARGIN_CA_Z:get(),
+        plan_m              = PARAM.PLAN_M:get(),
+        roll_limit_deg      = roll_limit_deg,
+        roll_rate_dps       = roll_rate_dps,
+        side_hold_s         = side_hold_s,
+        slew_dps            = slew_dps,
+        slew_urg_s          = PARAM.SLEW_URG:get(),
+        tau_s               = PARAM.TAU_S:get(),
+        well_clear_xy       = well_clear_xy,
+        well_clear_z        = well_clear_z,
+        wp_loiter_rad_m     = wp_loiter_rad_m,
+        lookahead_param_m   = lookahead_param_m,
     })
     loiteralt.configure({
-        loiter_cool_ms  = PARAM.LTR_COOL_S:get() * 1000,
-        wp_loiter_rad_m = wp_loiter_rad_m,
+        loiter_cool_ms      = PARAM.LTR_COOL_S:get() * 1000,
+        wp_loiter_rad_m     = wp_loiter_rad_m,
     })
 end
 
@@ -805,26 +789,15 @@ local function get_vehicle_state()
     end
 end
 
-
-
-
 -------------------------------------------------------------------------------
--- LOITER ALTITUDE - Loiter right or left to (usually) lose altitude to avoid an obstacle (usually a crewed aircraft)
+-- MODULES - instantiated once, then configured every 5 s by get_vehicle_state()
 -------------------------------------------------------------------------------
--- The avoidance MECHANISM.  It answers "where can I safely go?" and decides nothing about
--- what to do with the answer - alerting, commanding and the failsafes all stay in this
--- file, which is what keeps this the only file an integrator has to edit.
 -- Instantiates every DAA module and everything that depends on one: daageo/daaobs (moved
 -- here from chunk top-level so their heap allocations happen at STARTUP_DELAY instead of
 -- racing AP_Terrain's own first allocation attempt at the most fragmented point in boot -
--- see the forward-declaration comment above), the taxonomy/geometry aliases, the
--- margin_fence_m fallback and roll_rate_dps calc (both need geometry), then daacore and
--- daaltr, which need obstacles. Called once, from the top of Delayed_Startup() - MUST run
--- before DAA.enable(), which calls DAA.warnings(), which itself calls max_turn_rate_dps()
--- and fence_margin_fallback_m() (-> turn_radius_m()) and would otherwise call a nil value.
+-- see the forward-declaration comment above),
 local function init_modules()
-    -- daageo is stateless (every function is a pure function of its arguments, see that
-    -- file), so it is required directly rather than instantiated - there is no shared
+    -- daageo is stateless so it is required directly rather than instantiated - there is no shared
     -- state to keep consistent between this file, daacore and daaobs.
     geometry  = need("daageo")
     obstacles = need("daaobs").new()
@@ -876,10 +849,7 @@ local DAA = {
     local current_loc           = ahrs:get_position() -- luacheck: ignore current_loc
     -- Placeholder values only: get_vehicle_state()/DAA.get_vehicle_state() overwrite all
     -- six of these on the first real cycle, in one place, before anything reads them -
-    -- see the comment there.  Kept here only because Lua requires an initial value for
-    -- each upvalue; wind is left literally unmeasured (0.0/0.0) rather than fetched
-    -- again from ahrs, so there is exactly one fetch site for wind/airspeed/groundspeed/
-    -- roll in the whole file, not two.
+    -- see the comment there.
     local groundspeed_ms        = 0.0
     local airspeed_ms           = 0.0
     local ground_course_deg     = 0.0
@@ -930,7 +900,7 @@ local DAA = {
     -- actually probes at is core.update_state()'s own copy (kept in sync via
     -- lookahead_param_m in configure_modules()); this is only a "did it change" sentinel
     -- for the GCS message below.
-    local lookahead_set_m   = lookahead_param_m
+    local lookahead_set_m       = lookahead_param_m
 
     -- Speed and heading of the horizontal wind, from the AHRS wind estimate.  Computed
     -- directly from the x/y components rather than through an intermediate Vector2f:
@@ -948,13 +918,6 @@ local DAA = {
     -- methods to log DAA results DAAD = Detect, DAAA = Alert, DAAV = aVoid
 
     local function log_avoid(obstacle, target_loc)
-        -- Both can be nil independently: avoid_obstacle()'s "done" branch calls this with
-        -- obstacle == nil on the very cycle avoidance ends, before daa_target_loc is cleared
-        -- (that happens in set_avoid_location(nil), called separately) - so target_loc alone
-        -- being non-nil does not guarantee obstacle is too.  Reproduced live: "Excl. Circle
-        -- done" followed immediately by "attempt to index a nil value (local 'obstacle')" at
-        -- the old obstacle.distance_m read below, which aborted the rest of that cycle's
-        -- DAA.avoid() - including any state bookkeeping still to run after this call.
         if target_loc == nil or obstacle == nil then
             return
         end
@@ -983,18 +946,6 @@ local DAA = {
             gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " log avoid:" .. tostring(err) )
         end
     end
-
-    -- DAAS: per-cycle avoidance-smoothing trace, logged every avoidance cycle for a
-    -- non-fixed (moving) obstacle.  It captures the bearing at each smoothing stage so
-    -- a flight log shows the raw wiggle and whether the smoothing damps it:
-    --   HdD = direct bearing to the target
-    --   HdR = raw bendy-ruler bearing (per-cycle, un-smoothed)
-    --   HdS = after clearance hysteresis (this is the pre-smoothing command)
-    --   HdC = final commanded bearing we fly (after side-commit + slew limit)
-    -- plus the decision state (Sid committed side, Flp side-flip pending, Urg slew
-    -- bypassed) and the motion assessment (Cls closing speed, CPA horizontal miss,
-    -- TTC time-to-conflict, PsB pass-behind side, Dst obstacle range, Typ type).
-    -- Compare HdR vs HdS vs HdC across time to see the wiggle and the smoothing effect.
 
     -- Sanity-check the DAA parameters against each other and related vehicle params, and
     -- flag disabled features. Advisory only (GCS text, nothing is changed). Fires on every
