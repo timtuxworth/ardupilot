@@ -207,7 +207,9 @@ public:
                 get_inclusion_circle_count());
     }
 
-    // methods to support scripted fence checking and avoidance
+    // methods to support scripted fence checking and avoidance. Always declared
+    // (never behind a build guard - this header is included far too broadly for that
+    // to be safe, see AC_PolyFence_loader.cpp); the definition is gated instead.
     // inclusion circles and polygons are queried together because FENCE_OPTIONS
     // INCLUSION_UNION applies across both kinds at once; fence_type reports which kind
     // the returned distance belongs to

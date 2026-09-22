@@ -4,6 +4,7 @@
 
 #include <AP_Vehicle/AP_Vehicle_Type.h>
 #include <AP_BoardConfig/AP_BoardConfig.h>
+#include <AP_Avoidance/AP_Avoidance_config.h>
 
 #ifndef AC_FENCE_DUMMY_METHODS_ENABLED
 #define AC_FENCE_DUMMY_METHODS_ENABLED  (!(APM_BUILD_TYPE(APM_BUILD_Rover) | APM_BUILD_COPTER_OR_HELI | APM_BUILD_TYPE(APM_BUILD_ArduPlane) | APM_BUILD_TYPE(APM_BUILD_ArduSub) | (AP_FENCE_ENABLED == 1)))
@@ -339,6 +340,7 @@ bool AC_PolyFence_loader::breached(const Location& loc, float& distance_outside_
     return false;
 }
 
+#if AP_OA_SCRIPTING_ENABLED
 // returns the closest distance in metres from (start_NE_cm, end_NE_cm) to the inclusion fences,
 // positive while inside the inclusion and negative once it has been breached, or FLT_MAX when no
 // inclusion fence is loaded.  fence_type reports which kind of inclusion area the distance belongs
@@ -436,7 +438,11 @@ float AC_PolyFence_loader::distance_line_to_polygon_exclusion(const Vector2f& st
 
     return distance_new_m;
 }
-
+#else
+float AC_PolyFence_loader::distance_line_to_inclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm, AC_PolyFenceType &fence_type) const { return FLT_MAX; }
+float AC_PolyFence_loader::distance_line_to_circle_exclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const { return FLT_MAX; }
+float AC_PolyFence_loader::distance_line_to_polygon_exclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const { return FLT_MAX; }
+#endif  // AP_OA_SCRIPTING_ENABLED
 
 bool AC_PolyFence_loader::formatted() const
 {

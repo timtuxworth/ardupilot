@@ -206,8 +206,11 @@ public:
     bool sys_status_enabled() const;
     bool sys_status_failed() const;
 
-    // methods used by scripted avoidance to detect distances from various fences
-    // each method returns true if it finds a fence and false if no related fence is found
+    // distance in metres from the line segment (start_NE_cm, end_NE_cm) to the nearest
+    // fence of each kind, or FLT_MAX if none is loaded. Positive while inside an
+    // inclusion area or outside an exclusion one, negative once breached. Always
+    // declared (never behind a build guard - AC_Fence.h is included far too broadly
+    // for that to be safe, see AC_Fence.cpp); the definition is gated instead.
     float distance_line_to_home_inclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const;
     float distance_line_to_inclusion(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm,
                                      AC_PolyFenceType &fence_type) const;
