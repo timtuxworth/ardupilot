@@ -54,6 +54,16 @@ ALT_FRAME           = {GLOBAL = 0, RELATIVE = 1, ORIGIN = 2, TERRAIN = 3}
 MAV_SEVERITY        = {EMERGENCY=0, ALERT=1, CRITICAL=2, ERROR=3, WARNING=4, NOTICE=5, INFO=6, DEBUG=7}
  -- COG = Course over Ground, i.e. where you want to go, HEADING = which way the vehicle points
 
+-- OAScripting, and the AVD_WCLR/NMAC/UAV parameters this file binds further down, exist
+-- only on a build with AP_OA_SCRIPTING_ENABLED (Plane + >2MB flash, or the custom build
+-- server DAA option) - checked here, before any of those binds run, so a copy of this
+-- applet on an unsupported firmware gets one clear message instead of failing on
+-- whichever missing parameter it happens to bind first.
+if OAScripting == nil then
+    gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " OAScripting object is nil!")
+    return
+end
+
 
 -- ADSB Emitter types
 
@@ -1065,7 +1075,12 @@ local DAA = {
         end
 
         if current_loc == nil or current_target_loc == nil then
-            -- no position or not navigating
+            -- no position or not navigating - revert any in-progress avoidance (and
+            -- loiter) before dropping the state below, or the hijacked avoidance
+            -- target becomes the permanent navigation target on the next good cycle:
+            -- clear_avoidance() needs navigation_target_loc/daa_target_loc still set
+            -- to know what to revert to.
+            DAA.clear_avoidance()
             navigation_target_loc   = nil
             daa_target_loc          = nil
             if navigating then
