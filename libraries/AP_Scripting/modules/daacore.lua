@@ -371,7 +371,11 @@ function DAAcore.new(deps)
         -- or negative and a plain ratio test flip-flops every cycle. It still switches away from
         -- a committed side that is itself breaching (distance_previous_m < 0) towards a side that
         -- actually clears (distance_found_m > 0), so containment is preserved.
-        if distance_found_m > 0 and distance_found_m >= bendy_ratio * distance_previous_m then
+        -- distance_previous_m < FLT_MAX: LUA_32BITS makes FLT_MAX+FLT_MAX overflow to
+        -- +inf, and inf >= bendy_ratio*inf reads true - "switch" - for two headings that
+        -- are actually equally clear. Exclude that case rather than lose hysteresis there.
+        if distance_found_m > 0 and distance_previous_m < FLT_MAX
+                and distance_found_m >= bendy_ratio * distance_previous_m then
             return bearing_deg, distance_found_m
         end
         return bearing_orig_deg, distance_previous_m
@@ -750,13 +754,13 @@ function DAAcore.new(deps)
     --]]
     -- (2) Side commitment: once a side is chosen, hold it until the sweep has wanted the
     -- other one continuously for DAA_SIDE_HOLD_S.  Returns the bearing to fly.
-    local function apply_side_commitment(bearing, side, pass_behind)
+    local function apply_side_commitment(bearing, side)
         if side_hold_s <= 0 then
             return bearing
         end
         if committed_side_sign == 0 then
-            -- fresh episode: commit; prefer passing behind a moving obstacle
-            committed_side_sign = (pass_behind ~= 0) and pass_behind or side
+            -- fresh episode: commit to the side actually being flown
+            committed_side_sign = side
             side_flip_pending = false
             return bearing
         end
@@ -805,7 +809,6 @@ function DAAcore.new(deps)
 
     local function refine_avoidance_bearing(direct_bearing_deg, raw_bearing_deg, raw_distance_m,
                                             motion, obstacle, target_loc)
-        local pass_behind = motion.pass_behind
         local ttc_s = motion.ttc
 
         -- (1) clearance hysteresis: the safe, multi-obstacle, anti-flip baseline.  The
@@ -835,14 +838,13 @@ function DAAcore.new(deps)
         if last_avoid_bearing_deg == nil or urgent or no_time_to_damp then
             -- first cycle, or a turn there is no time to damp: obey the sweep exactly.
             -- Record the side we are going round, so that a later reversal is seen as
-            -- a flip to be debounced rather than as another "necessary" turn; leave it
-            -- uncommitted on the very first cycle so pass_behind can choose below.
+            -- a flip to be debounced rather than as another "necessary" turn.
             committed_side_sign = (last_avoid_bearing_deg == nil) and 0 or side
             side_flip_pending = false
         else
             -- small adjustment only: damp the jitter ('side' was computed above from this
             -- same bearing)
-            bearing = apply_side_commitment(bearing, side, pass_behind)
+            bearing = apply_side_commitment(bearing, side)
             bearing = apply_slew_limit(bearing)
         end
         last_cmd_bearing_ms = now_ms
@@ -1581,9 +1583,10 @@ function DAAcore.new(deps)
                     math.abs(current_roll_deg), target_loc)
         end
         -- Wings-level (or no usable roll-rate bound): continuing straight is the honest
-        -- projection.
+        -- projection. groundspeed_ms, not airspeed_ms - airspeed undershoots the real
+        -- ground track in a tailwind.
         return location_project(current_loc, ground_course_deg,
-                math.max(airspeed_ms, 1.0) * VALIDATE_PROJECTION_S, target_loc)
+                math.max(groundspeed_ms, 1.0) * VALIDATE_PROJECTION_S, target_loc)
     end
 
     -- One shared release-validation path for every way a horizontal avoidance can lapse
@@ -1829,6 +1832,14 @@ function DAAcore.new(deps)
                 -- resolve_moving_bearing()'s own answer untouched below.
                 best_bearing_deg, best_distance_m, obstacle_avoiding =
                         resolved_bearing_deg, resolved_distance_m, resolved_obstacle
+                if held then
+                    -- The fence-hold path bypasses resolve_fence_bearing()'s own
+                    -- bookkeeping - sync it the same way, or the next cycle's slew
+                    -- limiter anchors to a stale heading.
+                    last_avoid_bearing_deg = best_bearing_deg
+                    committed_side_sign    = 0
+                    side_flip_pending      = false
+                end
             end
         end
 
