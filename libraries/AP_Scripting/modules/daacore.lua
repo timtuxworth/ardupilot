@@ -136,6 +136,12 @@ function DAAcore.new(deps)
     -- near-full function (see project_lua_binding_gotchas in memory). Same caveat as
     -- assess_aircraft_conflict() itself: safe only because there is one DAAcore instance.
     last_aircraft_range_m     = nil
+    -- identity of the contact last_aircraft_range_m was measured against, so a switch to a
+    -- different aircraft (no intervening nil cycle - AP_Avoidance:distance_to_aircraft()
+    -- just returns whichever tracked aircraft is currently closest) is detected and the
+    -- history reset rather than differenced across two unrelated contacts.
+    last_aircraft_sysid       = nil
+    last_aircraft_icao        = nil
     aircraft_closure_rate_ms  = 0.0
     -- False until the first genuine two-fix measurement exists. assess_aircraft_conflict()
     -- treats "no measurement yet" as a conflict (safer-is-better, matching
@@ -1246,6 +1252,8 @@ function DAAcore.new(deps)
             last_aircraft_obstacle = nil
             last_aircraft_ts_ms = nil
             last_aircraft_range_m = nil
+            last_aircraft_sysid = nil
+            last_aircraft_icao = nil
             aircraft_closure_rate_ms = 0.0
             aircraft_closure_rate_valid = false
             return
@@ -1264,6 +1272,8 @@ function DAAcore.new(deps)
             last_aircraft_obstacle  = nil
             last_aircraft_ts_ms     = nil
             last_aircraft_range_m   = nil
+            last_aircraft_sysid     = nil
+            last_aircraft_icao      = nil
             aircraft_closure_rate_ms = 0.0
             aircraft_closure_rate_valid = false
             return
@@ -1281,6 +1291,19 @@ function DAAcore.new(deps)
         end
 
         local obstacle = populate_obstacle(distance_m, aircraft_obstacle)
+
+        -- AP_Avoidance:distance_to_aircraft() just returns whichever tracked aircraft is
+        -- currently closest, with no stickiness - the "closest" contact can switch to a
+        -- different aircraft with no intervening nil cycle through the guards above. Treat
+        -- that as a new encounter: the range history below is a MEASURED delta between two
+        -- fixes of the SAME aircraft, and differencing across two different aircraft
+        -- fabricates a closure rate that has no physical meaning.
+        if last_aircraft_range_m ~= nil
+                and (obstacle.sysid ~= last_aircraft_sysid or obstacle.icao_code ~= last_aircraft_icao) then
+            last_aircraft_range_m = nil
+            aircraft_closure_rate_ms = 0.0
+            aircraft_closure_rate_valid = false
+        end
 
         -- Update assess_aircraft_conflict()'s MEASURED range-rate filter from this fresh
         -- fix, before last_aircraft_range_m/last_aircraft_ts_ms are overwritten below - see
@@ -1302,6 +1325,8 @@ function DAAcore.new(deps)
             end
         end
         last_aircraft_range_m  = obstacle.distance_xy
+        last_aircraft_sysid    = obstacle.sysid
+        last_aircraft_icao     = obstacle.icao_code
 
         aircraft_avoiding       = obstacle
         last_aircraft_obstacle  = obstacle
