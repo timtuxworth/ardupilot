@@ -1050,7 +1050,7 @@ float AP_Avoidance::distance_to_aircraft(const Vector3f &vehicle_NED_m, const fl
     // we need to do one square root here at the end. But by using squared above we avoid lots of them
     return safe_sqrt(distance_new_msq);
 }
-#endif // AP_SCRIPTING_ENABLED && APM_BUILD_TYPE(APM_BUILD_ArduPlane)
+#endif // AP_OA_SCRIPTING_ENABLED && APM_BUILD_TYPE(APM_BUILD_ArduPlane)
 
 
 // get unit vector away from the nearest obstacle
