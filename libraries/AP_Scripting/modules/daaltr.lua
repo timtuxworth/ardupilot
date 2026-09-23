@@ -184,13 +184,15 @@ function DAAloiter.new(deps)
             end
         end
         if previous_mode >= 0 and previous_mode ~= PLANE_MODE.GUIDED then
-            if vehicle:set_mode(previous_mode) then
-                gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": Loiter Done set mode: %s", get_mode_string(previous_mode) ))
-            else
+            if not vehicle:set_mode(previous_mode) then
                 -- say so rather than announcing a handback that did not happen: the vehicle
-                -- is still in GUIDED on the loiter target and the pilot needs to know
+                -- is still in GUIDED on the loiter target and the pilot needs to know.
+                -- Keep previous_mode/self.active so the next call retries instead of
+                -- losing the restore state.
                 gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(": Loiter Done but %s REFUSED - still in Guided", get_mode_string(previous_mode) ))
+                return false
             end
+            gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": Loiter Done set mode: %s", get_mode_string(previous_mode) ))
             gcs:send_named_string("DAA-AVOID", "")
             gcs:send_named_float("DAA-LOITER", 0.0)
         end
