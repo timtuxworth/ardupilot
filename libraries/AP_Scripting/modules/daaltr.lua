@@ -83,6 +83,9 @@ function DAAloiter.new(deps)
     local previous_mode = -1
     local target_alt_m = nil
     local target_alt_frame = ALT_FRAME.GLOBAL
+    -- the GUIDED destination the loiter reposition is about to overwrite, when we are started
+    -- while already in GUIDED (see the comment on it below, and on the matching stop() branch)
+    local saved_guided_target_loc = nil
 
     -- Returns true when the loiter is running once this call returns, so the caller can
     -- decide whether to enter STATE.loitering.  It used to return nil on every path,
@@ -142,6 +145,16 @@ function DAAloiter.new(deps)
         -- here first would mean owning that undo, and getting it wrong strands the aircraft
         -- in GUIDED with self.active false, which nothing recovers from.
         previous_mode = vehicle:get_mode()
+        -- The mode-restore branch in stop() only undoes a MODE change (see its own comment);
+        -- if we are already in GUIDED, this same DO_REPOSITION is about to overwrite GUIDED's
+        -- own destination instead. Save it so stop() can put it back rather than leaving the
+        -- vehicle loitering forever at the point the aircraft avoidance picked. nil if GUIDED
+        -- has no destination set (nothing to restore).
+        if previous_mode == PLANE_MODE.GUIDED then
+            saved_guided_target_loc = vehicle:get_target_location()
+        else
+            saved_guided_target_loc = nil
+        end
         if mavlink_wrappers.set_vehicle_target_location({lat    = loiteralt_loc:lat(),
                                                         lng     = loiteralt_loc:lng(),
                                                         alt     = target_alt_m,
@@ -195,8 +208,32 @@ function DAAloiter.new(deps)
             gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": Loiter Done set mode: %s", get_mode_string(previous_mode) ))
             gcs:send_named_string("DAA-AVOID", "")
             gcs:send_named_float("DAA-LOITER", 0.0)
+        elseif previous_mode == PLANE_MODE.GUIDED and saved_guided_target_loc ~= nil then
+            -- no mode change to undo, but the loiter's own DO_REPOSITION overwrote GUIDED's
+            -- destination when we started it (see self.start()) - put it back, or the vehicle
+            -- is left circling at the loiter point instead of continuing to where GUIDED had
+            -- actually been sent.
+            local restore_alt_frame = saved_guided_target_loc:get_alt_frame()
+            local restore_alt_m = saved_guided_target_loc:get_alt_m(restore_alt_frame)
+            if restore_alt_m == nil then
+                -- can't reconstruct the altitude (e.g. home/origin no longer set) - nothing
+                -- safe to reissue, so fall through and just drop the stale destination
+                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. ": Loiter Done but GUIDED destination alt unavailable - not restored")
+            elseif not mavlink_wrappers.set_vehicle_target_location({lat   = saved_guided_target_loc:lat(),
+                                                                      lng   = saved_guided_target_loc:lng(),
+                                                                      alt   = restore_alt_m,
+                                                                      frame = restore_alt_frame}) then
+                -- as above: keep previous_mode/saved_guided_target_loc so the next call retries
+                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. ": Loiter Done but GUIDED destination restore REFUSED - still circling")
+                return false
+            else
+                gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. ": Loiter Done, restored GUIDED destination")
+                gcs:send_named_string("DAA-AVOID", "")
+                gcs:send_named_float("DAA-LOITER", 0.0)
+            end
         end
         previous_mode = -1
+        saved_guided_target_loc = nil
         self.active = false
         return true
     end
