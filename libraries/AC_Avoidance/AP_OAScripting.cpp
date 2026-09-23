@@ -193,8 +193,10 @@ float AP_OAScripting::_find_fence_threats_NE(const Vector2f &start_NE_cm, const 
         _populate_fence_obstacle(obstacle, ObstacleType::FENCE_HOME);
         distance_m          = distance_new_m;
     }
+    // Stand-down checks below query (start_NE_cm, start_NE_cm): the vehicle's own
+    // position, not the candidate segment, which can cross a boundary without breaching it.
     distance_new_m = fence->distance_line_to_circle_exclusion(start_NE_cm, end_NE_cm);
-    if (poly_breached && distance_new_m < -margin_m) {
+    if (poly_breached && fence->distance_line_to_circle_exclusion(start_NE_cm, start_NE_cm) < -margin_m) {
         distance_new_m = FLT_MAX;   // this is the fence actually in breach: stand it down
     }
     if (distance_new_m < distance_m) {
@@ -205,8 +207,11 @@ float AP_OAScripting::_find_fence_threats_NE(const Vector2f &start_NE_cm, const 
     // "inside any one of them" legal, which cannot be evaluated per category
     AC_PolyFenceType inclusion_type = AC_PolyFenceType::POLYGON_INCLUSION;
     distance_new_m = fence->distance_line_to_inclusion(start_NE_cm, end_NE_cm, inclusion_type);
-    if (poly_breached && distance_new_m < -margin_m) {
-        distance_new_m = FLT_MAX;
+    if (poly_breached) {
+        AC_PolyFenceType breach_type = inclusion_type;
+        if (fence->distance_line_to_inclusion(start_NE_cm, start_NE_cm, breach_type) < -margin_m) {
+            distance_new_m = FLT_MAX;
+        }
     }
     if (distance_new_m < distance_m) {
         _populate_fence_obstacle(obstacle,
@@ -216,7 +221,7 @@ float AP_OAScripting::_find_fence_threats_NE(const Vector2f &start_NE_cm, const 
         distance_m          = distance_new_m;
     }
     distance_new_m = fence->distance_line_to_polygon_exclusion(start_NE_cm, end_NE_cm);
-    if (poly_breached && distance_new_m < -margin_m) {
+    if (poly_breached && fence->distance_line_to_polygon_exclusion(start_NE_cm, start_NE_cm) < -margin_m) {
         distance_new_m = FLT_MAX;
     }
     if (distance_new_m < distance_m) {
