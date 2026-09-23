@@ -29,6 +29,7 @@ userdata Location method change_alt_frame boolean Location::AltFrame'enum Locati
 userdata Location method copy Location
 userdata Location method set_alt_m void float'skip_check Location::AltFrame'enum Location::AltFrame::ABSOLUTE Location::AltFrame::ABOVE_TERRAIN
 userdata Location method get_alt_m boolean Location::AltFrame'enum Location::AltFrame::ABSOLUTE Location::AltFrame::ABOVE_TERRAIN float'Null
+userdata Location method get_alt_m depends AP_OA_SCRIPTING_ENABLED
 
 include AP_AHRS/AP_AHRS.h
 
@@ -408,7 +409,9 @@ singleton AP_Vehicle method is_taking_off boolean
 singleton AP_Vehicle method is_crashed boolean
 singleton AP_Vehicle method set_crosstrack_start boolean Location
 singleton AP_Vehicle method set_crosstrack_enabled boolean boolean
+singleton AP_Vehicle method set_crosstrack_enabled depends AP_OA_SCRIPTING_ENABLED
 singleton AP_Vehicle method get_crosstrack_enabled boolean boolean'Null
+singleton AP_Vehicle method get_crosstrack_enabled depends AP_OA_SCRIPTING_ENABLED
 singleton AP_Vehicle method register_custom_mode AP_Vehicle::custom_mode_state uint8_t'skip_check string string
 
 
