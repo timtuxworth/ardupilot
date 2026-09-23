@@ -1433,7 +1433,11 @@ local DAA = {
     -- execute avoidance maneuvers depending on the nature of the obstacle
     function DAA.avoid(new_target_loc)
         if daa_action == 0 then
-            return              -- parameter DAA_AVOID can be used to disable avoidance
+            -- DAA_AVD_ACTION can be used to disable avoidance manoeuvres - revert any
+            -- target already commanded rather than leaving it hijacked if this changes
+            -- mid-avoidance
+            DAA.clear_avoidance()
+            return
         end
 
         if loiteralt.active then
@@ -1885,8 +1889,15 @@ local function update()
         -- when avoidance can't find a way out, the trapped-failsafe takes over (and we
         -- stop issuing avoidance); otherwise avoid, but only in FW forward flight
         local trapped = DAA.trap_update()
-        if not trapped and in_fw_flight then
-            DAA.avoid(suggested_target_loc)
+        if not trapped then
+            if in_fw_flight then
+                DAA.avoid(suggested_target_loc)
+            else
+                -- transiently out of forward flight (e.g. a quadplane assist-flight
+                -- blip) - revert rather than leave a stale avoidance target steering
+                -- for the whole time it lasts
+                DAA.clear_avoidance()
+            end
         end
     else
         -- DAA is inactive (e.g. the pilot switched it off).  If it was mid-avoidance,
