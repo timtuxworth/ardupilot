@@ -1207,9 +1207,11 @@ function Location_ud:offset(ofs_north, ofs_east) end
 ---@return number -- horizontal distance in meters
 function Location_ud:get_distance(loc) end
 
---get altitude (in cm) in the desired frame
--- does not modify ret_alt_cm unless true is returned
--- returns false on failure to get altitude in the desired frame which can only happen if the original frame or desired frame is:
+-- get altitude (in metres) in the desired frame. Returns nil on failure, which can only
+-- happen if the original frame or desired frame is:
+-- - above-terrain and the terrain database can't supply terrain height amsl
+-- - above-home and home is not set
+-- - above-origin and origin is not set
 ---@param frame integer -- altitude frame
 ---| '0' # ABSOLUTE
 ---| '1' # ABOVE_HOME
