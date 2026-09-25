@@ -6,7 +6,7 @@
     talks to it through five members only:
 
         .active                        true while the loiter is running
-        start(alt_m, frame, right, spd) begin; returns true if a loiter is running after the call
+        start(alt_m, frame, right, spd, mission_loc) begin; returns true if a loiter is running after the call
         stop(force)                    end it; returns false if it declined (cool-down)
         update()                       call regularly while active; notices a pilot mode change
         aircraft_seen()                refresh the cool-down timer
@@ -92,7 +92,7 @@ function DAAloiter.new(deps)
     -- including the three that do not loiter - already active, no current_loc, and the
     -- vehicle refusing the target - and callers set STATE.loitering regardless, so the
     -- state machine could claim to be loitering while self.active was false.
-    function self.start(new_alt_m, new_alt_frame, direction_right, _speed_ms)
+    function self.start(new_alt_m, new_alt_frame, direction_right, _speed_ms, mission_target_loc)
         local direction
 
         if self.active then
@@ -147,11 +147,12 @@ function DAAloiter.new(deps)
         previous_mode = vehicle:get_mode()
         -- The mode-restore branch in stop() only undoes a MODE change (see its own comment);
         -- if we are already in GUIDED, this same DO_REPOSITION is about to overwrite GUIDED's
-        -- own destination instead. Save it so stop() can put it back rather than leaving the
-        -- vehicle loitering forever at the point the aircraft avoidance picked. nil if GUIDED
-        -- has no destination set (nothing to restore).
+        -- own destination instead. Save it so stop() can put it back. mission_target_loc, not
+        -- vehicle:get_target_location() - GUIDED's live target is the DAA avoidance carrot
+        -- whenever avoidance is already running, and restoring that would fly to a stale
+        -- avoidance waypoint instead of the real mission destination.
         if previous_mode == PLANE_MODE.GUIDED then
-            saved_guided_target_loc = vehicle:get_target_location()
+            saved_guided_target_loc = mission_target_loc
         else
             saved_guided_target_loc = nil
         end

@@ -1480,7 +1480,7 @@ local DAA = {
             -- average, closing fast enough to cross that radius within DAA_TAU_S is
             -- skipped, and it then falls through to normal monitoring. A missing/uncertain
             -- closure trend => conflict.
-            if loiteralt.start(crewed_avoid_alt_m, crewed_avoid_alt_frame, true, airspeed_ms) then
+            if loiteralt.start(crewed_avoid_alt_m, crewed_avoid_alt_frame, true, airspeed_ms, navigation_target_loc) then
                 gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITER AIRCRAFT: %s", aircraft_avoiding.label))
 
                 gcs:send_named_string("DAA-AVOID", "LOITER")
