@@ -29,7 +29,6 @@ userdata Location method change_alt_frame boolean Location::AltFrame'enum Locati
 userdata Location method copy Location
 userdata Location method set_alt_m void float'skip_check Location::AltFrame'enum Location::AltFrame::ABSOLUTE Location::AltFrame::ABOVE_TERRAIN
 userdata Location method get_alt_m boolean Location::AltFrame'enum Location::AltFrame::ABSOLUTE Location::AltFrame::ABOVE_TERRAIN float'Null
-userdata Location method get_alt_m depends AP_OA_SCRIPTING_ENABLED
 
 include AP_AHRS/AP_AHRS.h
 
