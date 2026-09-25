@@ -380,6 +380,13 @@ reversals; this is deliberate — the heading is slew-rate limited (`DAA_SLEW_DP
 so the motion stays bounded, and responsiveness is preferred over a smoother but
 laggier committed path.
 
+`DAA_SIDE_HOLD` commits to whichever side of a moving obstacle is actually being
+flown at the start of an episode — not, on that first commit, a "pass behind the
+obstacle" preference the geometry may separately favour. Committing to the flown
+side keeps the committed side and the commanded bearing always consistent; a
+"pass behind" preference is still visible in the log (`DAAS.PsB`) but no longer
+overrides which side gets committed.
+
 ### Sizing the traffic standoff
 
 The effective standoff held around a drone is `AVD_UAV_XY + DAA_MARGIN_UAV` (and
