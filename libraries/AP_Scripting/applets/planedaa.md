@@ -167,12 +167,13 @@ use any terrain frame you must enable terrain and have terrain data available:
 |-----------|-------|-------|
 | `TERRAIN_ENABLE` | `1` | Required when `DAA_AVD_ALT_TP` or `FENCE_ALT_*_TP` use the terrain frame. |
 
-**Known issue — do not set `DAA_AVD_ALT_TP` to `2` (above origin).** The MAVLink
-DO_REPOSITION command the aircraft-avoidance loiter uses has no "above origin" frame, and
-the conversion that sends it currently falls through to absolute (AMSL) without converting
-the value. At a site whose EKF origin is well above sea level, `DAA_AVD_ALT_TP=2` will
-command the loiter to the wrong absolute altitude. Use `0` (absolute), `1` (above home), or
-`3` (above terrain) instead. Tracked for a fix in a follow-up PR (backlog item #32).
+**Known issue — `2` (above origin) is not offered.** The MAVLink DO_REPOSITION
+command the aircraft-avoidance loiter uses has no "above origin" frame, and the
+conversion that sends it currently falls through to absolute (AMSL) without
+converting the value. At a site whose EKF origin is well above sea level, that
+would command the loiter to the wrong absolute altitude, so `2` is left out of
+`DAA_AVD_ALT_TP`'s dropdown. Use `0` (absolute), `1` (above home), or `3` (above
+terrain) instead. Tracked for a real fix in a follow-up PR (backlog item #32).
 
 ### 6. Activation
 
