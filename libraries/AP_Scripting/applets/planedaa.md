@@ -55,7 +55,7 @@ To confirm a binary has it, `Tools/scripts/extract_features.py <binary>` lists
 
 An out-of-memory failure here is easy to misdiagnose as a corrupt or missing file.
 The modules `require()` each other in sequence (`daageo` → `daaobs` → `daacore` →
-`daaltr`), so the heap is most depleted by the time the *last* one in the chain
+`daaltr`), so the heap is most depleted by the time the _last_ one in the chain
 loads — that one fails while the earlier ones log a normal load banner, which
 looks exactly like a bad copy of just that one file. The actual error,
 `error loading module 'X' from file 'Y': <reason>`, is also frequently truncated
