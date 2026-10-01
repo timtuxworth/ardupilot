@@ -37,7 +37,7 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-114"
+SCRIPT_VERSION      = "4.8.0-115"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -56,16 +56,11 @@ MAV_SEVERITY        = {EMERGENCY=0, ALERT=1, CRITICAL=2, ERROR=3, WARNING=4, NOT
 
 -- OAScripting, and the AVD_WCLR/NMAC/UAV parameters this file binds further down, exist
 -- only on a build with AP_OA_SCRIPTING_ENABLED (Plane + >2MB flash, or the custom build
--- server DAA option) - checked here, before any of those binds run, so a copy of this
--- applet on an unsupported firmware gets one clear message instead of failing on
--- whichever missing parameter it happens to bind first.
+-- server DAA option) - checked here, before any of those binds run.
 if OAScripting == nil then
     gcs:send_text(MAV_SEVERITY.ERROR, SCRIPT_NAME_SHORT .. " OAScripting object is nil!")
     return
 end
-
-
--- ADSB Emitter types
 
 local PARAM_TABLE_KEY = 126
 local PARAM_TABLE_PREFIX = "DAA_"
@@ -85,10 +80,7 @@ end
 assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 40), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
 
 -- Every parameter this applet binds lives in this one table rather than in a global each.
--- The field name IS the string handed to bind_add_param, so the pair costs the parser a
--- single distinct name instead of two - see planedaa.md, "Distinct names are a budget" -
--- and it keeps 45 names out of _ENV.  The cached locals further down are what the code
--- actually reads; these objects are only touched when parameters are refreshed.
+-- The cached locals further down are what the code actually reads; these objects are only touched when parameters are refreshed.
 local PARAM = {}
 
 --[[
@@ -554,7 +546,7 @@ end
 -- stays the one an integrator edits to change avoidance policy (see planedaa.md).
 --
 -- geometry/obstacles/core/loiteralt are forward-declared here but not required/
--- instantiated until init_modules() runs from Delayed_Startup() (see that function) -
+-- instantiated until init_modules() runs from Delayed_Startup() (see that function).
 local loiteralt
 local core
 local geometry
@@ -563,7 +555,7 @@ local obstacles
 -- The obstacle taxonomy belongs to the module that classifies obstacles, so it is defined
 -- there and read back here.  This file only names the four members it actually uses, which
 -- keeps the other twelve - and the whole twenty-member ADSB_EMITTER table - out of this
--- chunk's parser budget.  See planedaa.md, "Distinct names are a budget".
+-- chunk's parser budget.
 local OBSTACLE_TYPE
 
 local max_turn_rate_dps
@@ -789,10 +781,7 @@ local function get_vehicle_state()
         margin_crewed_m       = PARAM.MARGIN_CA:get()
 
         -- the modules cache these too, so push the new values through - LAST, after every
-        -- local above is refreshed.  This used to run partway through the block, before
-        -- bearing_inc_deg (among others) was refreshed, so core.configure() was handed a
-        -- one-refresh-cycle-stale bearing_inc_deg every time after the first; moving the
-        -- call to the end fixes that incidentally.
+        -- local above is refreshed.
         configure_modules()
 
         now_params_ms         = now_ms
@@ -803,9 +792,7 @@ end
 -- MODULES - instantiated once, then configured every 5 s by get_vehicle_state()
 -------------------------------------------------------------------------------
 -- Instantiates every DAA module and everything that depends on one: daageo/daaobs (moved
--- here from chunk top-level so their heap allocations happen at STARTUP_DELAY instead of
--- racing AP_Terrain's own first allocation attempt at the most fragmented point in boot -
--- see the forward-declaration comment above),
+-- here from chunk top-level so their heap allocations happen at STARTUP_DELAY.
 local function init_modules()
     -- daageo is stateless so it is required directly rather than instantiated - there is no shared
     -- state to keep consistent between this file, daacore and daaobs.
@@ -831,7 +818,7 @@ local function init_modules()
 
     -- The altitude loiter is a POLICY implementation living behind a small seam: five
     -- members (.active, start, stop, update, aircraft_seen).  Point this at a different
-    -- module - your own daaltr2 - and nothing else in this file changes.  See planedaa.md.
+    -- module - e.g. your own daaltr2 - and nothing else in this file changes.  See planedaa.md.
     loiteralt = need("daaltr").new({
         PLANE_MODE              = PLANE_MODE,
         ALT_FRAME               = ALT_FRAME,
@@ -1051,9 +1038,6 @@ local DAA = {
     end
 
     -- populate some local values with a static/consistent picture of the vehicle state.
-    -- fetched_current_loc is the position get_vehicle_state() (file scope) already read
-    -- this same cycle - passed in rather than re-fetched, so ahrs:get_position() is only
-    -- ever called once per cycle instead of once per get_vehicle_state function.
     function DAA.get_vehicle_state(fetched_current_loc)
         local current_target_loc = vehicle:get_target_location()
 
@@ -1092,12 +1076,7 @@ local DAA = {
         end
 
         -- if we got here we have a current location (AHRS active) and a current navigation target
-        -- No :copy() here: current_target_loc is a fresh Location this vehicle:get_target_location()
-        -- call built for us, nothing else this cycle holds a reference to it, and
-        -- update_target_location_save_loc is only ever READ (:get_alt_frame(), passed as the
-        -- "current" argument into vehicle:update_target_location()) - it is never the object that
-        -- gets change_alt_frame()'d in place, so aliasing it costs nothing.  Contrast
-        -- navigation_target_loc below: that copy IS load-bearing, see its own comment.
+        -- No :copy(): this is only ever read elsewhere, never mutated in place.
         update_target_location_save_loc = current_target_loc
 
         -- if the navigation target has changed to some other target not the DAA target, it must be vehicle navigation
@@ -1105,11 +1084,8 @@ local DAA = {
             (not locations_equal(navigation_target_loc, current_target_loc) and
                 not locations_equal(daa_target_loc, current_target_loc)) then
             -- the vehicle navigation code has changed it's target
-            -- :copy() IS needed here (unlike update_target_location_save_loc above):
-            -- navigation_target_loc persists across many cycles, and set_avoid_location()'s
-            -- revert path calls update_target_location(navigation_target_loc), which mutates
-            -- whatever object is passed in via :change_alt_frame() - so navigation_target_loc
-            -- must be its own private object, not an alias shared with anything else.
+            -- :copy() needed: update_target_location(navigation_target_loc) mutates its
+            -- argument in place via change_alt_frame(), so this must be a private object.
             navigation_target_loc = current_target_loc:copy()
         end
 
@@ -1120,16 +1096,11 @@ local DAA = {
         airspeed_ms                 = ahrs:airspeed_EAS() or groundspeed_ms
         -- Calculate wind direction and speed
         wind_speed, wind_dir_rad    = calculate_windspeed()
-        -- get_roll() is deprecated - use the _rad form.  Needed for the fence
-        -- reversal-in-progress latch (project_planedaa_reversal_awareness): the sweep
-        -- must know which way the aircraft is ACTUALLY banked, not just which way it was
+        -- the sweep must know which way the aircraft is ACTUALLY banked, not just which way it was
         -- last told to go.
         current_roll_deg            = math.deg(ahrs:get_roll_rad())
 
-        -- hand the mechanism the picture it searches against, positionally: it keeps its
-        -- own copies as locals rather than reading ours through a table, and the sweep
-        -- touches them on every one of a hundred-plus probes a cycle, so a table literal
-        -- here would be built and thrown away on every single active cycle.
+        -- hand the mechanism the picture it searches against.
         core.update_state(current_loc, navigation_target_loc, airspeed_ms, groundspeed_ms,
                           ground_course_deg, wind_speed, wind_dir_rad, now_ms, current_roll_deg)
     end
@@ -1139,8 +1110,7 @@ local DAA = {
         if obstacle_avoiding ~= nil and
                 (obstacle_avoiding.type == OBSTACLE_TYPE.FENCE_ALT_MAX or
                  obstacle_avoiding.type == OBSTACLE_TYPE.FENCE_ALT_MIN) then
-            -- altitude fences emit their own throttled, edge-triggered notice from
-            -- detect_altitude_fence(); don't also raise the generic obstacle ALERT
+            -- altitude fences emit their own throttled, edge-triggered notice via detect_altitude_fence().
             return
         end
         if obstacle_avoiding == nil or alert_target_loc == nil then
@@ -1306,17 +1276,7 @@ local DAA = {
             local entering_avoidance = (daa_target_loc == nil)
             if update_target_location(new_target_loc) then
                 if entering_avoidance then
-                    -- Entering avoidance: fly the direct current-position-to-target
-                    -- line DAA itself evaluated when it chose this bearing, not the
-                    -- stale prev_WP_loc -> target leg - a stale crosstrack reference
-                    -- manufactured a large XTE and could command a bank direction
-                    -- that contradicted DAA's own current_loc -> bearing evaluation
-                    -- (confirmed live 2026-09-04, log 00000178.BIN: NTUN.XT jumped
-                    -- from +7m to -22.6m the instant DAA changed HdgB). Unlike
-                    -- set_crosstrack_start(), this never touches prev_WP_loc, so the
-                    -- vertical glide-slope calculation that also depends on it is
-                    -- undisturbed - see project_planedaa_reversal_awareness in
-                    -- memory for why that distinction matters here.
+                    -- Fly the direct current-position-to-target line, not the stale prev_WP_loc -> target leg.
                     local enabled = vehicle:get_crosstrack_enabled()
                     if enabled ~= nil then
                         saved_crosstrack_enabled = enabled
@@ -1348,10 +1308,7 @@ local DAA = {
             -- commanding a mode; only force the restore while we still hold GUIDED.
             loiteralt.update()
             if loiteralt.active then
-                -- force past the DAA_LTR_COOL_S hold: it exists so a flapping traffic
-                -- feed cannot thrash the mode, and means nothing once DAA is off.
-                -- stop() restores the mode saved when the loiter began (and correctly
-                -- leaves us in GUIDED if that is what we were in beforehand).
+                -- force past the DAA_LTR_COOL_S hold.
                 loiteralt.stop(true)
             end
         end
@@ -1409,12 +1366,7 @@ local DAA = {
             return
         end
         -- Release the loiter only when the aircraft is no longer detected at all. The
-        -- "gone" distance must match the DETECTION distance (well_clear_xy + margin_crewed_m),
-        -- NOT the bare margin_crewed_m: a plane sitting steadily inside the detection volume
-        -- (e.g. 200 m out, well within ~660 m but far beyond 50 m) would otherwise satisfy
-        -- both "still detected" (start) and "far enough to stop" (stop) every cycle and flip
-        -- GUIDED<->AUTO. Hysteresis is provided by the 10 s aircraft_seen() dwell in
-        -- loiteralt.stop(false), so a plane at the boundary cannot thrash the mode.
+        -- "gone" distance must match the DETECTION distance (well_clear_xy + margin_crewed_m).
         if aircraft_avoiding == nil or (current_loc:get_distance(aircraft_avoiding.location) > (well_clear_xy + margin_crewed_m)) then
             if loiteralt.stop(false) then
                 return
@@ -1441,26 +1393,13 @@ local DAA = {
         end
 
         if loiteralt.active then
-            -- The aircraft loiter owns the vehicle's target exclusively while it runs:
-            -- without this return, avoid_obstacle() below still fires every cycle and
-            -- fights the loiter for the same GUIDED target via update_target_location()
-            -- (only the loiter's own FIRST cycle went through the elseif's return, below -
-            -- every cycle after that took this branch and fell through). The separate NMAC
-            -- trap (DAA.trap_update(), called before DAA.avoid() every cycle) is unaffected
-            -- by this return - it still escalates to DAA_TRAP_ACT regardless of loiter state
-            -- if the aircraft keeps closing.
+            -- The aircraft loiter owns the vehicle's target exclusively while it runs.
             --
             -- Consequence, accepted deliberately: the loiter circle (see loiteralt.start(),
             -- offset from the heading at the moment it engaged) has no fence awareness at
             -- all, so this return also suppresses ordinary fence avoidance for as long as
             -- the loiter runs - a fence that happens to sit near the loiter point can be
-            -- breached. Tim's call: separation from a real aircraft outranks a geofence: the
-            -- core AC_Fence library still handles a breach on its own (FENCE_ACTION), and
-            -- that recovery is a perfectly acceptable outcome here - not a gap to close.
-            -- Also unlikely in practice: a fence typically represents a real fixed hazard
-            -- (e.g. a tower), and a real crewed aircraft flying close enough to one to
-            -- provoke this loiter in the first place is a contrived scenario - mostly a
-            -- demo/test artifact rather than a realistic operational conflict.
+            -- breached.
             do_loitering()
             return
         -- Crewed traffic outranks whatever we are already avoiding, so the loiter trigger is
@@ -1471,15 +1410,6 @@ local DAA = {
         -- assess_obstacle_motion() so the CPA work is skipped when the loiter is off.
         elseif aircraft_avoiding ~= nil and crewed_avoid_alt_m > 0
                 and core.assess_aircraft_conflict(aircraft_avoiding).is_conflict then
-            -- CONSERVATIVE modified-tau gate on the loiter trigger (see
-            -- assess_aircraft_conflict()'s own comment for why this is tau-based rather
-            -- than assess_obstacle_motion()'s instantaneous CPA): an aircraft inside the
-            -- well-clear radius is always a conflict (the same unconditional close-range
-            -- floor as before), so the loiter still fires unconditionally at close range -
-            -- safer-first. Only a plane in the outer detection band that is not, on
-            -- average, closing fast enough to cross that radius within DAA_TAU_S is
-            -- skipped, and it then falls through to normal monitoring. A missing/uncertain
-            -- closure trend => conflict.
             if loiteralt.start(crewed_avoid_alt_m, crewed_avoid_alt_frame, true, airspeed_ms, navigation_target_loc) then
                 gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITER AIRCRAFT: %s", aircraft_avoiding.label))
 
@@ -1575,13 +1505,7 @@ local DAA = {
 
     -- Avoidance is "hung" when it is running but the vehicle is not closing on its navigation
     -- target.  This is neither a breach nor a boxed-in sweep: the bendy ruler keeps finding
-    -- headings and the plane keeps flying them, it simply never arrives.  The observed case is
-    -- a waypoint inside an exclusion-fence standoff, where the mission pull and the fence push
-    -- are irreconcilable, so the vehicle orbits until fuel or some other failsafe ends it.
-    -- Progress is a new CLOSEST approach to the target, not a shrinking range: a legitimate
-    -- detour flies away from the waypoint for a while and must not read as no progress.  The
-    -- new best has to beat the old by a turn radius - the distance scale the avoidance geometry
-    -- itself works at - so position noise cannot keep resetting the timer.
+    -- headings and the plane keeps flying them, it simply never arrives.
     local function hung_update()
         if hung_alrt_s <= 0 or not in_fw_flight
             or daa_target_loc == nil or navigation_target_loc == nil or current_loc == nil
@@ -1639,12 +1563,7 @@ local DAA = {
     local function daa_compromised_now()
         -- A fence breach is a compromise UNLESS the core fence library is already handling it
         -- in a way that will refuse the trap's mode change: FENCE_ACTION ~= 0 (core takes a mode
-        -- action) AND FENCE_OPTIONS bit0 (DISABLE_MODE_CHANGE) set. In that pairing set_mode is
-        -- denied "in fence recovery", so firing the trap only spams the pilot with a
-        -- TRAPPED -> denied -> released burst and achieves nothing. Stand the fence branch down;
-        -- DAA.warnings() flags the pairing at enable. The trap still fires for a report-only fence
-        -- (FENCE_ACTION=0) or when mode changes are allowed, and the aircraft near-miss branch
-        -- below is unaffected (a real NMAC still traps regardless of fence config).
+        -- action) AND FENCE_OPTIONS bit0 (DISABLE_MODE_CHANGE) set.
         if fence ~= nil and fence:get_breaches() ~= 0 then
             local fence_act  = param:get('FENCE_ACTION') or 0
             local fence_opts = param:get('FENCE_OPTIONS') or 0
@@ -1748,12 +1667,7 @@ local DAA = {
     end
 
     -- Tell the pilot when the mission has moved on from a waypoint the vehicle never
-    -- reached.  Skipping one is the right outcome - containment beats mission fidelity -
-    -- but it is otherwise silent, and the pilot is owed the fact: ArduPlane's
-    -- past-the-waypoint test is taken against next_WP_loc, which we have replaced with the
-    -- avoidance target, so a laterally offset target rotates that finish line and the
-    -- waypoint completes early (measured at 100-177 m short on a real flight).
-    --
+    -- reached.
     -- Only a FORWARD move counts.  A GCS can DO_JUMP the mission backwards while we happen
     -- to be avoiding, and that is not ours to report.
     local function mission_skip_update()
@@ -1833,10 +1747,7 @@ local DAA = {
             return false
         end
         -- A hung trap is released when the mission moves on - the pilot advancing it, or a new
-        -- mission - because that is the only thing that changes the geometry we could not fly.
-        -- Progress toward the target cannot be the release test: the trap's own action retargets
-        -- the vehicle (RTL goes to home), which would read as instant progress and drop us
-        -- straight back into the stall.
+        -- mission.
         if trap_hung and mission:get_current_nav_index() ~= hung_nav_index then
             trap_release("mission moved")
             hung_reset()

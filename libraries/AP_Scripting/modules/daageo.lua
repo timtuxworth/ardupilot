@@ -17,7 +17,7 @@
 
 local DAAgeometry = {}
 
-DAAgeometry.SCRIPT_VERSION = "4.8.0-005"
+DAAgeometry.SCRIPT_VERSION = "4.8.0-006"
 DAAgeometry.SCRIPT_NAME = "DAA geometry"
 DAAgeometry.SCRIPT_NAME_SHORT = "DAAgeo"
 
@@ -130,11 +130,8 @@ end
 -- the zero case is the actual case that needs handling here, not an edge case.  The
 -- fallback, roll_limit_deg / tconst_s, is the rate that would cover the full commanded
 -- roll range in one roll-controller time constant - the same order-of-magnitude estimate
--- AP_RollController's own P gain uses when RLL2SRV_P is left at zero (P = 1/TCONST).  Like
--- RLL2SRV_RMAX itself, this bounds DEMANDED rate, not a guarantee of ACHIEVED rate - but a
--- real, speed-and-airframe-derived number is a large improvement over the instantaneous
--- (infinite-rate) assumption it replaces.  Returns 0 when nothing usable is configured,
--- and the caller decides what that means.
+-- AP_RollController's own P gain uses when RLL2SRV_P is left at zero (P = 1/TCONST).
+-- Returns 0 when nothing usable is configured, and the caller decides what that means.
 function DAAgeometry.roll_rate_dps(rmax_dps, roll_limit_deg, tconst_s)
     if rmax_dps ~= nil and rmax_dps > 0 then
         return rmax_dps
