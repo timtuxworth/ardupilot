@@ -167,13 +167,13 @@ use any terrain frame you must enable terrain and have terrain data available:
 |-----------|-------|-------|
 | `TERRAIN_ENABLE` | `1` | Required when `DAA_AVD_ALT_TP` or `FENCE_ALT_*_TP` use the terrain frame. |
 
-**Known issue — `2` (above origin) is not offered.** The MAVLink DO_REPOSITION
-command the aircraft-avoidance loiter uses has no "above origin" frame, and the
-conversion that sends it currently falls through to absolute (AMSL) without
-converting the value. At a site whose EKF origin is well above sea level, that
-would command the loiter to the wrong absolute altitude, so `2` is left out of
-`DAA_AVD_ALT_TP`'s dropdown. Use `0` (absolute), `1` (above home), or `3` (above
-terrain) instead. Tracked for a real fix in a follow-up PR (backlog item #32).
+The MAVLink DO_REPOSITION command the aircraft-avoidance loiter uses has no
+"above origin" frame, so `2` (above origin) is converted to absolute (AMSL)
+before being sent - `daaltr.lua` does this itself, at both the point the loiter
+starts and the point a saved GUIDED destination in that frame is restored.
+`mavlink_wrappers.lua`'s own frame mapper still has no `ABOVE_ORIGIN` case
+(backlog item #32); that gap no longer matters for the aircraft-avoidance loiter
+specifically, since the conversion happens before the frame ever reaches it.
 
 ### 6. Activation
 
@@ -211,7 +211,7 @@ Collision volumes, and the `FENCE_*` parameters for the altitude/geo fences.
 | `DAA_BR_RATIO` | 1.5 | | BendyRuler will avoid changing bearing unless the ratio of the previous margin to the newly calculated margin is at least this much. |
 | `DAA_BR_ANGLE` | 45 | deg | BendyRuler resists changing the current bearing if the change exceeds this angle. A change above it is also the point at which the smoothing asks whether there is time to damp it — see `DAA_SLEW_DPS`. |
 | `DAA_AVD_ALT` | 50 | m | Altitude to loiter/descend to when avoiding a crewed aircraft contact. Ignored if zero. |
-| `DAA_AVD_ALT_TP` | 3 | | Frame of `DAA_AVD_ALT` (0: absolute, 1: above home, 2: above origin, 3: above terrain). **Known issue with `2` (above origin) — see "Terrain (default altitude frame)" below.** |
+| `DAA_AVD_ALT_TP` | 3 | | Frame of `DAA_AVD_ALT` (0: absolute, 1: above home, 2: above origin, 3: above terrain). See "Terrain (default altitude frame)" above for the `2` (above origin) conversion. |
 | `DAA_LTR_COOL_S` | 10 | s | Time the aircraft loiter-to-altitude is held after the aircraft was last detected before releasing back to the mission. Hysteresis against a briefly-dropped or laggy ADS-B feed thrashing the vehicle between GUIDED (loiter) and AUTO (mission). Set to 0 to release as soon as the aircraft is no longer detected. |
 | `DAA_AVD_ALERT` | 1 | | Whether to alert on avoidance (0: none, 1: alert). |
 | `DAA_AVD_ACTION` | 1 | | Whether to act on avoidance (0: none, 1: avoid). |
