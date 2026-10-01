@@ -565,30 +565,6 @@ state:
 Replacing that is a much larger undertaking than replacing a loiter, but the seam is the
 same one.
 
-### Distinct names are a budget
-
-Lua's parser keeps one table of **every distinct identifier, string literal and number in a
-chunk**, and it is sized in powers of two. Crossing **1024 entries** doubles it from 32 KB
-to 64 KB _while parsing_, and because the collector does not run inside `luaL_loadfile`
-that lands straight on the peak. A large script that fits comfortably once loaded can fail
-to load with `Insufficent memory`.
-
-This is not hypothetical: v4.8.0-078 sat at **1020 entries — four names from the wall**.
-Adding two parameters took it to 1029 and it stopped loading.
-
-Things worth knowing before adding to this applet:
-
-- It is the **count** of distinct names, not their length. Shortening names does nothing;
-  reusing a name that already exists is free.
-- Comments are free — the lexer discards them without buffering. Do not trim comments for
-  memory; it was measured and recovers nothing.
-- Every parameter costs **two** entries: the global (`DAA_MARGIN_FENCE`) and the string
-  passed to `bind_add_param` (`'MARGIN_FENCE'`).
-- **Splitting into a module is the only real lever** — each chunk gets its own 1024.
-
-Current occupancy: `planedaa.lua` 607, `daacore.lua` 383, `daaobs.lua` 171, `daaltr.lua` 102,
-`daageo.lua` 78.
-
 ## Logging
 
 The script writes the following messages to the dataflash log to record its
