@@ -57,13 +57,17 @@ An out-of-memory failure here is easy to misdiagnose as a corrupt or missing fil
 The modules `require()` each other in sequence (`daageo` → `daaobs` → `daacore` →
 `daaltr`), so the heap is most depleted by the time the _last_ one in the chain
 loads — that one fails while the earlier ones log a normal load banner, which
-looks exactly like a bad copy of just that one file. The actual error,
-`error loading module 'X' from file 'Y': <reason>`, is also frequently truncated
-to nothing useful by the 50-character STATUSTEXT limit before the filename or
-reason ever appears in the log. Before assuming a corrupt upload, check the `SCR`
-records' `Total_mem` right before the failing module's load: if it's close to
-`SCR_HEAP_SIZE`, that's the cause, and re-uploading the file will not help —
-only raising `SCR_HEAP_SIZE` will.
+looks exactly like a bad copy of just that one file. The actual error, Lua's
+`error loading module 'X' from file 'Y':\n\t<reason>`, doesn't come through intact
+either, but not because of the dataflash `MSG`/STATUSTEXT limit (that caps at 50
+characters, not 64): `need()`'s own fallback truncates it to 40 characters first
+(`planedaa.lua`'s `msg:sub(1, 40)`), which on this error shape cuts off before
+`<reason>` ever starts. Before assuming a corrupt upload, set `SCR_DEBUG_OPTS` bit
+3 (see below) and check the `SCR` records' `Total_mem`: it's logged once per
+script load and once per run, not between each `require()`, so there's no
+per-module checkpoint to read - but a `Total_mem` close to `SCR_HEAP_SIZE` on the
+last run before the failure is still the same tell. Re-uploading the file will not
+help either way - only raising `SCR_HEAP_SIZE` will.
 
 Do not treat `SCR_VM_I_COUNT` as a value to trim. It is an _instruction_ budget,
 not a memory allocation — raising it costs no RAM. `1000000` is the top of the
