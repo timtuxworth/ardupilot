@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-027"
+DAAcore.SCRIPT_VERSION = "4.8.0-028"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -40,18 +40,12 @@ local BANNER_SEVERITY = 6
 -- configure() below), passed as an explicit argument each call.
 local geometry = require("daageo")
 
--- Implementation constants: how THIS module works, not a runtime-configurable behaviour,
--- so they live here rather than being injected from planedaa.lua - Codex's review of the
--- constructor deps tables and Tim's "the complexity of making it a deps doesn't seem worth
--- it" (re: FLT_MAX) both landed on the same conclusion.  If one of these ever needs to be
--- configurable it should become a real DAA_ parameter, not a constructor argument.
+-- Implementation constants: how THIS module works, not a runtime-configurable behaviour.
 local FLT_MAX             = 3.402823466e+38
 -- The candidate-heading sweep in DAA.detect() runs coarse-to-fine: it steps at
 -- COARSE_SWEEP_MULT * DAA_HEADING_INC, then refines around the winner at the full
 -- DAA_HEADING_INC. The final resolution is unchanged; the worst case (boxed in, no
 -- heading clears, so every candidate is probed) costs ~COARSE_SWEEP_MULT times less.
--- Not a parameter: DAA_HEADING_INC already exposes the resolution-vs-CPU trade, and
--- this only sets how the same search is scheduled.
 local COARSE_SWEEP_MULT   = 4
 -- minimum length of the bendy-ruler second-leg probe, so a plane sitting almost on top
 -- of its waypoint still tests a sane segment (mirrors OA_BENDYRULER_LOOKAHEAD_STEP2_MIN)
@@ -63,7 +57,7 @@ local MIN_TURN_CHORD_M    = 5.0
 -- would wreck the autoscaling of any plot it shares an axis with.
 local LOG_CLEARANCE_MAX_M = 9999.0
 -- assess_aircraft_conflict()'s filter constants - module scope, not inside DAAcore.new(),
--- since they are true constants with no per-instance state (see the 100-local-per-function
+-- since they are true constants with no per-instance state (see the 200-local-per-function
 -- ceiling note in project_lua_binding_gotchas in memory).
 local AIRCRAFT_TAU_FILTER_S = 8.0
 local AIRCRAFT_TAU_GAP_S    = 5.0
@@ -73,10 +67,7 @@ local AIRCRAFT_TAU_GAP_S    = 5.0
 local VALIDATE_PROJECTION_S = 2.0
 
 -- Clamp a possibly-nil clearance (m) to +/-LOG_CLEARANCE_MAX_M for logging, treating "no
--- value at all" the same as "no obstacle" (LOG_CLEARANCE_MAX_M). Module scope like the
--- constants above, for the same 200-local-per-function reason - and a real if/else here
--- (rather than the `x == nil and A or B` idiom used elsewhere in this file) lets LuaLS
--- narrow value_m to non-nil in the else branch instead of flagging math.min/math.max.
+-- value at all" the same as "no obstacle" (LOG_CLEARANCE_MAX_M).
 local function clamp_log_m(value_m)
     if value_m == nil then
         return LOG_CLEARANCE_MAX_M
@@ -132,7 +123,7 @@ function DAAcore.new(deps)
     -- instantaneous velocity-vector CPA. Reset alongside last_aircraft_obstacle whenever
     -- the tracked aircraft changes or is lost, so history never leaks across encounters.
     -- Bare GLOBALS, along with tau_s below (removed from the cached-parameters block
-    -- above) - not `local`, to stay under Lua's 100-per-function ceiling on this already
+    -- above) - not `local`, to stay under Lua's 200-per-function ceiling on this already
     -- near-full function (see project_lua_binding_gotchas in memory). Same caveat as
     -- assess_aircraft_conflict() itself: safe only because there is one DAAcore instance.
     last_aircraft_range_m     = nil
@@ -304,8 +295,6 @@ function DAAcore.new(deps)
     -- Forward-declared: resist_bearing_change() and resist_fence_bearing_change() (defined
     -- here, ahead of probe_bearing in the file) need to call it, and need the SAME
     -- turn-lead-aware measurement probe_bearing gives every other candidate in the sweep.
-    -- Assigned without "local" at its usual
-    -- location further down; this is the upvalue resist_bearing_change closes over.
     local probe_bearing
 
     -- Sign of the bank the aircraft is CURRENTLY, physically holding - not the sign of any
@@ -438,11 +427,6 @@ function DAAcore.new(deps)
     breakable the moment the held bearing itself stops being clear (a lock that can
     hold an unsafe path is worse than no lock).
 
-    NEEDS TESTING against a fresh live flight before this is trusted alone - the first
-    two "fixes" here each looked complete against their own reproduction and were not;
-    see the memory file for what to measure (minimum achieved fence clearance across
-    several consecutive laps, not just whether one particular symptom disappears).
-
     Returns (bearing, distance): the distance is the clearance of WHICHEVER bearing is
     returned, not of the candidate that was proposed.  Getting this right matters for
     logging: DAAD.DstB used to be left as the proposed candidate's distance even on the
@@ -498,12 +482,7 @@ function DAAcore.new(deps)
         end
 
         -- What bank direction the fresh candidate needs, and whether that differs from
-        -- the bank the aircraft is currently, physically holding - computed up front
-        -- because it now gates BOTH branches below, not just the "no longer clear" one.
-        -- A candidate within bendy_angle of the current ground course is a small
-        -- correction, not a turn with a bank direction of its own - the sign of such a
-        -- tiny change is noise and must not be classified as needing a reversal (the
-        -- original fault was 150-220 deg jumps, not sub-bendy_angle corrections).
+        -- the bank the aircraft is currently, physically holding
         local course_change_deg = wrap_180(bearing_deg - ground_course_deg)
         local current_sign = bank_sign(current_roll_deg)
         local needs_reversal = false
@@ -667,15 +646,6 @@ function DAAcore.new(deps)
                             matching assess_obstacle_motion()'s own close-range floor.
     closure_rate <= 0    => not closing on average: no conflict regardless of range.
     tau_mod <= DAA_TAU_S => predicted to cross the keep-out radius soon enough to conflict.
-
-    Declared as a bare GLOBAL, not `local function`, specifically to avoid costing
-    DAAcore.new() one more of Lua's 100 per-function locals (see the "declare the new
-    helper as a bare global" note in project_lua_binding_gotchas in memory) - it is still
-    a real closure over this DAAcore instance's current_loc/aircraft_closure_rate_ms/etc,
-    exactly like a local function would be; only where the function VALUE is stored
-    differs. Safe here because this whole applet only ever constructs one DAAcore
-    instance - if that ever changes, a second instance would silently redefine this same
-    global over the first one's.
     --]]
     function assess_aircraft_conflict(obstacle)
         if obstacle == nil or current_loc == nil or obstacle.location == nil then
@@ -683,9 +653,7 @@ function DAAcore.new(deps)
         end
         -- Recomputed live from the CURRENT position, not obstacle.distance_xy (which is
         -- frozen at whatever it was when this obstacle's last ADS-B fix arrived, ~1 Hz -
-        -- our own continued movement between fixes matters at cruise speed). The range
-        -- HISTORY used to derive aircraft_closure_rate_ms in detect_aircraft() is anchored
-        -- to real fix instants on purpose, which is unaffected by this.
+        -- our own continued movement between fixes matters at cruise speed).
         local range_m    = current_loc:get_distance(obstacle.location)
         local standoff_m = get_standoff(obstacle.type)
 
@@ -703,11 +671,7 @@ function DAAcore.new(deps)
             -- first report) apart from a converging one before this function existed.
             -- Confirmed the hard way: hardcoding "conflict" here engaged the loiter once
             -- during warm-up and then never released it, because do_loitering()'s own
-            -- release condition is proximity-only, not conflict-based, and was never
-            -- designed to correct an early wrong answer (PlaneDAAAircraftCpaGate,
-            -- 2026-09-08). Re-shaped into this function's own return table (not
-            -- assess_obstacle_motion()'s) so callers - including the DAAT logging above -
-            -- see a consistent set of fields regardless of which branch answered.
+            -- release condition is proximity-only, not conflict-based.
             local fallback = assess_obstacle_motion(obstacle)
             return { is_conflict = fallback.is_conflict, tau_mod_s = -1.0, range_m = range_m,
                      closure_rate_ms = aircraft_closure_rate_ms }
@@ -790,10 +754,7 @@ function DAAcore.new(deps)
         -- cycle" refine_avoidance_bearing() thinks it is) - last_cmd_bearing_ms is
         -- only ever set below, in THIS function's own caller, so it genuinely is
         -- still nil then and must be checked on its own, not inferred from
-        -- last_avoid_bearing_deg.  Without this a real flight crashed here
-        -- (2026-09-04, log 00000183.BIN) the first time a drone avoidance ran after
-        -- an earlier fence episode, aborting that cycle's avoidance decision
-        -- entirely - a fence breach followed ~10s later.
+        -- last_avoid_bearing_deg.
         if slew_dps <= 0 or last_avoid_bearing_deg == nil or last_cmd_bearing_ms == nil then
             return bearing
         end
@@ -1025,13 +986,7 @@ function DAAcore.new(deps)
         local avoid_step2_m     = current_lookahead * 2.0
 
         -- Start the look-ahead from where we will actually be after turning onto this
-        -- candidate course.  This used to be applied only in wind, as a way of leading the
-        -- carrot downwind; it is really a TURN lead and calm air needs it just as much.
-        -- Without it the probe assumes the vehicle is already on the candidate course, so a
-        -- heading that needs a reversal is judged against a path the turn never flies.
-        -- location_for_candidate() upgrades this further for a candidate that reverses
-        -- bank direction from what the aircraft is currently, physically holding - see
-        -- its own comment for why the plain single-arc model is not safe there.
+        -- candidate course.
         local adjusted_loc          = location_for_candidate(bearing_test_deg, target_loc)
 
         -- location_for_candidate() routes through location_project(), which always adopts
@@ -1311,9 +1266,7 @@ function DAAcore.new(deps)
         -- fix, before last_aircraft_range_m/last_aircraft_ts_ms are overwritten below - see
         -- that function's own comment for why this is tracked instead of a velocity vector.
         if last_aircraft_range_m ~= nil and last_aircraft_ts_ms ~= nil then
-            -- OAObstacle's timestamp_ms is bound as int32_t (a plain Lua number), NOT the
-            -- boxed uint32_t_ud millis() returns - no :tofloat() here, that is a userdata
-            -- method and this is a plain number.
+            -- OAObstacle's timestamp_ms is bound as int32_t (a plain Lua number).
             local dt_s = (ts_ms - last_aircraft_ts_ms) / 1000.0
             if dt_s > 0.0 and dt_s < AIRCRAFT_TAU_GAP_S then
                 local raw_rate_ms = (last_aircraft_range_m - obstacle.distance_xy) / dt_s
@@ -1414,11 +1367,8 @@ function DAAcore.new(deps)
     -- unsafe" reading).
     local function sweep_for_heading(bearing_deg, distance_to_target_m, target_loc,
                                      best_distance_m, best_bearing_deg)
-        -- Under 20 m to the target there is nothing useful to sweep for.  Only the sweep
-        -- declines: detect_aircraft() and detect_altitude_fence() are independent of it, and
-        -- returning from self.detect() here - as this check used to - cleared aircraft_avoiding
-        -- and then suppressed traffic alerts, NMAC, the trapped failsafe, the aircraft loiter
-        -- and the altitude clamp for as long as the target stayed close.
+        -- Under 20 m to the target there is nothing useful to sweep for. Only the sweep
+        -- itself declines - detect_aircraft() and detect_altitude_fence() are independent of it.
         if distance_to_target_m < 20 then
             return best_distance_m, best_bearing_deg, false
         end
@@ -1631,24 +1581,6 @@ function DAAcore.new(deps)
     -- - so the escape search below hunts for one against the fence specifically, and
     -- that is what gets the usual hysteresis applied to it.
     --
-    -- Considered and reverted (2026-09-05, same day): a "never release while
-    -- fence:get_breaches() is set" recovery latch, meant to stop a fence disappearing
-    -- from find_closest_fence() the instant AC_Fence itself flags a breach (the SAME
-    -- deliberate skip find_threats() uses so a bendy ruler cannot be trapped forever
-    -- trying to get back into an unreachable fence - see _find_fence_threats_NE()'s own
-    -- comment). Live data (00000191.BIN's FIRST breach) shows that "vanish and revert
-    -- to nav" is not actually harmful on its own: FncD recovered from -47 m back to
-    -- positive over about 4 seconds on a smooth, continuing bearing, via ordinary
-    -- navigation alone, no active re-avoidance needed. The latch, meanwhile, broke two
-    -- existing tests whose whole premise is a fence that stays breached (or nearly so)
-    -- for an extended stretch by design - PlaneDAABreachScopedToFenceType's
-    -- permanently-distant home circle, PlaneDAAFenceDriftReversal's tight racetrack -
-    -- because it cannot tell "still actively escaping a fresh breach" from "this fence
-    -- is never going to un-breach and must be stood down", which is exactly what
-    -- find_threats()'s original skip was built to do. The bank-aware geometry fix above
-    -- already covers the one concretely reproduced defect (the -8.14 m case); the
-    -- "vanish" pattern itself is left as the pre-existing, deliberate design.
-    --
     -- Fourth return value `held` is for DAAR diagnostics only (see detect_impl()'s own
     -- DAAR block) - nothing in the resolution logic itself reads it.
     local function validate_horizontal_release(target_loc, candidate_bearing_deg, candidate_distance_m)
@@ -1796,13 +1728,8 @@ function DAAcore.new(deps)
         -- is what dismissed it - captured here, before validate_horizontal_release() can
         -- reassign obstacle_avoiding below.
         local was_release_candidate = (obstacle_avoiding == nil)
-        -- Round ten (00000196.BIN, 2026-09-06): a moving obstacle can keep winning the
-        -- single-obstacle choice for many seconds straight while a fence quietly erodes
-        -- to a breach underneath it - the release check below used to run only at the
-        -- INSTANT the moving obstacle stopped winning, so a fence that never got that
-        -- instant (this one didn't: the drone was dismissed for good only after the
-        -- aircraft had already crossed the boundary) was never checked at all. Run the
-        -- same fence-reality check while a moving obstacle is still actively being
+        -- a moving obstacle can keep winning the single-obstacle choice for many seconds straight while a fence quietly erodes
+        -- to a breach underneath it. Run the same fence-reality check while a moving obstacle is still actively being
         -- avoided too - it is one line query, the same cost validate_horizontal_release()
         -- already pays at every ordinary release, not the full sweep.
         local was_moving_avoidance = obstacle_avoiding ~= nil and not is_fence and not gone

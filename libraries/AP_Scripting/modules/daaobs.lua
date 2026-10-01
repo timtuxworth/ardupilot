@@ -15,7 +15,7 @@
 
 local DAAobstacles = {}
 
-DAAobstacles.SCRIPT_VERSION = "4.8.0-009"
+DAAobstacles.SCRIPT_VERSION = "4.8.0-010"
 DAAobstacles.SCRIPT_NAME = "DAA obstacles"
 DAAobstacles.SCRIPT_NAME_SHORT = "DAAobs"
 
@@ -149,8 +149,7 @@ function DAAobstacles.new()
         local emitter_type  = script_obstacle:emitter_type()
 
         -- a MAVLink drone (GLOBAL_POSITION_INT/FOLLOW_TARGET) carries a small MAV system id in
-        -- src_id; an ADSB-sourced drone (emitter 14) carries a 24-bit ICAO address there instead,
-        -- so show that in hex rather than a meaningless decimal "SYSID" (0xBFFF matches the C++ split)
+        -- src_id; an ADSB-sourced drone (emitter 14) carries a 24-bit ICAO address there instead.
         if emitter_type == ADSB_EMITTER.UAV then
             if script_obstacle:src_id() > 0xBFFF then
                 return string.format("Drone:%06X", script_obstacle:icao_code())

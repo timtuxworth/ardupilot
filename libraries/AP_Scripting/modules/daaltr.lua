@@ -22,7 +22,7 @@
 
 local DAAloiter = {}
 
-DAAloiter.SCRIPT_VERSION = "4.8.0-004"
+DAAloiter.SCRIPT_VERSION = "4.8.0-005"
 DAAloiter.SCRIPT_NAME = "DAA loiter"
 DAAloiter.SCRIPT_NAME_SHORT = "DAAloiter"
 
