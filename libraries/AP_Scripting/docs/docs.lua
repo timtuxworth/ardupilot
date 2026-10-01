@@ -1220,10 +1220,6 @@ function Location_ud:offset(ofs_north, ofs_east) end
 ---@return number -- horizontal distance in meters
 function Location_ud:get_distance(loc) end
 
--- Copies the altitude (and altitude frame) from another Location into this one.
----@param loc Location_ud -- location to copy altitude from
-function Location_ud:copy_alt_from(loc) end
-
 -- desc
 ---@class (exact) AP_EFI_Backend_ud
 local AP_EFI_Backend_ud = {}
