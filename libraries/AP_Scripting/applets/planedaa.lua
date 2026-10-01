@@ -528,8 +528,8 @@ MIN_HUNG_PROGRESS_M = 10.0
 SKIP_AVOID_GRACE_MS = 2000
 
 
--- Load a module, reporting a failure in a form that survives the 64-character cap on a
--- logged STATUSTEXT.  Lua's own message is "./scripts/modules/daaobs.lua:12: <text>" and
+-- Load a module, reporting a failure in a form that survives the 50-character cap on a
+-- logged MSG record.  Lua's own message is "./scripts/modules/daaobs.lua:12: <text>" and
 -- the path alone eats the whole budget before any of the text arrives, so re-order it to
 -- line number, then file, then message.  This can only ever cover the MODULES: a syntax
 -- error in this file is raised before a line of it runs, and nothing here can catch that.
