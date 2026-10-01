@@ -87,6 +87,27 @@ function DAAloiter.new(deps)
     -- while already in GUIDED (see the comment on it below, and on the matching stop() branch)
     local saved_guided_target_loc = nil
 
+    -- DO_REPOSITION (and mavlink_wrappers.lua's frame conversion for it) has no ABOVE_ORIGIN
+    -- case and silently falls through to absolute (AMSL) - see planedaa.md's known issue for
+    -- DAA_AVD_ALT_TP=2. Convert ORIGIN to GLOBAL ourselves before either call site hands the
+    -- frame off, so a loiter commanded above-origin (or a saved GUIDED destination in that
+    -- frame) sends the altitude it actually means. loc must already be positioned at the
+    -- target lat/lng; it is set to (alt_m, alt_frame) and mutated in place by change_alt_frame.
+    local function resolve_origin_alt(loc, alt_m, alt_frame)
+        if alt_frame ~= ALT_FRAME.ORIGIN then
+            return alt_m, alt_frame
+        end
+        loc:set_alt_m(alt_m, alt_frame)
+        if loc:change_alt_frame(ALT_FRAME.GLOBAL) then
+            local converted_alt_m = loc:get_alt_m(ALT_FRAME.GLOBAL)
+            if converted_alt_m ~= nil then
+                return converted_alt_m, ALT_FRAME.GLOBAL
+            end
+        end
+        -- no origin set to convert from: nothing safe to do but send what we were given
+        return alt_m, alt_frame
+    end
+
     -- Returns true when the loiter is running once this call returns, so the caller can
     -- decide whether to enter STATE.loitering.  It used to return nil on every path,
     -- including the three that do not loiter - already active, no current_loc, and the
@@ -134,6 +155,8 @@ function DAAloiter.new(deps)
                 target_alt_m = clamped_alt_m
             end
         end
+
+        target_alt_m, target_alt_frame = resolve_origin_alt(loiteralt_loc, target_alt_m, target_alt_frame)
 
         gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": LOITER %s to %.0f/%.0f(%.0f) alt radius %.0f m",
                 direction, target_alt_m, target_alt_frame, mavlink_wrappers.alt_frame_to_mavlink(target_alt_frame), radius_m ))
@@ -216,6 +239,9 @@ function DAAloiter.new(deps)
             -- actually been sent.
             local restore_alt_frame = saved_guided_target_loc:get_alt_frame()
             local restore_alt_m = saved_guided_target_loc:get_alt_m(restore_alt_frame)
+            if restore_alt_m ~= nil then
+                restore_alt_m, restore_alt_frame = resolve_origin_alt(saved_guided_target_loc:copy(), restore_alt_m, restore_alt_frame)
+            end
             if restore_alt_m == nil then
                 -- can't reconstruct the altitude (e.g. home/origin no longer set) - nothing
                 -- safe to reissue, so fall through and just drop the stale destination

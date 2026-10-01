@@ -191,7 +191,7 @@ PARAM.AVD_ALT = bind_add_param('AVD_ALT', 14, 50)
     // @Param: DAA_AVD_ALT_TP
     // @DisplayName: The frame of the DAA_AVD_ALT
     // @Description:  DAA will loiter and descent to DAA_AVD_ALT in this frame.
-    // @Values: 0:Absolute,1:Above Home,3:Above Terrain
+    // @Values: 0:Absolute,1:Above Home,2:Above Origin,3:Above Terrain
     // @User: Standard
 --]]
 PARAM.AVD_ALT_TP = bind_add_param('AVD_ALT_TP', 15, 3)
