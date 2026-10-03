@@ -1234,11 +1234,17 @@ function DAAcore.new(deps)
 
         -- De-bounce the oversampled ADS-B feed: AP_Avoidance re-reports the same fix many
         -- times between genuine updates (~63% of DAAG records were duplicate lat/lng in
-        -- log_102). Act only on a fresh fix (new timestamp_ms); on a repeat, reuse the last
-        -- obstacle so the loiter latch holds without re-populating or re-logging every
-        -- cycle. The timestamp change is the true (~1 Hz) fix rate.
+        -- log_102). Act only on a fresh fix (new timestamp_ms) of the SAME aircraft; on a
+        -- repeat, reuse the last obstacle so the loiter latch holds without re-populating
+        -- or re-logging every cycle. The timestamp change is the true (~1 Hz) fix rate.
+        -- The identity check matters: find_aircraft() can switch to a different aircraft
+        -- with no intervening nil cycle, and that aircraft's own last fix can carry the
+        -- same millisecond timestamp during an ADS-B burst - without it, this would keep
+        -- returning the stale aircraft until the new one's NEXT fix.
         local ts_ms = aircraft_obstacle:timestamp_ms()
-        if last_aircraft_obstacle ~= nil and ts_ms == last_aircraft_ts_ms then
+        if last_aircraft_obstacle ~= nil and ts_ms == last_aircraft_ts_ms
+                and aircraft_obstacle:src_id() == last_aircraft_sysid
+                and aircraft_obstacle:icao_code() == last_aircraft_icao then
             aircraft_avoiding = last_aircraft_obstacle
             return
         end
