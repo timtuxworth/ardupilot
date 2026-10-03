@@ -179,9 +179,9 @@ The MAVLink DO_REPOSITION command the aircraft-avoidance loiter uses has no
 "above origin" frame, so `2` (above origin) is converted to absolute (AMSL)
 before being sent - `daaltr.lua` does this itself, at both the point the loiter
 starts and the point a saved GUIDED destination in that frame is restored.
-`mavlink_wrappers.lua`'s own frame mapper still has no `ABOVE_ORIGIN` case
-(backlog item #32); that gap no longer matters for the aircraft-avoidance loiter
-specifically, since the conversion happens before the frame ever reaches it.
+`mavlink_wrappers.lua`'s own frame mapper still has no `ABOVE_ORIGIN` case; that
+gap no longer matters for the aircraft-avoidance loiter specifically, since the
+conversion happens before the frame ever reaches it.
 
 ### 6. Activation
 
