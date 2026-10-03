@@ -1276,13 +1276,17 @@ local DAA = {
             local entering_avoidance = (daa_target_loc == nil)
             if update_target_location(new_target_loc) then
                 if entering_avoidance then
-                    -- Fly the direct current-position-to-target line, not the stale prev_WP_loc -> target leg.
+                    -- save the pre-avoidance state so it can be restored on exit, below.
                     local enabled = vehicle:get_crosstrack_enabled()
                     if enabled ~= nil then
                         saved_crosstrack_enabled = enabled
                     end
-                    vehicle:set_crosstrack_enabled(false)
                 end
+                -- Fly the direct current-position-to-target line, not the stale prev_WP_loc ->
+                -- target leg. Re-assert this on every update, not just on entry: the mission's
+                -- own waypoint-advance (Plane::set_next_WP()) re-enables crosstrack whenever it
+                -- moves to the next leg, even while avoidance is still active.
+                vehicle:set_crosstrack_enabled(false)
                 daa_target_loc = new_target_loc:copy()
                 return true
             end
