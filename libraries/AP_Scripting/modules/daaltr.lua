@@ -88,11 +88,12 @@ function DAAloiter.new(deps)
     local saved_guided_target_loc = nil
 
     -- DO_REPOSITION (and mavlink_wrappers.lua's frame conversion for it) has no ABOVE_ORIGIN
-    -- case and silently falls through to absolute (AMSL) - see planedaa.md's known issue for
-    -- DAA_AVD_ALT_TP=2. Convert ORIGIN to GLOBAL ourselves before either call site hands the
-    -- frame off, so a loiter commanded above-origin (or a saved GUIDED destination in that
-    -- frame) sends the altitude it actually means. loc must already be positioned at the
-    -- target lat/lng; it is set to (alt_m, alt_frame) and mutated in place by change_alt_frame.
+    -- case and silently falls through to absolute (AMSL) - see planedaa.md's "Terrain (default
+    -- altitude frame)" section for DAA_AVD_ALT_TP=2. Convert ORIGIN to GLOBAL ourselves before
+    -- either call site hands the frame off, so a loiter commanded above-origin (or a saved
+    -- GUIDED destination in that frame) sends the altitude it actually means. loc must already
+    -- be positioned at the target lat/lng; it is set to (alt_m, alt_frame) and mutated in place
+    -- by change_alt_frame.
     local function resolve_origin_alt(loc, alt_m, alt_frame)
         if alt_frame ~= ALT_FRAME.ORIGIN then
             return alt_m, alt_frame
