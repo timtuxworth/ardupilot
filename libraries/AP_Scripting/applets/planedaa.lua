@@ -471,7 +471,7 @@ PARAM.RLL2SRV_TCONST              = bind_param("RLL2SRV_TCONST")
 -- sanity check in DAA.warnings(), a hot-path comparison, or - like margin_fence_m below -
 -- self-referential derivation).  A parameter that exists solely to be forwarded into a
 -- module's configure() call is fetched straight from PARAM there instead: see
--- configure_modules() below, and project_planedaa_param_cache_cleanup in memory.
+-- configure_modules() below.
 local lookahead_param_m     = PARAM.LKAHD_M:get()
 local detect_m              = PARAM.DETECT_M:get()
 -- daageo's turn_radius_m()/max_turn_rate_dps() are stateless and take this directly (see

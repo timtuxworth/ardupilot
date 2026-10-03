@@ -57,8 +57,7 @@ local MIN_TURN_CHORD_M    = 5.0
 -- would wreck the autoscaling of any plot it shares an axis with.
 local LOG_CLEARANCE_MAX_M = 9999.0
 -- assess_aircraft_conflict()'s filter constants - module scope, not inside DAAcore.new(),
--- since they are true constants with no per-instance state (see the 200-local-per-function
--- ceiling note in project_lua_binding_gotchas in memory).
+-- since they are true constants with no per-instance state.
 local AIRCRAFT_TAU_FILTER_S = 8.0
 local AIRCRAFT_TAU_GAP_S    = 5.0
 -- How far ahead validate_horizontal_release() projects the aircraft's CURRENT bank
@@ -124,8 +123,8 @@ function DAAcore.new(deps)
     -- the tracked aircraft changes or is lost, so history never leaks across encounters.
     -- Bare GLOBALS, along with tau_s below (removed from the cached-parameters block
     -- above) - not `local`, to stay under Lua's 200-per-function ceiling on this already
-    -- near-full function (see project_lua_binding_gotchas in memory). Same caveat as
-    -- assess_aircraft_conflict() itself: safe only because there is one DAAcore instance.
+    -- near-full function. Same caveat as assess_aircraft_conflict() itself: safe only
+    -- because there is one DAAcore instance.
     last_aircraft_range_m     = nil
     -- identity of the contact last_aircraft_range_m was measured against, so a switch to a
     -- different aircraft (no intervening nil cycle - AP_Avoidance:distance_to_aircraft()
@@ -373,10 +372,7 @@ function DAAcore.new(deps)
     --[[
     Fence-specific hysteresis: persistence (Stage 1), a reversal-in-progress latch
     (Stage 1b), and a bank-aware reversal transition (Stage 2, see
-    location_for_candidate() above) - see project_planedaa_reversal_awareness in memory
-    for the full field report, SITL reproductions and log analyses behind this (three
-    separate live breaches, 2026-09-04, each closing a different gap in what came
-    before it).
+    location_for_candidate() above).
 
     Persistence rests on TWO signals, not one, because they catch different failures:
 
@@ -431,7 +427,7 @@ function DAAcore.new(deps)
     returned, not of the candidate that was proposed.  Getting this right matters for
     logging: DAAD.DstB used to be left as the proposed candidate's distance even on the
     "stay the course" path, so it could read as fully clear while the bearing actually
-    being flown was not - see project_planedaa_standoff_not_achieved in memory.
+    being flown was not.
     --]]
     local function resist_fence_bearing_change(bearing_orig_deg, bearing_deg, distance_found_m, target_loc)
         if bearing_orig_deg == nil then
@@ -531,7 +527,7 @@ function DAAcore.new(deps)
         -- good as what is already held - accepted every cycle rather than holding the
         -- aircraft on one fixed bearing indefinitely just because it happens to stay
         -- clear (that held a SITL aircraft on a single straight heading for 16-23s past
-        -- a small exclusion circle - see project_planedaa_reversal_awareness in memory).
+        -- a small exclusion circle).
         -- If this transition itself needs a reversal, latch that direction so a fresh
         -- sweep result next cycle cannot reverse it again before the aircraft responds.
         if needs_reversal then
