@@ -8329,10 +8329,7 @@ class AutoTestPlane(vehicle_test_suite.TestSuite):
                 self.script_modules_source_path(module),
                 module,
             )
-        # TEMPORARY: planedaa + its modules need more than the 200 KB SITL default to run.
-        # The load-time cliff is fixed (see planedaa.md, "Distinct names are a budget"), but
-        # the live footprint is still ~149 KB and the working set does not fit on top of it.
-        # Remove this once the footprint is back under the default.
+        # planedaa + its modules need more than the default 200 KB SITL heap to run.
         self.set_parameters({"SCR_HEAP_SIZE": 262144})
 
     def PlaneDAAFenceBreachEscape(self):
