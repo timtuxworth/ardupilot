@@ -86,29 +86,33 @@ To measure the applet's real cost on your airframe, set `SCR_DEBUG_OPTS` bit 3
 (value `8`). That logs an `SCR` record per script run carrying its runtime and
 Lua heap use, which is the only place either is visible in a dataflash log.
 
-**You must install TWO files, and they go in DIFFERENT places.** This trips
-people up: `planedaa.lua` depends on the `mavlink_wrappers` module, which it
-loads with `require("mavlink_wrappers")` at startup. If that module is not on
-the SD card in the right place, the applet fails to load immediately — it does
-not start in a degraded mode.
+**You must install SIX files, and they go in DIFFERENT places.** This trips
+people up: `planedaa.lua` depends on five modules (`daageo`, `daaobs`, `daacore`,
+`daaltr`, `mavlink_wrappers`), loaded with `need()`/`require()` at startup. If any
+one of them is not on the SD card in the right place, the applet fails to load
+immediately — it does not start in a degraded mode.
 
-The two files live in different source folders and must be copied to different
-destination folders:
+The applet and its modules live in different source folders and must be copied
+to different destination folders:
 
 | Source (in the ArduPilot tree) | Destination (on the SD card) |
 |--------------------------------|------------------------------|
 | `AP_Scripting/applets/planedaa.lua` | `APM/scripts/planedaa.lua` |
+| `AP_Scripting/modules/daageo.lua` | `APM/scripts/modules/daageo.lua` |
+| `AP_Scripting/modules/daaobs.lua` | `APM/scripts/modules/daaobs.lua` |
+| `AP_Scripting/modules/daacore.lua` | `APM/scripts/modules/daacore.lua` |
+| `AP_Scripting/modules/daaltr.lua` | `APM/scripts/modules/daaltr.lua` |
 | `AP_Scripting/modules/mavlink_wrappers.lua` | `APM/scripts/modules/mavlink_wrappers.lua` |
 
 Notes:
 
-- `mavlink_wrappers.lua` is a **module**, so it lives under `modules/`, not next
-  to the applet. ArduPilot's `require` searches `scripts/` and
-  `scripts/modules/`, so the module must end up in `APM/scripts/modules/`.
-- Do **not** rename either file — `require("mavlink_wrappers")` looks for a file
-  named exactly `mavlink_wrappers.lua`.
+- The five modules live under `modules/`, not next to the applet. ArduPilot's
+  `require` searches `scripts/` and `scripts/modules/`, so each module must end
+  up in `APM/scripts/modules/`.
+- Do **not** rename any file — `require()`/`need()` look for each module by its
+  exact filename (e.g. `mavlink_wrappers.lua`).
 - If you only copy `planedaa.lua`, the script will not run. The most common
-  setup failure is forgetting the module or putting it in the wrong folder.
+  setup failure is forgetting a module or putting it in the wrong folder.
 
 ### 3. Dynamic traffic detection (aircraft / drones / ADS-B)
 
@@ -523,7 +527,7 @@ different action, your own failsafe — you should only have to edit `planedaa.l
 | `daaltr.lua` | `scripts/modules/` | `DAAloiter` — one implementation of the altitude-loiter policy (see below) |
 | `mavlink_wrappers.lua` | `scripts/modules/` | MAVLink command helpers |
 
-**All four must be installed.** A missing module is a load failure, not a degraded mode.
+**All five must be installed.** A missing module is a load failure, not a degraded mode.
 `@Param` documentation has to stay in `planedaa.lua`: the parameter metadata tool only
 scans `libraries/AP_Scripting/applets` and `drivers`, so a `@Param` block moved into a
 module silently disappears from the documentation.
