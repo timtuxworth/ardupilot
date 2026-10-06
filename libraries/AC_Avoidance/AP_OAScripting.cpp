@@ -97,7 +97,7 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
             distance_m          = distance_new_m;
         }
     }
-#endif
+#endif // AP_FENCE_ENABLED
     if (distance_m < lookahead_m) {
         any_obstacle    = obstacle;
         return true;
