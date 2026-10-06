@@ -522,7 +522,8 @@ void AP_OAScripting::_populate_scripting_obstacle(OAObstacle &script_obstacle, c
 // Distance to objects in the AP_Avoidance database from a line from start_NED_m to end_NED_m
 float AP_OAScripting::_distance_to_avoidance(const Vector3f &start_NED_m, const Vector3f &end_NED_m,
                                                 // return values
-                                                OAObstacle &script_any_obstacle
+                                                OAObstacle &script_any_obstacle,
+                                                bool has_exclude_src_id, uint32_t exclude_src_id
                                                 ) const
 {
     AP_Avoidance *avoid = AP_Avoidance::get_singleton();
@@ -531,11 +532,46 @@ float AP_OAScripting::_distance_to_avoidance(const Vector3f &start_NED_m, const 
     }
     AP_Avoidance::Obstacle any_avoidance {};
 
-    float distance_m = avoid->distance_to_obstacle(start_NED_m, end_NED_m, any_avoidance);
+    float distance_m = avoid->distance_to_obstacle(start_NED_m, end_NED_m, any_avoidance,
+                                                     has_exclude_src_id, exclude_src_id);
     if (distance_m < FLT_MAX) {
         _populate_scripting_obstacle(script_any_obstacle, &any_avoidance);
     }
     return distance_m;
+}
+
+// As find_threats(), but AP_Avoidance contacts only, excluding one specific contact by src_id -
+// see the header comment for why.
+bool AP_OAScripting::find_threats_excluding(const Location &start_loc, const Location &end_loc, float lookahead_m,
+                                                int32_t exclude_src_id,
+                                                // Return values
+                                                float       &distance_m,
+                                                OAObstacle  &any_obstacle
+                                                ) const
+{
+    distance_m = lookahead_m;
+
+    Vector3f start_NED_m, end_NED_m;
+    if (!start_loc.get_vector_from_origin_NEU_m(start_NED_m) ||
+        !end_loc.get_vector_from_origin_NEU_m(end_NED_m)) {
+        return false;
+    }
+    if (start_NED_m == end_NED_m) {
+        return false;
+    }
+    // until we get the new NED functions
+    start_NED_m.z   = -start_NED_m.z;
+    end_NED_m.z     = -end_NED_m.z;
+
+    OAObstacle obstacle_found {};
+    const float distance_new_m = _distance_to_avoidance(start_NED_m, end_NED_m, obstacle_found,
+                                                         true, static_cast<uint32_t>(exclude_src_id));
+    if (distance_new_m < distance_m) {
+        any_obstacle    = obstacle_found;
+        distance_m      = distance_new_m;
+        return true;
+    }
+    return false;
 }
 
 // Closest Distance to aircraft in the AP_Avoidance database from a single point
