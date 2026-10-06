@@ -55,9 +55,13 @@ function DAAloiter.new(deps)
     local get_mode_string           = deps.get_mode_string
     local mavlink_wrappers          = deps.mavlink_wrappers
     local clamp_alt_to_fence        = deps.clamp_alt_to_fence
+    -- point clearance (m, signed) to the nearest horizontal fence boundary of any category -
+    -- see self.start()/self.update() for why the orbit needs this and the reposition target
+    -- sanitize check alone does not.
+    local nearest_fence_clearance_m = deps.nearest_fence_clearance_m
 
     -- pushed in by configure()
-    local loiter_cool_ms, wp_loiter_rad_m
+    local loiter_cool_ms, wp_loiter_rad_m, margin_fence_m
     -- pushed in by update_state()
     local current_loc, current_mode, now_ms
     -- the cool-down clock is ours alone: nothing outside this module reads it
@@ -65,10 +69,17 @@ function DAAloiter.new(deps)
     -- consecutive-refusal tracking, reset on any success: nothing outside this module reads it
     local loiter_fail_since_ms = nil
     local loiter_fail_notify_ms = nil
+    -- set by update() when it force-stops the loiter for coming too close to a fence; start()
+    -- refuses to re-engage until this elapses, so DAA.avoid() falls through to ordinary
+    -- bendy-ruler/fence avoidance for a while instead of immediately re-looping into the same
+    -- fence (the aircraft conflict that wanted the loiter is usually still present the very
+    -- next cycle).
+    local fence_bailout_until_ms = nil
 
     local function configure(settings)
         loiter_cool_ms   = settings.loiter_cool_ms
         wp_loiter_rad_m  = settings.wp_loiter_rad_m
+        margin_fence_m   = settings.margin_fence_m
     end
 
     -- Positional, not a table: called every cycle, and a table literal here would be one
@@ -121,6 +132,15 @@ function DAAloiter.new(deps)
             return true     -- already loitering: the caller's state is correct as it stands
         end
 
+        if fence_bailout_until_ms ~= nil then
+            if now_ms < fence_bailout_until_ms then
+                return false    -- recently bailed out of this loiter for a fence - let
+                                 -- ordinary avoidance handle it for a while rather than
+                                 -- immediately re-looping into the same fence
+            end
+            fence_bailout_until_ms = nil
+        end
+
         if current_loc == nil then
             gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT ..": loiteralt no current_location")
             return false
@@ -139,6 +159,34 @@ function DAAloiter.new(deps)
         else
             direction = "left"
             loiteralt_loc:offset_bearing(wrap_360(pre_loiteralt_heading_deg - 90), radius_m)
+        end
+
+        -- The reposition command below is sanitize()-checked against fences by the core, but
+        -- only at the CENTRE point - the orbit this will actually fly, radius_m around it, is
+        -- invisible to that check. A fence within radius_m + margin_fence_m of the centre can
+        -- still be breached mid-loiter (confirmed live, AreaXO 2026-10-06, a cell-tower
+        -- exclusion circle). Check the real edge clearance here and try the other side once
+        -- before giving up - update() below keeps checking for the rest of the loiter's life.
+        if nearest_fence_clearance_m ~= nil then
+            local clearance_m = nearest_fence_clearance_m(loiteralt_loc)
+            if clearance_m ~= nil and clearance_m < (radius_m + margin_fence_m) then
+                local flipped_right = not direction_right
+                local flipped_loc = current_loc:copy()
+                if flipped_right then
+                    flipped_loc:offset_bearing(wrap_360(pre_loiteralt_heading_deg + 90), radius_m)
+                else
+                    flipped_loc:offset_bearing(wrap_360(pre_loiteralt_heading_deg - 90), radius_m)
+                end
+                local flipped_clearance_m = nearest_fence_clearance_m(flipped_loc)
+                if flipped_clearance_m ~= nil and flipped_clearance_m >= (radius_m + margin_fence_m) then
+                    direction        = flipped_right and "right" or "left"
+                    loiteralt_loc    = flipped_loc
+                else
+                    gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT ..
+                            ": loiteralt no fence-clear side - falling through to ordinary avoidance")
+                    return false
+                end
+            end
         end
 
         -- Every other commanded target goes through update_target_location(), which
@@ -268,10 +316,26 @@ function DAAloiter.new(deps)
 
     -- should be called regularly if loiteralt is active
     function self.update()
-        if self.active and current_mode ~= PLANE_MODE.GUIDED then
+        if not self.active then
+            return
+        end
+        if current_mode ~= PLANE_MODE.GUIDED then
             gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": Pilot changed from GUIDED to: %.0f", current_mode ))
             previous_mode = -1
             self.stop(true)
+            return
+        end
+        -- The side check in self.start() only looked at the centre once; the vehicle keeps
+        -- moving around the orbit afterward, so re-check real fence clearance from the
+        -- CURRENT position every cycle for the rest of the loiter's life.
+        if nearest_fence_clearance_m ~= nil and current_loc ~= nil then
+            local clearance_m = nearest_fence_clearance_m(current_loc)
+            if clearance_m ~= nil and clearance_m < margin_fence_m then
+                gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(
+                        ": fence %.0f m - bailing out of loiter", clearance_m))
+                fence_bailout_until_ms = now_ms + loiter_cool_ms
+                self.stop(true)
+            end
         end
     end
 
