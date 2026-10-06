@@ -40,6 +40,13 @@ extern const AP_HAL::HAL& hal;
 #define debug(fmt, args ...)
 #endif
 
+// The APM_BUILD_TYPE term is redundant - AP_OA_SCRIPTING_ENABLED already includes it -
+// but it must appear in this .cpp's text somewhere, because that is how waf decides to
+// compile this source per-vehicle; it does not follow macros through headers. One
+// occurrence anywhere in the file is enough, so every other use of this condition goes
+// through this define rather than repeating APM_BUILD_TYPE itself.
+#define AP_AVOIDANCE_OA_SCRIPTING_PLANE_ENABLED (AP_OA_SCRIPTING_ENABLED && APM_BUILD_TYPE(APM_BUILD_ArduPlane))
+
 // table of user settable parameters
 const AP_Param::GroupInfo AP_Avoidance::var_info[] = {
 
@@ -126,10 +133,7 @@ const AP_Param::GroupInfo AP_Avoidance::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("F_ALT_MIN",    12, AP_Avoidance, _fail_altitude_min_m, 0),
 
-// The APM_BUILD_TYPE term is redundant - AP_OA_SCRIPTING_ENABLED already includes it -
-// but it must appear in this .cpp's text, because that is how waf decides to compile
-// this source per-vehicle; it does not follow macros through headers.
-#if AP_OA_SCRIPTING_ENABLED && APM_BUILD_TYPE(APM_BUILD_ArduPlane)   // DAA standoff params, consumed only by AP_OAScripting
+#if AP_AVOIDANCE_OA_SCRIPTING_PLANE_ENABLED   // DAA standoff params, consumed only by AP_OAScripting
     // @Param: WCLR_XY
     // @DisplayName: Well Clear horizontal
     // @Description: Horizontal "Well Clear" separation kept from crewed aircraft during ADS-B avoidance (metres). The ASTM F3442M-23 standard specifies 2000 ft (= 609.6 m).
@@ -188,7 +192,7 @@ const AP_Param::GroupInfo AP_Avoidance::var_info[] = {
     // @User: Standard
     AP_GROUPINFO("GND_SPD",    20, AP_Avoidance, _ground_speed_ms, 2),
 
-#endif
+#endif // AP_AVOIDANCE_OA_SCRIPTING_PLANE_ENABLED
 
     AP_GROUPEND
 };
@@ -751,7 +755,7 @@ void AP_Avoidance::handle_msg(const mavlink_message_t &msg)
                  );
 }
 
-#if AP_OA_SCRIPTING_ENABLED && APM_BUILD_TYPE(APM_BUILD_ArduPlane)   // see above: APM_BUILD_TYPE repeated for waf's per-vehicle detection
+#if AP_AVOIDANCE_OA_SCRIPTING_PLANE_ENABLED
 // get the avoidance radius in meters of a given obstacle type
 // the definition of "Well Clear" (2000ft = 609.6m) is from ASTM F3442M-23
 float AP_Avoidance::get_obstacle_radius_m(uint8_t emitter_type) const
@@ -1050,7 +1054,7 @@ float AP_Avoidance::distance_to_aircraft(const Vector3f &vehicle_NED_m, const fl
     // we need to do one square root here at the end. But by using squared above we avoid lots of them
     return safe_sqrt(distance_new_msq);
 }
-#endif // AP_OA_SCRIPTING_ENABLED && APM_BUILD_TYPE(APM_BUILD_ArduPlane)
+#endif // AP_AVOIDANCE_OA_SCRIPTING_PLANE_ENABLED
 
 
 // get unit vector away from the nearest obstacle
