@@ -114,7 +114,7 @@ private:
     float _find_fence_threats_NE(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm, float lookahead_m, OAObstacle &obstacle) const;
 #if AP_OA_SCRIPTING_OADB_ENABLED
     float _distance_to_object(const Vector3f &start_NED_m, const Vector3f end_NED_m, OAObstacle &script_obstacle) const;
-#endif
+#endif // AP_OA_SCRIPTING_OADB_ENABLED
     float _distance_to_aircraft(const Vector3f &vehicle_NED_m, const float lookahead_m, const float vertical_lookahead_m, OAObstacle &script_obstacle) const;
 
     // create a "Scripting Obstacle" to easily pass info about an obstacle to Lua
