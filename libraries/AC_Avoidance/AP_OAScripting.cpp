@@ -107,13 +107,13 @@ bool AP_OAScripting::find_threats(const Location &start_loc, const Location &end
 }
 
 // As find_threats(), but fences only - see the header comment for why this exists.
+#if AP_FENCE_ENABLED
 bool AP_OAScripting::find_fence_threats(const Location &start_loc, const Location &end_loc, float lookahead_m,
                                             // Return values
                                             float       &distance_m,
                                             OAObstacle  &any_obstacle
                                             ) const
 {
-#if AP_FENCE_ENABLED
     // convert start and end to offsets from EKF origin - same conversion find_threats()
     // does, duplicated here rather than shared because a fence-only caller has no
     // reason to also pay for the avoidance/OADB Vector3f conversion find_threats() does.
@@ -136,15 +136,23 @@ bool AP_OAScripting::find_fence_threats(const Location &start_loc, const Locatio
         any_obstacle = obstacle;
         return true;
     }
+    return false;
+}
 #else
+bool AP_OAScripting::find_fence_threats(const Location &start_loc, const Location &end_loc, float lookahead_m,
+                                            // Return values
+                                            float       &distance_m,
+                                            OAObstacle  &any_obstacle
+                                            ) const
+{
     (void)start_loc;
     (void)end_loc;
     (void)lookahead_m;
     (void)distance_m;
     (void)any_obstacle;
-#endif
     return false;
 }
+#endif // AP_FENCE_ENABLED
 
 // Shared fence-only search behind find_threats() and find_fence_threats(): every
 // polygon/circle fence category, checked along the WHOLE start->end segment (not just
@@ -152,11 +160,11 @@ bool AP_OAScripting::find_fence_threats(const Location &start_loc, const Locatio
 // centimetres (the fence loader's native units) since both callers already convert to
 // that once for their own purposes. Returns lookahead_m unchanged (the "nothing closer
 // than this" sentinel both callers already use) when no fence is closer.
+#if AP_FENCE_ENABLED
 float AP_OAScripting::_find_fence_threats_NE(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm,
                                               float lookahead_m, OAObstacle &obstacle) const
 {
     float distance_m = lookahead_m;
-#if AP_FENCE_ENABLED
     const AC_Fence *fence = AC_Fence::get_singleton();
     if (fence == nullptr || !fence->enabled()) {
         return distance_m;
@@ -228,13 +236,18 @@ float AP_OAScripting::_find_fence_threats_NE(const Vector2f &start_NE_cm, const 
         _populate_fence_obstacle(obstacle, ObstacleType::FENCE_POLYGON_EXCLUSION);
         distance_m          = distance_new_m;
     }
+    return distance_m;
+}
 #else
+float AP_OAScripting::_find_fence_threats_NE(const Vector2f &start_NE_cm, const Vector2f &end_NE_cm,
+                                              float lookahead_m, OAObstacle &obstacle) const
+{
     (void)start_NE_cm;
     (void)end_NE_cm;
     (void)obstacle;
-#endif
-    return distance_m;
+    return lookahead_m;
 }
+#endif // AP_FENCE_ENABLED
 
 // Lua binding to find the nearest crewed aircraft (ObstacleType::CREWED_AIRCRAFT)
 // this is needed because avoiding aircraft is often a higher priority than avoiding other obstacles
@@ -284,9 +297,9 @@ bool AP_OAScripting::find_aircraft(const Location &vehicle_loc, const float look
 //
 // The fence loader stores its points/centres as NE offsets in cm from the EKF origin; that cm
 // frame is confined to this function - everything handed back to the caller (Lua) is in metres.
+#if AP_FENCE_ENABLED
 bool AP_OAScripting::fence_distance(const Location &loc, uint8_t fence_type, float &distance_m) const
 {
-#if AP_FENCE_ENABLED
     const AC_Fence *fence = AC_Fence::get_singleton();
     if (fence == nullptr || !fence->enabled()) {
         return false;
@@ -387,13 +400,16 @@ bool AP_OAScripting::fence_distance(const Location &loc, uint8_t fence_type, flo
     // subtracts the margin unconditionally rather than only on the clear side
     distance_m = closest_signed_m - fence->get_margin_ne_m();
     return true;
+}
 #else
+bool AP_OAScripting::fence_distance(const Location &loc, uint8_t fence_type, float &distance_m) const
+{
     (void)loc;
     (void)fence_type;
     (void)distance_m;
     return false;
-#endif
 }
+#endif // AP_FENCE_ENABLED
 
 #if AP_OA_SCRIPTING_OADB_ENABLED
 // Distance to objects in the AP_OADatabase
