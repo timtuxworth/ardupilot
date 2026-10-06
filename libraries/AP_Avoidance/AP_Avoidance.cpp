@@ -928,7 +928,8 @@ bool AP_Avoidance::is_adsb_aircraft(uint8_t emitter_type)
 // caller's vertical gate, whereas this uses the per-emitter table.
 float AP_Avoidance::distance_to_obstacle(const Vector3f &start_NED_m, const Vector3f &end_NED_m,
                                             // return values
-                                            Obstacle &avoid_obstacle
+                                            Obstacle &avoid_obstacle,
+                                            bool has_exclude_src_id, uint32_t exclude_src_id
                                         ) const
 {
     // guard the obstacle database against concurrent updates from the MAVLink thread
@@ -953,6 +954,12 @@ float AP_Avoidance::distance_to_obstacle(const Vector3f &start_NED_m, const Vect
         // is_parked()'s header comment for why this can't just be left for the caller to
         // reject after the fact
         if (is_parked(obstacle)) {
+            continue;
+        }
+        // the caller's explicitly-excluded contact (see this function's header comment) -
+        // identity, not geometry, so it is skipped regardless of where it is relative to
+        // the path
+        if (has_exclude_src_id && obstacle.src_id == exclude_src_id) {
             continue;
         }
         const Location obstacle_loc     = _obstacles[i]._location;

@@ -120,8 +120,14 @@ public:
     // For AP_AOScripting to check for obstacles
     float get_obstacle_radius_m(uint8_t emitter_type) const;
     float get_obstacle_height_m(uint8_t emitter_type) const;
+    // exclude_src_id, when has_exclude_src_id is true, skips one specific contact - used to
+    // re-search for a DIFFERENT conflicting contact after the single-winner comparison below
+    // picked one that a caller has since dismissed (e.g. a wide-radius aircraft that turned
+    // out to be opening can otherwise mask a still-closing, smaller-radius drone on the same
+    // tested path).
     float distance_to_obstacle(const Vector3f &start_NED_m, const Vector3f &end_NED_m,
-                                Obstacle &avoid_obstacle
+                                Obstacle &avoid_obstacle,
+                                bool has_exclude_src_id = false, uint32_t exclude_src_id = 0
                                 ) const;
     float distance_to_aircraft(const Vector3f &vehicle_NED_m, const float lookahead_m, const float vertical_lookahead_m,
                                 // return values

@@ -92,6 +92,18 @@ public:
                                     OAObstacle  &aircraft_obstacle
                             ) const;
 
+    // As find_threats(), but AP_Avoidance (ADS-B/MAVLink) contacts only, and excluding one
+    // specific contact by its src_id. For re-checking whether a DIFFERENT contact is still a
+    // conflict on this path after the caller has dismissed the single-winner result of an
+    // earlier find_threats() call as non-conflicting - see AP_Avoidance::distance_to_obstacle()'s
+    // header comment for why that dismissal alone is not enough.
+    bool find_threats_excluding(const Location &start_loc, const Location &end_loc, float lookahead_m,
+                                                int32_t exclude_src_id,
+                                                // Return values
+                                                float       &distance_m,
+                                                OAObstacle  &any_obstacle
+                                                ) const;
+
     // closest distance (metres) from a location to the nearest fence boundary edge.  For Lua so
     // the AVOIDING message can report a real distance to a fence obstacle (which, unlike ADS-B
     // point obstacles, has no single usable "location").  fence_type scopes the search to the
@@ -106,7 +118,8 @@ private:
 
     static AP_OAScripting *_singleton;
 
-    float _distance_to_avoidance(const Vector3f &start_NED_m, const Vector3f &end_NED_m, OAObstacle &script_obstacle) const;
+    float _distance_to_avoidance(const Vector3f &start_NED_m, const Vector3f &end_NED_m, OAObstacle &script_obstacle,
+                                    bool has_exclude_src_id = false, uint32_t exclude_src_id = 0) const;
     // Shared by find_threats() and find_fence_threats(): the fence-only portion of the
     // search (every polygon/circle fence category), taking NE offsets in CENTIMETRES
     // (the fence loader's native units) rather than Locations, since both callers
