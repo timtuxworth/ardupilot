@@ -66,7 +66,7 @@ public:
 
 #if AP_OA_SCRIPTING_ENABLED
         uint8_t  emitter_type;
-#endif
+#endif // AP_OA_SCRIPTING_ENABLED
         Location _location;
         Vector3f _velocity_ned_ms;
 
@@ -88,7 +88,7 @@ public:
                       const Vector3f &vel_ned_ms
 #if AP_OA_SCRIPTING_ENABLED
                       , const uint8_t emitter_type
-#endif
+#endif // AP_OA_SCRIPTING_ENABLED
                       );
 
     void add_obstacle(uint32_t obstacle_timestamp_ms,
@@ -100,7 +100,7 @@ public:
                       float vspeed
 #if AP_OA_SCRIPTING_ENABLED
                       , uint8_t emitter_type
-#endif
+#endif // AP_OA_SCRIPTING_ENABLED
                       );
 
     // update should be called at 10hz or higher
@@ -140,7 +140,7 @@ public:
     // its keep-out radius is often larger than a genuinely airborne threat's, so leaving it in
     // the candidate pool can let it win the single-closest-obstacle search and mask a real one.
     bool is_parked(const Obstacle &obstacle) const;
-#endif
+#endif // AP_OA_SCRIPTING_ENABLED
 
     // for holding parameters
     static const struct AP_Param::GroupInfo var_info[];

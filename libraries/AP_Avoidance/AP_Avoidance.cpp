@@ -213,7 +213,7 @@ void AP_Avoidance::init(void)
     // the scripting-thread readers walk _obstacles[]; publish the allocation under
     // the same semaphore they take
     WITH_SEMAPHORE(_rsem);
-#endif
+#endif // AP_OA_SCRIPTING_ENABLED
     if (_obstacles == nullptr) {
         _obstacles = NEW_NOTHROW AP_Avoidance::Obstacle[_obstacles_max];
 
@@ -267,7 +267,7 @@ void AP_Avoidance::deinit(void)
         _obstacles_allocated = 0;
         handle_recovery(RecoveryAction::RTL);
     }
-#endif
+#endif // AP_OA_SCRIPTING_ENABLED
 }
 
 bool AP_Avoidance::check_startup()
@@ -293,7 +293,7 @@ void AP_Avoidance::add_obstacle(const uint32_t obstacle_timestamp_ms,
                                 const Vector3f &vel_ned_ms
 #if AP_OA_SCRIPTING_ENABLED
                                 , const uint8_t emitter_type
-#endif
+#endif // AP_OA_SCRIPTING_ENABLED
                                 )
 {
     if (! check_startup()) {
@@ -341,7 +341,7 @@ void AP_Avoidance::add_obstacle(const uint32_t obstacle_timestamp_ms,
 
 #if AP_OA_SCRIPTING_ENABLED
     _obstacles[index].emitter_type = emitter_type;
-#endif
+#endif // AP_OA_SCRIPTING_ENABLED
     _obstacles[index]._location = loc;
     _obstacles[index]._velocity_ned_ms = vel_ned_ms;
     _obstacles[index].timestamp_ms = obstacle_timestamp_ms;
@@ -356,7 +356,7 @@ void AP_Avoidance::add_obstacle(const uint32_t obstacle_timestamp_ms,
                                 const float speed_d_ms
 #if AP_OA_SCRIPTING_ENABLED
                                 , const uint8_t emitter_type
-#endif
+#endif // AP_OA_SCRIPTING_ENABLED
                                 )
 {
     Vector3f vel_ned_ms;
@@ -367,7 +367,7 @@ void AP_Avoidance::add_obstacle(const uint32_t obstacle_timestamp_ms,
     return add_obstacle(obstacle_timestamp_ms, src, src_id, loc, vel_ned_ms
 #if AP_OA_SCRIPTING_ENABLED
                         , emitter_type
-#endif
+#endif // AP_OA_SCRIPTING_ENABLED
                         );
 }
 
@@ -392,7 +392,7 @@ void AP_Avoidance::get_adsb_samples()
                    -vehicle.info.ver_velocity * 0.01   // convert cm-up to m-down
 #if AP_OA_SCRIPTING_ENABLED
                    , vehicle.info.emitter_type
-#endif
+#endif // AP_OA_SCRIPTING_ENABLED
                    );
     }
 }
@@ -554,7 +554,7 @@ void AP_Avoidance::handle_threat_gcs_notify(AP_Avoidance::Obstacle *threat)
         // the scripting queries copy the whole Obstacle under _rsem; take it here too,
         // or their copy can race this write
         WITH_SEMAPHORE(_rsem);
-#endif
+#endif // AP_OA_SCRIPTING_ENABLED
         threat->last_gcs_report_time = now;
     }
 
@@ -604,7 +604,7 @@ void AP_Avoidance::check_for_threats()
     // _obstacle_count moves.  Scoped to the loop: the mode-changing avoidance handlers
     // run later, in update(), and must not be called holding this.
     WITH_SEMAPHORE(_rsem);
-#endif
+#endif // AP_OA_SCRIPTING_ENABLED
     _current_most_serious_threat = -1;
     for (uint8_t i=0; i<_obstacle_count; i++) {
 
@@ -639,7 +639,7 @@ AP_Avoidance::Obstacle *AP_Avoidance::most_serious_threat()
     if (_current_most_serious_threat < 0
 #if AP_OA_SCRIPTING_ENABLED
         || _obstacles == nullptr  // a scripting-thread reader can race a deinit()
-#endif
+#endif // AP_OA_SCRIPTING_ENABLED
         ) {
         // we *really_ should not have been called!
         return nullptr;
@@ -747,7 +747,7 @@ void AP_Avoidance::handle_msg(const mavlink_message_t &msg)
                  vel_ned_ms
 #if AP_OA_SCRIPTING_ENABLED
                  , static_cast<uint8_t>(ADSB_EMITTER_TYPE_UAV)
-#endif
+#endif // AP_OA_SCRIPTING_ENABLED
                  );
 }
 
