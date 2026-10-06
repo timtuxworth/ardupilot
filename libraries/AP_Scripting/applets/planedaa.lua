@@ -645,6 +645,7 @@ local function configure_modules()
     loiteralt.configure({
         loiter_cool_ms      = PARAM.LTR_COOL_S:get() * 1000,
         wp_loiter_rad_m     = wp_loiter_rad_m,
+        margin_fence_m      = margin_fence_m,
     })
 end
 
@@ -827,6 +828,7 @@ local function init_modules()
         get_mode_string         = get_mode_string,
         mavlink_wrappers        = mavlink_wrappers,
         clamp_alt_to_fence      = core.clamp_alt_to_fence,
+        nearest_fence_clearance_m = obstacles.nearest_fence_clearance_m,
     })
 
     -- Now that every module exists, push the cached parameter values into all of them.
