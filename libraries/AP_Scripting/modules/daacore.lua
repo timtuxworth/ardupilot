@@ -1245,6 +1245,12 @@ function DAAcore.new(deps)
         if last_aircraft_obstacle ~= nil and ts_ms == last_aircraft_ts_ms
                 and aircraft_obstacle:src_id() == last_aircraft_sysid
                 and aircraft_obstacle:icao_code() == last_aircraft_icao then
+            -- The de-bounce only means the FIX is unchanged; ownship keeps moving between
+            -- fixes, and distance_xy/distance_z feed the NMAC/LoWC alert and the trap's
+            -- "moving" classification, so refresh them from the current position each
+            -- cycle rather than leaving them frozen at the last fresh fix.
+            last_aircraft_obstacle.distance_xy = last_aircraft_obstacle.location:get_distance(current_loc)
+            last_aircraft_obstacle.distance_z  = math.abs(last_aircraft_obstacle.location:get_distance_NED(current_loc):z())
             aircraft_avoiding = last_aircraft_obstacle
             return
         end
