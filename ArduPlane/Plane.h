@@ -309,7 +309,7 @@ private:
 
 #if AP_OA_SCRIPTING_ENABLED
     AP_OAScripting aoscripting;
-#endif
+#endif // AP_OA_SCRIPTING_ENABLED
 
     ModeCircle mode_circle;
     ModeStabilize mode_stabilize;
