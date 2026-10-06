@@ -77,7 +77,7 @@ function bind_add_param(name, idx, default_value)
 end
 
 -- setup follow mode specific parameters
-assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 40), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
+assert(param:add_table(PARAM_TABLE_KEY, PARAM_TABLE_PREFIX, 41), SCRIPT_NAME_SHORT .. ' could not add param table: ' .. PARAM_TABLE_PREFIX .. " key: " .. PARAM_TABLE_KEY)
 
 -- Every parameter this applet binds lives in this one table rather than in a global each.
 -- The cached locals further down are what the code actually reads; these objects are only touched when parameters are refreshed.
@@ -451,6 +451,17 @@ PARAM.NMAC_UAV_XY = bind_add_param('NMAC_UAV_XY', 39, 15)
 --]]
 PARAM.NMAC_UAV_Z = bind_add_param('NMAC_UAV_Z', 40, 8)
 
+--[[
+    // @Param: DAA_LTR_SIDE
+    // @DisplayName: Aircraft loiter turn-away quadrant
+    // @Description: The aircraft loiter-to-altitude (DAA_AVD_ALT) normally always loiters right. If the crewed aircraft that triggered it lies within this many degrees to the right of straight ahead (0 = dead ahead), loiter LEFT instead, so the turn banks away from the aircraft's side rather than across its nose. 0 disables this and always loiters right.
+    // @Units: deg
+    // @Range: 0 180
+    // @Increment: 5
+    // @User: Advanced
+--]]
+PARAM.LTR_SIDE = bind_add_param('LTR_SIDE', 41, 60)
+
 PARAM.AVD_ENABLE                  = bind_param("AVD_ENABLE")
 PARAM.AVD_WCLR_XY                 = bind_param("AVD_WCLR_XY")
 PARAM.AVD_WCLR_Z                  = bind_param("AVD_WCLR_Z")
@@ -490,6 +501,7 @@ local wp_loiter_rad_m       = math.abs(PARAM.WP_LOITER_RAD:get())
 local wp_radius_m           = math.abs(PARAM.WP_RADIUS:get())
 local crewed_avoid_alt_m    = PARAM.AVD_ALT:get()
 local crewed_avoid_alt_frame = PARAM.AVD_ALT_TP:get()
+local loiter_side_deg       = PARAM.LTR_SIDE:get()
 local daa_alert             = PARAM.AVD_ALERT:get()
 local daa_action            = PARAM.AVD_ACTION:get()
 local well_clear_xy         = PARAM.AVD_WCLR_XY:get()
@@ -756,6 +768,7 @@ local function get_vehicle_state()
         if margin_fence_m <= 0 then margin_fence_m = fence_margin_fallback_m() end
         crewed_avoid_alt_m    = PARAM.AVD_ALT:get()
         crewed_avoid_alt_frame  = PARAM.AVD_ALT_TP:get()
+        loiter_side_deg       = PARAM.LTR_SIDE:get()
         daa_alert             = PARAM.AVD_ALERT:get()
         daa_action            = PARAM.AVD_ACTION:get()
 
@@ -1417,7 +1430,19 @@ local DAA = {
         -- assess_obstacle_motion() so the CPA work is skipped when the loiter is off.
         elseif aircraft_avoiding ~= nil and crewed_avoid_alt_m > 0
                 and core.assess_aircraft_conflict(aircraft_avoiding).is_conflict then
-            if loiteralt.start(crewed_avoid_alt_m, crewed_avoid_alt_frame, true, airspeed_ms, navigation_target_loc) then
+            -- Default to the right, as before; DAA_LTR_SIDE > 0 turns left instead when the
+            -- aircraft lies in the quadrant from dead ahead to that many degrees right of
+            -- straight ahead, so the loiter turn banks away from its side rather than
+            -- across its nose.
+            local loiter_right = true
+            if loiter_side_deg > 0 and aircraft_avoiding.location ~= nil then
+                local bearing_to_aircraft_deg = math.deg(current_loc:get_bearing(aircraft_avoiding.location))
+                local relative_bearing_deg    = wrap_180(bearing_to_aircraft_deg - ground_course_deg)
+                if relative_bearing_deg >= 0 and relative_bearing_deg <= loiter_side_deg then
+                    loiter_right = false
+                end
+            end
+            if loiteralt.start(crewed_avoid_alt_m, crewed_avoid_alt_frame, loiter_right, airspeed_ms, navigation_target_loc) then
                 gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(" LOITER AIRCRAFT: %s", aircraft_avoiding.label))
 
                 gcs:send_named_string("DAA-AVOID", "LOITER")
