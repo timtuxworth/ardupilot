@@ -393,6 +393,20 @@ function DAAobstacles.new()
         return classify_threat(distance_m, any_obstacle, wind_ms)
     end
 
+    -- As find_closest_obstacle(), excluding one specific contact by its AP_Avoidance src_id
+    -- (obstacle.sysid). Used to re-check for a DIFFERENT, still-conflicting contact after a
+    -- caller has dismissed find_closest_obstacle()'s single-winner result as non-conflicting -
+    -- see resolve_moving_bearing()'s header comment in daacore.lua for why that dismissal
+    -- alone can otherwise mask a second real threat.
+    local function find_closest_obstacle_excluding(loc1, loc2, lookahead_m, wind_ms, exclude_src_id)
+        local bearing_deg   = math.deg(loc1:get_bearing(loc2))
+        local loc1_shifted  = loc1:copy()
+        loc1_shifted:offset_bearing(bearing_deg, 1)
+        local distance_m, any_obstacle =
+                OAScripting:find_threats_excluding(loc1_shifted, loc2, lookahead_m, exclude_src_id)
+        return classify_threat(distance_m, any_obstacle, wind_ms)
+    end
+
     -- Fence-only variant of find_closest_obstacle() - immune to being masked by a
     -- moving obstacle (ADS-B/MAVLink traffic) that happens to be closer along the same
     -- line. detect_impl()'s fence-only sweep and release validation use this so a
@@ -420,6 +434,7 @@ function DAAobstacles.new()
     self.nearest_fence_clearance_m = nearest_fence_clearance_m
     self.get_standoff             = get_standoff
     self.find_closest_obstacle    = find_closest_obstacle
+    self.find_closest_obstacle_excluding = find_closest_obstacle_excluding
     self.find_closest_fence       = find_closest_fence
     self.is_fence_obstacle        = is_fence_obstacle
 

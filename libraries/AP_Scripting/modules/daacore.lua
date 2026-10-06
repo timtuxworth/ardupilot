@@ -1503,11 +1503,20 @@ function DAAcore.new(deps)
     -- the heading so we track a smooth path instead of wiggling as the obstacle (and the
     -- instantaneous geometry) moves; refine_avoidance_bearing() also logs the DAAS smoothing
     -- trace each cycle.
+    -- Fourth return value `dismissed_obstacle` is the contact just dropped as non-conflicting
+    -- (nil otherwise) - find_closest_obstacle()'s single-winner comparison (AP_Avoidance::
+    -- distance_to_obstacle()) can let a wide-radius contact (e.g. a crewed aircraft's
+    -- AVD_WCLR_XY) outrank a smaller-radius one (e.g. a drone) on the very same tested path,
+    -- so dismissing the winner here does not mean the path is actually clear - a second,
+    -- independently-conflicting contact can have been masked behind it the whole time.
+    -- validate_horizontal_release() uses this identity to re-probe excluding just the
+    -- dismissed contact, rather than accepting the release on its say-so alone.
     local function resolve_moving_bearing(bearing_deg, target_loc, best_bearing_deg, best_distance_m)
         -- resist_fence_bearing_change()'s reversal latch is fence-specific state: clear it
         -- whenever the resolver switches to a moving obstacle instead, so it cannot survive
         -- stale into a later, unrelated fence episode.
         reversal_target_sign = nil
+        local dismissed_candidate = obstacle_avoiding
         local motion = assess_obstacle_motion(obstacle_avoiding)
         if not motion.is_conflict then
             -- the obstacle is leaving (opening range, predicted miss beyond its keep-out
@@ -1518,12 +1527,12 @@ function DAAcore.new(deps)
             -- extra (slew-limited) heading reversals, which is the safe trade.
             obstacle_avoiding       = nil
             reset_horizontal_avoidance()
-            return best_bearing_deg, best_distance_m, true
+            return best_bearing_deg, best_distance_m, true, dismissed_candidate
         end
         best_bearing_deg, best_distance_m = refine_avoidance_bearing(
             bearing_deg, best_bearing_deg, best_distance_m, motion, obstacle_avoiding, target_loc)
         last_avoid_bearing_deg  = best_bearing_deg
-        return best_bearing_deg, best_distance_m, false
+        return best_bearing_deg, best_distance_m, false, nil
     end
 
     -- Project a real continuation of the aircraft's CURRENT bank for VALIDATE_PROJECTION_S
@@ -1591,8 +1600,34 @@ function DAAcore.new(deps)
     --
     -- Fourth return value `held` is for DAAR diagnostics only (see detect_impl()'s own
     -- DAAR block) - nothing in the resolution logic itself reads it.
-    local function validate_horizontal_release(target_loc, candidate_bearing_deg, candidate_distance_m)
+    --
+    -- direct_bearing_deg/dismissed_obstacle are only non-nil the cycle resolve_moving_bearing()
+    -- dismissed a moving obstacle as non-conflicting (see its own header comment). Re-probe the
+    -- same path excluding just that contact's identity before trusting the dismissal: a
+    -- wide-radius contact can have masked a different, still-conflicting one behind it the
+    -- whole time, and nothing else ever looks for that second contact once the first is gone.
+    local function validate_horizontal_release(target_loc, candidate_bearing_deg, candidate_distance_m,
+                                                direct_bearing_deg, dismissed_obstacle)
         local near_loc = project_current_trajectory(target_loc)
+
+        if dismissed_obstacle ~= nil then
+            local _, masked_obstacle = obstacles.find_closest_obstacle_excluding(
+                    current_loc, near_loc, detect_m, wind_speed, dismissed_obstacle.sysid)
+            if masked_obstacle ~= nil then
+                local motion = assess_obstacle_motion(masked_obstacle)
+                if motion.is_conflict then
+                    -- a second, independently-conflicting contact - adopt it rather than
+                    -- releasing. obstacle_avoiding is reassigned by the caller from this
+                    -- function's third return value, same as it already is for a fence.
+                    local resumed_bearing_deg, resumed_distance_m = refine_avoidance_bearing(
+                            direct_bearing_deg, candidate_bearing_deg, candidate_distance_m,
+                            motion, masked_obstacle, target_loc)
+                    last_avoid_bearing_deg = resumed_bearing_deg
+                    return resumed_bearing_deg, resumed_distance_m, masked_obstacle, false
+                end
+            end
+        end
+
         local _, fence_obstacle =
                 obstacles.find_closest_fence(current_loc, near_loc, detect_m, wind_speed)
 
@@ -1720,11 +1755,12 @@ function DAAcore.new(deps)
             or obstacle_type == OBSTACLE_TYPE.FENCE_ALT_MIN)
 
         local gone = false
+        local dismissed_obstacle = nil
         if obstacle_avoiding ~= nil and is_fence then
             best_bearing_deg, best_distance_m =
                     resolve_fence_bearing(target_loc, best_bearing_deg, best_distance_m)
         elseif obstacle_avoiding ~= nil then
-            best_bearing_deg, best_distance_m, gone =
+            best_bearing_deg, best_distance_m, gone, dismissed_obstacle =
                     resolve_moving_bearing(bearing_deg, target_loc, best_bearing_deg, best_distance_m)
             if gone then
                 obstacle_avoiding = nil
@@ -1753,7 +1789,8 @@ function DAAcore.new(deps)
             -- checked against reality before being accepted.
             local resolved_bearing_deg, resolved_distance_m, resolved_obstacle
             resolved_bearing_deg, resolved_distance_m, resolved_obstacle, held =
-                    validate_horizontal_release(target_loc, best_bearing_deg, best_distance_m)
+                    validate_horizontal_release(target_loc, best_bearing_deg, best_distance_m,
+                                                 bearing_deg, dismissed_obstacle)
             if was_release_candidate or resolved_obstacle ~= nil then
                 -- A genuine release (fence confirmed clear too - resolved_obstacle is
                 -- nil), a release the fence just vetoed, OR the fence overriding an
