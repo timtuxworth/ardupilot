@@ -860,6 +860,7 @@ local DAA = {
     local trap_trigger_ms       = uint32_t(0)   -- when the failsafe fired (for DAA_TRAP_CLR_S recovery)
     local trap_dynamic          = false         -- trap from a moving obstacle (recoverable) vs a fence (sticky)
     local trap_prev_mode        = -1            -- mode to restore on recovery
+    local trap_saved_guided_target_loc = nil    -- GUIDED destination to restore, if trap_prev_mode was GUIDED
     local trap_fs_mode          = -1            -- the failsafe mode we commanded
     local trap_hung             = false         -- trap from a hung avoidance (released when the mission moves on)
     local trap_noesc_warn_ms    = uint32_t(0)   -- throttle for the repeating "no escalation" CRITICAL
@@ -1615,6 +1616,10 @@ local DAA = {
             hung_nav_index = mission:get_current_nav_index()
         end
         trap_prev_mode  = mode_now
+        -- set_mode(GUIDED) on release always re-targets current position (Plane's
+        -- ModeGuided::_enter()), so a real GUIDED destination interrupted by the trap
+        -- would otherwise be silently lost - save it here to reissue in trap_release().
+        trap_saved_guided_target_loc = ((mode_now == PLANE_MODE.GUIDED) and vehicle:get_target_location()) or nil
         trap_fs_mode    = resolve_trap_mode(mode_now)
         trap_trigger_ms = now_ms
         if trap_fs_mode == mode_now then
@@ -1634,6 +1639,7 @@ local DAA = {
                 trap_noesc_warn_ms = now_ms
             end
             trap_prev_mode  = -1
+            trap_saved_guided_target_loc = nil
             trap_since_ms   = uint32_t(0)
             return false
         end
@@ -1644,6 +1650,7 @@ local DAA = {
             gcs:send_text(MAV_SEVERITY.CRITICAL, SCRIPT_NAME_SHORT .. string.format(
                 ": TRAPPED - %s refused", get_mode_string(trap_fs_mode)))
             trap_prev_mode  = -1
+            trap_saved_guided_target_loc = nil
             trap_since_ms   = uint32_t(0)
             return false
         end
@@ -1661,10 +1668,16 @@ local DAA = {
         if resumed then
             gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(
                 ": trap clear (%s) -> resume %s", reason, get_mode_string(trap_prev_mode)))
+            -- ModeGuided::_enter() just re-targeted current position; put back the real
+            -- destination the trap interrupted, if there was one.
+            if trap_prev_mode == PLANE_MODE.GUIDED and trap_saved_guided_target_loc ~= nil then
+                vehicle:set_target_location(trap_saved_guided_target_loc)
+            end
         else
             gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(
                 ": trap clear but resume %s REFUSED", get_mode_string(trap_prev_mode)))
         end
+        trap_saved_guided_target_loc = nil
         gcs:send_named_string("DAA-AVOID", "")
         trap_active   = false
         trap_since_ms = uint32_t(0)
