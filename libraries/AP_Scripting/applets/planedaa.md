@@ -419,7 +419,8 @@ degrees while the separation keeps shrinking. Symptomatically, avoidance that is
 _acquired_ at long range resolves with a small, smooth heading change, while the
 same aircraft acquiring the same traffic from inside the standoff produces a violent
 turn and still misses by less than the standoff. The startup check warns when
-`AVD_UAV_XY` is below `WP_LOITER_RAD`, which is a deliberately conservative proxy —
+`AVD_UAV_XY` is below the achievable turn radius at `ROLL_LIMIT_DEG`/`AIRSPEED_CRUISE`
+(falling back to `WP_LOITER_RAD` only if no cruise airspeed is configured yet) —
 see the turn-radius note above, and prefer sizing from `R ≈ v²/(g·tan φ)`.
 
 A worked case: flight `log_87` (2026-08-27) ran `AVD_UAV_XY 75` against
