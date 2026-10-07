@@ -1435,7 +1435,7 @@ local DAA = {
             -- straight ahead, so the loiter turn banks away from its side rather than
             -- across its nose.
             local loiter_right = true
-            if loiter_side_deg > 0 and aircraft_avoiding.location ~= nil then
+            if loiter_side_deg > 0 and current_loc ~= nil and aircraft_avoiding.location ~= nil then
                 local bearing_to_aircraft_deg = math.deg(current_loc:get_bearing(aircraft_avoiding.location))
                 local relative_bearing_deg    = wrap_180(bearing_to_aircraft_deg - ground_course_deg)
                 if relative_bearing_deg >= 0 and relative_bearing_deg <= loiter_side_deg then
