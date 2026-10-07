@@ -284,19 +284,24 @@ bool AP_OAScripting::find_aircraft(const Location &vehicle_loc, const float look
 }
 
 // signed clearance (metres) from a location to the nearest fence boundary edge — polygon or
-// circle, inclusion or exclusion. POSITIVE means clear (outside an exclusion fence, or inside
-// an inclusion fence); NEGATIVE means already in breach of that boundary. The boundary
-// SELECTED is still whichever is geometrically nearest by absolute distance (unchanged from
-// before this carried a sign) - only the sign attached to that selection is new, so an
-// existing caller that only cared about magnitude (e.g. the AVOIDING message) is unaffected
-// except in the rare already-breached case, where it now reports a true negative distance
-// instead of a misleading positive one.
-// Lets the AVOIDING message report a true distance for fence obstacles, which (unlike ADS-B
-// point obstacles) carry no single usable "location".  Returns true and sets distance_m if
-// any polygon/circle fence is loaded.
+// circle, inclusion or exclusion, home-centred radius too. POSITIVE means clear (outside an
+// exclusion fence, or inside an inclusion fence); NEGATIVE means already in breach of that
+// boundary. The boundary SELECTED is whichever is geometrically nearest by absolute distance.
+// Lets the AVOIDING message report a real distance for fence obstacles, which (unlike ADS-B
+// point obstacles) carry no single usable "location", and backs nearest_fence_clearance_m()'s
+// control-path use (the aircraft loiter's fence-awareness check).
 //
-// The fence loader stores its points/centres as NE offsets in cm from the EKF origin; that cm
-// frame is confined to this function - everything handed back to the caller (Lua) is in metres.
+// Point queries only: every AC_Fence::distance_line_to_*() call below is given (point, point)
+// rather than a real line segment, matching the stand-down checks in _find_fence_threats_NE()
+// (see its own comment). Built on AC_Fence's own distance_line_to_*() API - the same one
+// _find_fence_threats_NE() uses - rather than walking the polyfence loader's raw boundary
+// arrays directly, which this used to do and which could never see three things those queries
+// already get right: the home-centred radius fence (FENCE_RADIUS has no loaded-boundary
+// representation at all, only AC_Fence's own _circle_radius_m - distance_line_to_home_inclusion()
+// is the only query that reads it), FENCE_OPTIONS INCLUSION_UNION (distance_line_to_inclusion()
+// already treats inclusion circles and polygons as one combined query, as union semantics
+// require), and a stored-but-currently-disabled fence category (each distance_line_to_*() call
+// gates itself on AC_Fence::get_enabled_fences(), where the old per-array walk did not).
 #if AP_FENCE_ENABLED
 bool AP_OAScripting::fence_distance(const Location &loc, uint8_t fence_type, float &distance_m) const
 {
@@ -309,96 +314,71 @@ bool AP_OAScripting::fence_distance(const Location &loc, uint8_t fence_type, flo
         return false;
     }
     const Vector2f point_NE_cm(loc_NEU_m.x * 100.0f, loc_NEU_m.y * 100.0f);
-    const AC_PolyFence_loader &poly = fence->polyfence();
 
-    // as in find_threats(): the boundary arrays below can be freed and rebuilt by an
-    // in-flight fence upload, so hold the loader semaphore while walking them
+    // as in _find_fence_threats_NE(): the boundary arrays these queries walk can be freed and
+    // rebuilt by an in-flight fence upload, so hold the loader semaphore for all of them
     WITH_SEMAPHORE(fence->polyfence().get_loaded_fence_semaphore());
 
     // scope the search to the fence category the caller is avoiding, so the returned distance
     // belongs to the same kind of fence the AVOIDING message names (e.g. an "Excl. Circle" label
     // no longer reports the distance to a nearer inclusion polygon).  Any non-fence-category value
-    // (0/GENERAL, FENCE_LUA, ...) falls back to searching every polygon/circle fence.
+    // (0/GENERAL, FENCE_LUA, ...) falls back to searching every fence category.
     //
-    // FENCE_HOME folds into want_incl_circ, but the home-centred radius fence (FENCE_RADIUS)
-    // is not one of the polyfence loader's inclusion circles walked below - it has no
-    // loaded-boundary representation at all, only _circle_radius_m on AC_Fence itself. So a
-    // FENCE_HOME obstacle's distance can never actually be measured here: this falls through
-    // to reporting whichever OTHER inclusion circle happens to be loaded (or nothing).
-    // Reporting/logging only, not a control-path bug.
+    // FENCE_CIRCLE_INCLUSION and FENCE_POLYGON_INCLUSION both map onto the one
+    // distance_line_to_inclusion() query - they are inseparable once FENCE_OPTIONS
+    // INCLUSION_UNION is set, and _find_fence_threats_NE() tags an inclusion obstacle with
+    // one or the other from that SAME query's own out-parameter, so re-querying either way
+    // here is the identical source of truth, not a narrower one.
     typedef AP_OAScripting::ObstacleType OT;
     bool want_excl_poly = (fence_type == (uint8_t)OT::FENCE_POLYGON_EXCLUSION);
-    bool want_incl_poly = (fence_type == (uint8_t)OT::FENCE_POLYGON_INCLUSION);
+    bool want_incl       = (fence_type == (uint8_t)OT::FENCE_CIRCLE_INCLUSION
+                            || fence_type == (uint8_t)OT::FENCE_POLYGON_INCLUSION);
     bool want_excl_circ = (fence_type == (uint8_t)OT::FENCE_CIRCLE_EXCLUSION);
-    bool want_incl_circ = (fence_type == (uint8_t)OT::FENCE_CIRCLE_INCLUSION
-                           || fence_type == (uint8_t)OT::FENCE_HOME);
-    if (!(want_excl_poly || want_incl_poly || want_excl_circ || want_incl_circ)) {
-        want_excl_poly = want_incl_poly = want_excl_circ = want_incl_circ = true;
+    bool want_home      = (fence_type == (uint8_t)OT::FENCE_HOME);
+    if (!(want_excl_poly || want_incl || want_excl_circ || want_home)) {
+        want_excl_poly = want_incl = want_excl_circ = want_home = true;
     }
 
-    // closest_m tracks selection (by absolute magnitude, unchanged); closest_signed_m is the
-    // value actually returned, carrying the sign for whichever boundary closest_m selected.
+    // closest_m tracks selection (by absolute magnitude); closest_signed_m is the value
+    // actually returned, carrying the sign for whichever boundary closest_m selected. Each
+    // distance_line_to_*() call already subtracts the fence margin internally.
     float closest_m = FLT_MAX;
     float closest_signed_m = FLT_MAX;
 
-    // polygon fences (inclusion + exclusion): true geometric point-to-edge distance
-    Vector2f closest_vec_cm;
-    for (uint8_t i = 0; want_excl_poly && i < poly.get_exclusion_polygon_count(); i++) {
-        uint16_t num_points = 0;
-        const Vector2f *points = poly.get_exclusion_polygon(i, num_points);
-        if (points != nullptr && Polygon_closest_distance_point(points, num_points, point_NE_cm, closest_vec_cm)) {
-            const float dist_m = closest_vec_cm.length() * 0.01f;
-            if (dist_m < closest_m) {
-                closest_m = dist_m;
-                // exclusion: outside is clear (positive), inside is breach (negative)
-                closest_signed_m = Polygon_outside(point_NE_cm, points, num_points) ? dist_m : -dist_m;
-            }
+    if (want_home) {
+        const float d = fence->distance_line_to_home_inclusion(point_NE_cm, point_NE_cm);
+        if (fabsf(d) < closest_m) {
+            closest_m = fabsf(d);
+            closest_signed_m = d;
         }
     }
-    for (uint8_t i = 0; want_incl_poly && i < poly.get_inclusion_polygon_count(); i++) {
-        uint16_t num_points = 0;
-        const Vector2f *points = poly.get_inclusion_polygon(i, num_points);
-        if (points != nullptr && Polygon_closest_distance_point(points, num_points, point_NE_cm, closest_vec_cm)) {
-            const float dist_m = closest_vec_cm.length() * 0.01f;
-            if (dist_m < closest_m) {
-                closest_m = dist_m;
-                // inclusion: inside is clear (positive), outside is breach (negative)
-                closest_signed_m = Polygon_outside(point_NE_cm, points, num_points) ? -dist_m : dist_m;
-            }
+    if (want_incl) {
+        AC_PolyFenceType inclusion_type = AC_PolyFenceType::POLYGON_INCLUSION;
+        const float d = fence->distance_line_to_inclusion(point_NE_cm, point_NE_cm, inclusion_type);
+        if (fabsf(d) < closest_m) {
+            closest_m = fabsf(d);
+            closest_signed_m = d;
         }
     }
-
-    // circle fences (inclusion + exclusion): range-to-centre vs radius already carries the
-    // right sign for an exclusion circle (positive when outside); inclusion flips it.
-    Vector2f centre_cm;
-    float radius_m = 0.0f;
-    for (uint8_t i = 0; want_excl_circ && i < poly.get_exclusion_circle_count(); i++) {
-        if (poly.get_exclusion_circle(i, centre_cm, radius_m)) {
-            const float range_m = (point_NE_cm - centre_cm).length() * 0.01f;
-            const float dist_m = fabsf(range_m - radius_m);
-            if (dist_m < closest_m) {
-                closest_m = dist_m;
-                closest_signed_m = range_m - radius_m;
-            }
+    if (want_excl_circ) {
+        const float d = fence->distance_line_to_circle_exclusion(point_NE_cm, point_NE_cm);
+        if (fabsf(d) < closest_m) {
+            closest_m = fabsf(d);
+            closest_signed_m = d;
         }
     }
-    for (uint8_t i = 0; want_incl_circ && i < poly.get_inclusion_circle_count(); i++) {
-        if (poly.get_inclusion_circle(i, centre_cm, radius_m)) {
-            const float range_m = (point_NE_cm - centre_cm).length() * 0.01f;
-            const float dist_m = fabsf(range_m - radius_m);
-            if (dist_m < closest_m) {
-                closest_m = dist_m;
-                closest_signed_m = radius_m - range_m;
-            }
+    if (want_excl_poly) {
+        const float d = fence->distance_line_to_polygon_exclusion(point_NE_cm, point_NE_cm);
+        if (fabsf(d) < closest_m) {
+            closest_m = fabsf(d);
+            closest_signed_m = d;
         }
     }
 
     if (closest_m >= FLT_MAX) {
         return false;
     }
-    // matches AC_Fence's own distance_line_to_*() convention (AC_Fence.cpp), which
-    // subtracts the margin unconditionally rather than only on the clear side
-    distance_m = closest_signed_m - fence->get_margin_ne_m();
+    distance_m = closest_signed_m;
     return true;
 }
 #else
