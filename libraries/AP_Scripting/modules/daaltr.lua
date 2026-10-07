@@ -228,12 +228,18 @@ function DAAloiter.new(deps)
         else
             saved_guided_target_loc = nil
         end
+        -- Plane's DO_REPOSITION handler (handle_command_int_do_reposition()) picks orbit
+        -- direction from param4 (yaw), not the radius sign: zero/NaN is clockwise, any
+        -- nonzero value is counter-clockwise. A hardcoded 0 here flew every loiter
+        -- clockwise regardless of which side the centre was offset to - confirmed live,
+        -- an announced "LOITER left" swept +618 deg clockwise about its own centre.
+        local yaw = (direction == "right") and 0 or 1
         if mavlink_wrappers.set_vehicle_target_location({lat    = loiteralt_loc:lat(),
                                                         lng     = loiteralt_loc:lng(),
                                                         alt     = target_alt_m,
                                                         frame   = target_alt_frame,
                                                         radius  = radius_m,
-                                                        yaw     = 0,
+                                                        yaw     = yaw,
                                                         bitmask = MAV_DO_REPOSITION_FLAGS.CHANGE_MODE }) then
             self.active = true
             loiter_fail_since_ms = nil
