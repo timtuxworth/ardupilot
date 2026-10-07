@@ -4604,6 +4604,18 @@ OAScripting = {}
 ---@return OAObstacle_ud|nil obstacle -- the closest threat found
 function OAScripting:find_threats(start_loc, end_loc, lookahead_m) end
 
+-- As find_threats(), but AP_Avoidance (ADS-B/MAVLink) contacts only, excluding one
+-- specific contact by its src_id - for re-checking whether a DIFFERENT contact is still
+-- a conflict after the single-winner result of an earlier find_threats() call was
+-- dismissed as non-conflicting.
+---@param start_loc Location_ud -- Location of the start of the line
+---@param end_loc Location_ud -- Location of the end of the line to check
+---@param lookahead_m number -- the furthest distance out from the line to check
+---@param exclude_src_id integer -- src_id of the one contact to ignore
+---@return number|nil distance_min_m -- distance to the closest remaining threat found, or nil if none
+---@return OAObstacle_ud|nil obstacle -- the closest remaining threat found
+function OAScripting:find_threats_excluding(start_loc, end_loc, lookahead_m, exclude_src_id) end
+
 -- As find_threats(), but fences only - immune to being masked by a moving obstacle
 -- (ADS-B/MAVLink traffic) that happens to be closer along the same line. Checks the
 -- WHOLE line, not just its endpoint.
