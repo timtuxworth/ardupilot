@@ -1610,9 +1610,21 @@ function DAAcore.new(deps)
                                                 direct_bearing_deg, dismissed_obstacle)
         local near_loc = project_current_trajectory(target_loc)
 
-        if dismissed_obstacle ~= nil then
+        -- Fence check runs first and unconditionally: adopting a masked contact must never
+        -- pre-empt a fence that already blocks the resumed path - a masked-contact adoption
+        -- used to return before this check ever ran.
+        local _, fence_obstacle =
+                obstacles.find_closest_fence(current_loc, near_loc, detect_m, wind_speed)
+
+        if fence_obstacle == nil and dismissed_obstacle ~= nil then
+            -- Full detect_m range along the actual candidate bearing, not
+            -- project_current_trajectory()'s few-seconds physical projection above: a
+            -- masked contact can be 250-400m back behind a receding/opening aircraft (or
+            -- behind a second, still-opening one), well past a short-term projection but
+            -- still within the normal detection range every other check in this file uses.
+            local masked_end_loc = location_project(current_loc, candidate_bearing_deg, detect_m, target_loc)
             local _, masked_obstacle = obstacles.find_closest_obstacle_excluding(
-                    current_loc, near_loc, detect_m, wind_speed, dismissed_obstacle.sysid)
+                    current_loc, masked_end_loc, detect_m, wind_speed, dismissed_obstacle.sysid)
             if masked_obstacle ~= nil then
                 local motion = assess_obstacle_motion(masked_obstacle)
                 if motion.is_conflict then
@@ -1627,9 +1639,6 @@ function DAAcore.new(deps)
                 end
             end
         end
-
-        local _, fence_obstacle =
-                obstacles.find_closest_fence(current_loc, near_loc, detect_m, wind_speed)
 
         if fence_obstacle == nil then
             -- Genuinely clear of every fence on the path actually being flown.
