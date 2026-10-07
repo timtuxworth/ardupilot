@@ -9660,6 +9660,238 @@ return update()
                 "code paths disagree with each other")
         self.disarm_vehicle(force=True)
 
+    def PlaneDAALoiterTurnDirection(self):
+        '''A LEFT-announced aircraft loiter must actually orbit counter-clockwise, not
+        clockwise.  daaltr.lua's self.start() hardcoded DO_REPOSITION's yaw (param4) to 0
+        regardless of which side the centre was offset to - Plane's
+        handle_command_int_do_reposition() reads param4, not the radius sign, to choose
+        orbit direction (0/NaN = clockwise, nonzero = counter-clockwise), so every loiter
+        flew clockwise even when announced "LOITER left" and the centre was genuinely
+        offset to the left.  Confirmed live: an announced "LOITER left" swept +618 deg
+        clockwise about its own centre.
+
+        The default DAA_LTR_SIDE quadrant (60 deg, dead-ahead-to-60-right-of-ahead)
+        chooses LEFT; a contact placed 30 deg right of a due-north track lands inside
+        that quadrant.  Once "LOITERING to" fires, sample ATTITUDE.yaw for a few seconds
+        and sum the signed heading deltas (wrapped to +-180 each step): a left/CCW orbit
+        nets negative, right/CW nets positive.'''
+        self.install_planedaa_scripts()
+
+        self.set_parameters({
+            "SCR_ENABLE": 1,
+            "SCR_VM_I_COUNT": 1000000,
+            "ADSB_TYPE": 1,     # MAVLink: ingest ADSB_VEHICLE with no ADS-B hardware
+            "AVD_ENABLE": 1,
+            "AVD_WCLR_XY": 200,
+            "AVD_WCLR_Z": 50,
+        })
+
+        self.context_collect('STATUSTEXT')
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+
+        self.set_parameters({
+            "DAA_MARGIN_CA": 50,
+            "DAA_MARGIN_CA_Z": 30,
+            "DAA_AVD_ALT": 50,
+            "DAA_AVD_ALT_TP": 1,     # above home - keep the terrain frame out of this
+            "DAA_LTR_SIDE": 60,      # default: quadrant dead-ahead to 60 deg right -> LEFT
+        })
+
+        icao = 0xA5A5AB
+
+        def inject_aircraft():
+            # 30 deg right of the due-north mission track, comfortably inside the
+            # default 60 deg DAA_LTR_SIDE quadrant, well inside AVD_WCLR_XY (200 m)
+            here = self.get_location()
+            contact = self.offset_location_ne(here, 130, 75)   # bearing ~30 deg, ~150 m
+            self.mav.mav.adsb_vehicle_send(
+                icao,
+                int(contact.lat * 1e7),
+                int(contact.lng * 1e7),
+                mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
+                int(here.get_alt_m(AltFrame.ABSOLUTE) * 1000 + 10 * 1000),
+                0, 0, 0,
+                "GAJET07".encode("ascii"),
+                mavutil.mavlink.ADSB_EMITTER_TYPE_LIGHT,   # crewed -> loiter path
+                1, 65535, 1200,
+            )
+
+        self.start_flying_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 60),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 3000, 0, 80),
+            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+        ])
+        self.wait_current_waypoint(2, timeout=120)
+        self.wait_text("Plane DAA", check_context=True, timeout=60)
+
+        tstart = self.get_sim_time()
+        loitering = False
+        while self.get_sim_time() - tstart < 60 and not loitering:
+            inject_aircraft()
+            self.wait_heartbeat()
+            loitering = self.statustext_in_collections("LOITERING to") is not None
+        if not loitering:
+            raise NotAchievedException("the aircraft loiter never engaged")
+        if self.statustext_in_collections("LOITER left") is None:
+            raise NotAchievedException(
+                "loitering started but never announced LOITER left - did the default "
+                "DAA_LTR_SIDE quadrant not pick the left side as expected?")
+
+        # Let the vehicle actually close on and establish on the loiter circle before
+        # sampling - the turn immediately after "LOITERING to" is the APPROACH onto the
+        # circle (whichever way is the shorter turn onto the new heading), which is not
+        # the orbit direction itself and can be either sense regardless of the bug.
+        tstart = self.get_sim_time()
+        while self.get_sim_time() - tstart < 25:
+            inject_aircraft()
+            self.wait_heartbeat()
+
+        # Now sample yaw for a while and sum the signed per-step heading change. Keep
+        # injecting the contact so the loiter does not get released mid-sample.
+        net_deg = 0.0
+        last_yaw_deg = None
+        tstart = self.get_sim_time()
+        while self.get_sim_time() - tstart < 20:
+            inject_aircraft()
+            m = self.mav.recv_match(type='ATTITUDE', blocking=True, timeout=2)
+            if m is None:
+                continue
+            yaw_deg = math.degrees(m.yaw)
+            if last_yaw_deg is not None:
+                delta_deg = yaw_deg - last_yaw_deg
+                delta_deg = (delta_deg + 180.0) % 360.0 - 180.0
+                net_deg += delta_deg
+            last_yaw_deg = yaw_deg
+
+        self.progress("net heading change over sample window: %.1f deg" % net_deg)
+        if net_deg >= 0:
+            raise NotAchievedException(
+                "announced LOITER left but net heading change was %.1f deg (clockwise) - "
+                "the orbit direction does not match the announced side" % net_deg)
+        self.disarm_vehicle(force=True)
+
+    def PlaneDAALoiterHomeFenceOnly(self):
+        '''The aircraft loiter's fence-clearance check must see a home-centred radius
+        fence (FENCE_RADIUS/FENCE_TYPE bit AC_FENCE_TYPE_CIRCLE), not just loaded polygon
+        fences. AP_OAScripting::fence_distance() used to walk the polyfence loader's raw
+        boundary arrays directly, which have no representation of FENCE_RADIUS at all (it
+        lives only as AC_Fence's own _circle_radius_m) - so a home-circle-only setup left
+        nearest_fence_clearance_m() always nil, and the loiter proceeded on its default
+        side with no fence awareness whatsoever. Confirmed live: a loiter reached 1064 m
+        from home against a 1000 m fence this way.
+
+        Same geometry idea as PlaneDAALoiterFencePicksClearSide, but with ONLY a home
+        circle active (no polygon fence loaded) and sized so BOTH loiter-side offsets
+        breach it - the mission track runs due north from home, so the left and right
+        WP_LOITER_RAD-abeam candidate centres are (by symmetry) almost exactly
+        equidistant from home, and so is the fence's signed clearance to each. With the
+        fix, this must refuse ("no fence-clear side"), never announce a flip, and never
+        start the loiter. Pre-fix, this fence is invisible to the check and the loiter
+        just proceeds as if no fence existed at all.'''
+        self.install_planedaa_scripts()
+
+        self.set_parameters({
+            "SCR_ENABLE": 1,
+            "SCR_VM_I_COUNT": 1000000,
+            "ADSB_TYPE": 1,      # MAVLink: ingest ADSB_VEHICLE with no ADS-B hardware
+            "AVD_ENABLE": 1,
+            "AVD_WCLR_XY": 200,
+            "AVD_WCLR_Z": 50,
+            "FENCE_ENABLE": 0,   # enabled in flight so arming is unimpeded
+            "FENCE_ACTION": 0,   # report only
+            "FENCE_TYPE": 2,     # home circle ONLY - no polygon bit set
+            "WP_LOITER_RAD": 400,
+        })
+
+        self.context_collect('STATUSTEXT')
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+
+        self.set_parameters({
+            "DAA_MARGIN_CA": 50,
+            "DAA_MARGIN_CA_Z": 30,
+            "DAA_AVD_ALT": 50,
+            "DAA_AVD_ALT_TP": 1,     # above home - keep the terrain frame out of this
+            "DAA_MARGIN_FENCE": 20,
+        })
+
+        icao = 0xA5A5AC
+
+        def inject_aircraft():
+            here = self.get_location()
+            contact = self.offset_location_ne(here, 0, -120)
+            self.mav.mav.adsb_vehicle_send(
+                icao,
+                int(contact.lat * 1e7),
+                int(contact.lng * 1e7),
+                mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
+                int(here.get_alt_m(AltFrame.ABSOLUTE) * 1000 + 10 * 1000),
+                0, 0, 0,
+                "GAJET08".encode("ascii"),
+                mavutil.mavlink.ADSB_EMITTER_TYPE_LIGHT,   # crewed -> loiter path
+                1, 65535, 1200,
+            )
+
+        self.start_flying_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 60),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 3000, 0, 80),
+            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+        ])
+        self.do_fence_enable()
+        self.wait_text("Plane DAA", check_context=True, timeout=60)
+
+        # Size the home circle off the vehicle's REAL distance from home right now, not a
+        # guessed figure: "current waypoint is 2" (as PlaneDAALoiterFencePicksClearSide
+        # waits for) means "now navigating toward WP2", not "arrived at WP2's location" -
+        # the vehicle can still be close to home at that point.
+        #
+        # The loiter CENTRE itself (WP_LOITER_RAD abeam of the vehicle) must stay the
+        # SAME side of the real fence boundary Plane's own DO_REPOSITION sanitize already
+        # checks (handle_command_int_do_reposition()'s check_location_within_fence()) -
+        # otherwise that pre-existing core check rejects the centre outright
+        # ("set_vehicle FAILED"), which proves nothing about THIS fix (the orbit-aware
+        # clearance check, which is about the RADIUS around an otherwise-legal centre, not
+        # the centre point itself - see daaltr.lua's own comment on self.start()). So the
+        # centre's distance from home must stay just INSIDE FENCE_RADIUS (positive
+        # clearance), by less than the (WP_LOITER_RAD + DAA_MARGIN_FENCE) threshold.
+        wp_loiter_rad_m = 400
+        home = self.home_position_as_location()
+        here = self.get_location()
+        dist_from_home_m = self.get_distance(home, here)
+        # the abeam centre is ~sqrt(dist^2 + WP_LOITER_RAD^2) from home when dist is small
+        # relative to WP_LOITER_RAD (current heading ~= the home-to-WP2 radial)
+        centre_dist_m = math.sqrt(dist_from_home_m ** 2 + wp_loiter_rad_m ** 2)
+        # ~50 m clearance: comfortably positive (core sanitize passes) and well under
+        # the 420 m (WP_LOITER_RAD + DAA_MARGIN_FENCE) threshold
+        fence_radius_m = centre_dist_m + 50
+        self.set_parameter("FENCE_RADIUS", fence_radius_m)
+        self.progress("vehicle %.0f m from home, centre ~%.0f m from home - "
+                      "FENCE_RADIUS set to %.0f m"
+                      % (dist_from_home_m, centre_dist_m, fence_radius_m))
+
+        tstart = self.get_sim_time()
+        decided = False
+        while self.get_sim_time() - tstart < 60 and not decided:
+            inject_aircraft()
+            self.wait_heartbeat()
+            decided = (self.statustext_in_collections("LOITERING to") is not None
+                       or self.statustext_in_collections("no fence-clear side") is not None)
+
+        loitering = self.statustext_in_collections("LOITERING to") is not None
+        no_clear_side = self.statustext_in_collections("no fence-clear side") is not None
+        self.progress("loitering=%s, no_clear_side=%s" % (loitering, no_clear_side))
+
+        if loitering:
+            raise NotAchievedException(
+                "the loiter started even though only a home-circle fence is active and "
+                "both sides should breach it - fence_distance() still cannot see FENCE_RADIUS")
+        if not no_clear_side:
+            raise NotAchievedException(
+                "neither started the loiter nor announced a refusal - the contact was "
+                "never detected, so this test proves nothing")
+        self.disarm_vehicle(force=True)
+
     def PlaneDAAAircraftPreemptsAvoidance(self):
         '''Crewed traffic must be able to take over from an avoidance already in progress.
 
@@ -13632,6 +13864,8 @@ return update()
             Test(self.PlaneDAAAvdAltZeroNoLoiter),
             Test(self.PlaneDAALoiterFailNoState),
             Test(self.PlaneDAALoiterFencePicksClearSide),
+            Test(self.PlaneDAALoiterTurnDirection),
+            Test(self.PlaneDAALoiterHomeFenceOnly),
             Test(self.PlaneDAAAircraftPreemptsAvoidance),
             Test(self.PlaneDAAAircraftCpaGate),
             Test(self.PlaneDAAAircraftConverging),
