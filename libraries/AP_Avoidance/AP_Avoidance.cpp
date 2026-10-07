@@ -853,6 +853,11 @@ bool AP_Avoidance::is_parked(const Obstacle &obstacle) const
     if (_ground_alt_m <= 0) {
         return false;  // AVD_GND_ALT = 0 disables the exclusion entirely
     }
+    // only applies to contacts that are actually capable of flight - a fixed-hazard type like
+    // POINT_OBSTACLE is stationary at ground level by design and must never be exempted here
+    if (!is_adsb_aircraft(obstacle.emitter_type) && !is_adsb_uav(obstacle.emitter_type)) {
+        return false;
+    }
     const Location &home = AP::ahrs().get_home();
     // AP_ADSB/AP_Avoidance obstacle locations are always Location::AltFrame::ABSOLUTE, same as
     // home's own alt field, so this is a plain subtraction - no frame conversion needed.
