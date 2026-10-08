@@ -408,6 +408,17 @@ side keeps the committed side and the commanded bearing always consistent; a
 "pass behind" preference is still visible in the log (`DAAS.PsB`) but no longer
 overrides which side gets committed.
 
+### Known issue — a masked contact behind two dismissed contacts is not found
+
+When a wide-radius contact (typically a crewed aircraft) wins the single-closest-obstacle
+search and is then dismissed as non-conflicting (opening range, CPA beyond its keep-out),
+the release check re-probes the real path excluding that one contact's identity, so a
+smaller-radius contact masked behind it (e.g. a drone) is still found and avoided. This
+only excludes **one** identity at a time: a contact masked behind **two** independently-
+dismissed contacts on the same path is not found. Fixing this needs `find_threats_excluding()`
+to take a set of excluded identities rather than a single one - deferred as a separate,
+larger change (`project_planedaa_backlog` item 48).
+
 ### Sizing the traffic standoff
 
 The effective standoff held around a drone is `AVD_UAV_XY + DAA_MARGIN_UAV` (and
