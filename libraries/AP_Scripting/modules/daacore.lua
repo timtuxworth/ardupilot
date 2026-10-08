@@ -1601,44 +1601,61 @@ function DAAcore.new(deps)
     -- Fourth return value `held` is for DAAR diagnostics only (see detect_impl()'s own
     -- DAAR block) - nothing in the resolution logic itself reads it.
     --
-    -- direct_bearing_deg/dismissed_obstacle are only non-nil the cycle resolve_moving_bearing()
-    -- dismissed a moving obstacle as non-conflicting (see its own header comment). Re-probe the
-    -- same path excluding just that contact's identity before trusting the dismissal: a
-    -- wide-radius contact can have masked a different, still-conflicting one behind it the
-    -- whole time, and nothing else ever looks for that second contact once the first is gone.
+    -- dismissed_obstacle is only non-nil the cycle resolve_moving_bearing() dismissed a
+    -- moving obstacle as non-conflicting (see its own header comment). Re-probe the real
+    -- path about to be flown excluding just that contact's identity before trusting the
+    -- dismissal: a wide-radius contact can have masked a different, still-conflicting one
+    -- behind it the whole time, and nothing else ever looks for that second contact once
+    -- the first is gone.
+    --
+    -- Only ONE contact's identity is ever excluded here - a drone masked behind TWO
+    -- independently-opening contacts is a known, deliberately deferred gap (8th AI review
+    -- round): excluding more than one id needs find_threats_excluding() to take a set, not
+    -- a single src_id. See planedaa.md's "Known issues" and backlog item #48.
     local function validate_horizontal_release(target_loc, candidate_bearing_deg, candidate_distance_m,
                                                 direct_bearing_deg, dismissed_obstacle)
         local near_loc = project_current_trajectory(target_loc)
 
-        -- Fence check runs first and unconditionally: adopting a masked contact must never
-        -- pre-empt a fence that already blocks the resumed path - a masked-contact adoption
-        -- used to return before this check ever ran.
-        local _, fence_obstacle =
-                obstacles.find_closest_fence(current_loc, near_loc, detect_m, wind_speed)
+        -- The path actually about to be flown if avoidance releases: the DIRECT bearing
+        -- to the target, not candidate_bearing_deg - that can still carry the sweep's own
+        -- deviation from avoiding the very contact just dismissed this cycle, so a probe
+        -- along it can read clear while the real resumed leg, never probed, is not (8th AI
+        -- review round, finding 1). Distance and altitude follow the same turn-lead/
+        -- interpolation pattern probe_bearing() uses for every other probe segment in this
+        -- file - location_project() alone takes target_loc's altitude outright, which
+        -- exaggerates the slope on a climbing/descending leg.
+        local release_distance_m = math.min(detect_m, limit_distance(current_loc, target_loc, direct_bearing_deg))
+        local release_end_loc = location_project(current_loc, direct_bearing_deg, release_distance_m, target_loc)
+        interpolate_alt(release_end_loc, current_loc, target_loc, release_distance_m)
 
-        if fence_obstacle == nil and dismissed_obstacle ~= nil then
-            -- Full detect_m range along the actual candidate bearing, not
-            -- project_current_trajectory()'s few-seconds physical projection above: a
-            -- masked contact can be 250-400m back behind a receding/opening aircraft (or
-            -- behind a second, still-opening one), well past a short-term projection but
-            -- still within the normal detection range every other check in this file uses.
-            local masked_end_loc = location_project(current_loc, candidate_bearing_deg, detect_m, target_loc)
-            local _, masked_obstacle = obstacles.find_closest_obstacle_excluding(
-                    current_loc, masked_end_loc, detect_m, wind_speed, dismissed_obstacle.sysid)
-            if masked_obstacle ~= nil then
-                local motion = assess_obstacle_motion(masked_obstacle)
-                if motion.is_conflict then
-                    -- a second, independently-conflicting contact - adopt it rather than
-                    -- releasing. obstacle_avoiding is reassigned by the caller from this
-                    -- function's third return value, same as it already is for a fence.
-                    local resumed_bearing_deg, resumed_distance_m = refine_avoidance_bearing(
-                            direct_bearing_deg, candidate_bearing_deg, candidate_distance_m,
-                            motion, masked_obstacle, target_loc)
-                    last_avoid_bearing_deg = resumed_bearing_deg
-                    return resumed_bearing_deg, resumed_distance_m, masked_obstacle, false
-                end
+        local masked_obstacle = nil
+        if dismissed_obstacle ~= nil then
+            local _, found = obstacles.find_closest_obstacle_excluding(
+                    current_loc, release_end_loc, detect_m, wind_speed, dismissed_obstacle.sysid)
+            if found ~= nil and assess_obstacle_motion(found).is_conflict then
+                masked_obstacle = found
             end
         end
+
+        if masked_obstacle ~= nil then
+            -- a second, independently-conflicting contact - adopt it rather than
+            -- releasing. obstacle_avoiding is reassigned by the caller from this
+            -- function's third return value, same as it already is for a fence.
+            local resumed_bearing_deg, resumed_distance_m = refine_avoidance_bearing(
+                    direct_bearing_deg, candidate_bearing_deg, candidate_distance_m,
+                    assess_obstacle_motion(masked_obstacle), masked_obstacle, target_loc)
+            last_avoid_bearing_deg = resumed_bearing_deg
+            return resumed_bearing_deg, resumed_distance_m, masked_obstacle, false
+        end
+
+        -- Only reached once the real resumed path is confirmed clear of a masked
+        -- contact - a fence merely being somewhere "in range" must never short-circuit
+        -- past that check (8th AI review round, finding 2: the fence-first reorder
+        -- that fixed the previous round's ordering bug skipped the traffic check
+        -- entirely whenever any fence showed up at all, even one not actually blocking
+        -- anything).
+        local _, fence_obstacle =
+                obstacles.find_closest_fence(current_loc, near_loc, detect_m, wind_speed)
 
         if fence_obstacle == nil then
             -- Genuinely clear of every fence on the path actually being flown.
@@ -1665,9 +1682,39 @@ function DAAcore.new(deps)
             return obstacles.find_closest_fence(adjusted_loc, leg_loc, detect_m, wind_speed)
         end
 
+        -- A fence-driven bearing (held or freshly found below) was only ever checked
+        -- against fences - never against the masked contact, so it can walk straight
+        -- into the very conflict the dismissal was supposed to be re-checked for (8th AI
+        -- review round, finding 2: a held bearing of 90 deg crossed a masked drone's
+        -- keep-out by 50m while a fresh check would have picked 130 deg with +119m
+        -- clearance). Resolving a genuine compound conflict (fence AND masked traffic on
+        -- the same bearing) at the same time is out of scope here - adopting the traffic
+        -- avoidance is the safe default; see planedaa.md's "Known issues".
+        local function masked_contact_on_bearing(bearing_test_deg)
+            if dismissed_obstacle == nil then
+                return nil
+            end
+            local end_loc = location_project(current_loc, bearing_test_deg, detect_m, target_loc)
+            interpolate_alt(end_loc, current_loc, target_loc, detect_m)
+            local _, found = obstacles.find_closest_obstacle_excluding(
+                    current_loc, end_loc, detect_m, wind_speed, dismissed_obstacle.sysid)
+            if found ~= nil and assess_obstacle_motion(found).is_conflict then
+                return found
+            end
+            return nil
+        end
+
         if fence_hold_bearing_deg ~= nil then
             local held_distance_m, held_obstacle = fence_blocks_path(fence_hold_bearing_deg)
             if held_obstacle == nil then
+                local compound_obstacle = masked_contact_on_bearing(fence_hold_bearing_deg)
+                if compound_obstacle ~= nil then
+                    local resumed_bearing_deg, resumed_distance_m = refine_avoidance_bearing(
+                            direct_bearing_deg, fence_hold_bearing_deg, held_distance_m,
+                            assess_obstacle_motion(compound_obstacle), compound_obstacle, target_loc)
+                    last_avoid_bearing_deg = resumed_bearing_deg
+                    return resumed_bearing_deg, resumed_distance_m, compound_obstacle, false
+                end
                 return fence_hold_bearing_deg, held_distance_m, fence_obstacle, true
             end
         end
@@ -1714,6 +1761,15 @@ function DAAcore.new(deps)
 
         local resolved_bearing_deg, resolved_distance_m =
                 resolve_fence_bearing(target_loc, fresh_bearing_deg, fresh_distance_m)
+
+        local compound_obstacle = masked_contact_on_bearing(resolved_bearing_deg)
+        if compound_obstacle ~= nil then
+            local resumed_bearing_deg, resumed_distance_m = refine_avoidance_bearing(
+                    direct_bearing_deg, resolved_bearing_deg, resolved_distance_m,
+                    assess_obstacle_motion(compound_obstacle), compound_obstacle, target_loc)
+            last_avoid_bearing_deg = resumed_bearing_deg
+            return resumed_bearing_deg, resumed_distance_m, compound_obstacle, false
+        end
         return resolved_bearing_deg, resolved_distance_m, fence_obstacle, true
     end
 
