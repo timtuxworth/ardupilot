@@ -14008,7 +14008,6 @@ return update()
             Test(self.PlaneDAALoiterTurnDirection),
             Test(self.PlaneDAALoiterHomeFenceOnly),
             Test(self.PlaneDAAMaskedDroneBehindDismissedAircraft),
-            Test(self.PlaneDAAMaskedDroneBehindDismissedAircraft),
             Test(self.PlaneDAAAircraftPreemptsAvoidance),
             Test(self.PlaneDAAAircraftCpaGate),
             Test(self.PlaneDAAAircraftConverging),
