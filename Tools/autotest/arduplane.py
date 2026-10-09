@@ -8964,6 +8964,76 @@ return update()
         self.wait_current_waypoint(3, timeout=400)
         self.disarm_vehicle(force=True)
 
+    def PlaneDAAParkedAircraftGPSNoiseIgnored(self):
+        '''is_parked()'s exclusion must survive a single, isolated noisy "moving" sample
+        from an otherwise genuinely-parked contact - confirmed live: T2Cruza
+        (00000409.BIN, 2026-10-08) briefly avoided a parked Silverback (MAV_SYSID 30, no
+        ADS-B) because its direct MAVLink GLOBAL_POSITION_INT reported a momentary
+        nonzero ground velocity while its own GPS fix was still acquiring/settling - raw
+        GPS noise, not real motion, with none of the transponder-side filtering a real
+        ADS-B squawk often has. AVD_GND_DEB requires a fast reading to persist, not just
+        one sample, before the parked exclusion is withdrawn.
+
+        One contact, injected continuously; every 10th sample reports 5 m/s instead of
+        0 - isolated single-sample spikes, never two in a row, so they never accumulate a
+        continuous AVD_GND_DEB-long fast streak. Must never trigger any reaction, same
+        assertion as PlaneDAAParkedAircraftIgnored.'''
+        self.install_planedaa_scripts()
+
+        self.set_parameters({
+            "SCR_ENABLE": 1,
+            "SCR_VM_I_COUNT": 1000000,
+            "ADSB_TYPE": 1,
+            "AVD_ENABLE": 1,
+            "AVD_GND_ALT": 3,
+            "AVD_GND_SPD": 2,
+            "AVD_GND_DEB": 2,
+        })
+
+        self.context_collect('STATUSTEXT')
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+        self.set_parameter("DAA_TRAP_ACT", 1)  # non-default, so the "TRAPPED" check below has teeth
+
+        home = self.home_position_as_location()
+        parked_loc = self.offset_location_ne(home, 30, 0)
+        parked_icao = 0xF00093
+
+        self.start_flying_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 50),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 500, 0, 80),
+            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+        ])
+        self.wait_current_waypoint(2, timeout=120)
+        self.wait_text("Plane DAA", check_context=True, timeout=60)
+
+        sample_count = [0]
+
+        def inject():
+            sample_count[0] += 1
+            noisy = (sample_count[0] % 10 == 0)
+            self.mav.mav.adsb_vehicle_send(
+                parked_icao,
+                int(parked_loc.lat * 1e7),
+                int(parked_loc.lng * 1e7),
+                mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
+                int(home.get_alt_m(AltFrame.ABSOLUTE) * 1000),
+                0,
+                500 if noisy else 0,   # 5 m/s horizontal "velocity" on the noisy sample only
+                0,
+                "PARKED04".encode("ascii"),
+                mavutil.mavlink.ADSB_EMITTER_TYPE_SMALL,
+                1, 65535, 1200,
+            )
+
+        self.daa_watch_no_reaction(60, [
+            "AVOIDING", "LOITERING", "LOITER AIRCRAFT", "TRAPPED",
+            "Near Miss", "Loss of Well Clear",
+        ], inject)
+
+        self.wait_current_waypoint(3, timeout=400)
+        self.disarm_vehicle(force=True)
+
     def PlaneDAAStandoffNotDoubleCounted(self):
         '''The traffic standoff must be AVD_UAV_XY + DAA_MARGIN_UAV, as documented, not
         twice the radius plus the margin.
@@ -9905,7 +9975,7 @@ return update()
         target. A probe along the deviated bearing could read "clear" while the real
         resumed leg, never actually probed, was not - confirmed live via DAAR's FnlB
         field reading 12-48 deg off the drone's true bearing in earlier attempts at this
-        test. Fixed by probing the real direct path instead (10th AI review round).
+        test. Fixed by probing the real direct path instead.
 
         Reproduces exactly that: a crewed aircraft 300 m ahead (closing, so its wide
         radius wins and masks the drone, which is still 600+ m away at this point)
@@ -13999,6 +14069,7 @@ return update()
             Test(self.PlaneDAAParkedAircraftDoesNotMaskDrone),
             Test(self.PlaneDAAParkedAircraftIgnored),
             Test(self.PlaneDAAParkedDroneIgnored),
+            Test(self.PlaneDAAParkedAircraftGPSNoiseIgnored),
             Test(self.PlaneDAAStandoffNotDoubleCounted),
             Test(self.PlaneDAADroneCrossing),
             Test(self.PlaneDAAAircraftLoiterNoFlip),
