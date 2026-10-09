@@ -244,6 +244,7 @@ below), and the `FENCE_*` parameters for the altitude/geo fences.
 | `DAA_TRAP_CLR_S` | 4 | s | For a trap caused by a MOVING obstacle (drone/aircraft), resume the previous mode this long after the failsafe fired (if the obstacle has not passed, forward flight simply re-triggers it). A trap caused by a fixed obstacle (fence) is not auto-recovered — it is held until the pilot changes mode. |
 | `DAA_HUNG_ALRT_S` | 60 | s | Avoidance is **hung** when it has been running this long without the vehicle getting any closer to its navigation target. The classic case is a waypoint inside an exclusion-fence standoff: it cannot be reached while avoiding, so the mission pull and the fence push never reconcile and the vehicle orbits indefinitely — without ever breaching anything, which is why neither the autopilot's `FENCE_ACTION` nor the other two trap causes can see it. A hung avoidance raises a `HUNG` alert and then counts as a compromise for `DAA_TRAP_ACT`, so with the default `DAA_TRAP_ACT=0` this is **alert-only**. Set 0 to disable. |
 | `DAA_TRAP_ESC_ACT` | 2 | | Escalation action for when `DAA_TRAP_ACT` would command the mode the aircraft is ALREADY in (e.g. trapped mid-RTL with `DAA_TRAP_ACT=RTL`) — commanding it again would do nothing, so it escalates to this. `1`: RTL, `2`: QRTL, `3`: QLOITER, `4`: QLAND (VTOL options fall back to RTL). Set equal to `DAA_TRAP_ACT` to disable escalation. |
+| `DAA_LTR_SIDE` | 60 | deg | The aircraft loiter-to-altitude normally always loiters right. If the crewed aircraft that triggered it lies within this many degrees to the right of straight ahead (0 = dead ahead), loiter LEFT instead, so the turn banks away from the aircraft's side rather than across its nose. 0 disables this and always loiters right. |
 
 ## Tuning for your vehicle
 
@@ -442,7 +443,7 @@ smaller-radius contact masked behind it (e.g. a drone) is still found and avoide
 only excludes **one** identity at a time: a contact masked behind **two** independently-
 dismissed contacts on the same path is not found. Fixing this needs `find_threats_excluding()`
 to take a set of excluded identities rather than a single one - deferred as a separate,
-larger change (`project_planedaa_backlog` item 48).
+larger change.
 
 ### Sizing the traffic standoff
 
