@@ -201,7 +201,9 @@ commanded while the vehicle is in fixed-wing flight).
 The script adds the following `DAA_` parameters to control its behaviour. It also
 reuses the existing core `AVD_` parameters (`AVD_WCLR_XY`, `AVD_WCLR_Z`,
 `AVD_NMAC_XY`, `AVD_NMAC_Z`, etc.) that define the Well Clear and Near Mid-Air
-Collision volumes, and the `FENCE_*` parameters for the altitude/geo fences.
+Collision volumes, `AVD_GND_ALT`/`AVD_GND_SPD`/`AVD_GND_DEB` that exclude a parked
+or taxiing contact from avoidance (see _Parked and taxiing contacts are excluded_
+below), and the `FENCE_*` parameters for the altitude/geo fences.
 
 | Parameter | Default | Units | Description |
 |-----------|---------|-------|-------------|
@@ -407,6 +409,29 @@ obstacle" preference the geometry may separately favour. Committing to the flown
 side keeps the committed side and the commanded bearing always consistent; a
 "pass behind" preference is still visible in the log (`DAAS.PsB`) but no longer
 overrides which side gets committed.
+
+### Parked and taxiing contacts are excluded
+
+A traffic contact (crewed aircraft or MAVLink drone) is excluded from avoidance while its
+own altitude is within `AVD_GND_ALT` of home AND its groundspeed is below `AVD_GND_SPD` —
+i.e. it is parked or taxiing, not flying. Broadcasting an airborne emitter type is not
+evidence a contact is actually in the air: a real aircraft on the ground near a runway
+keeps reporting the same category it uses in flight. Without this exclusion, a stationary
+contact can win the single-closest-obstacle search purely because its keep-out radius
+(e.g. `AVD_WCLR_XY` for a crewed aircraft) is larger than a real threat's, masking that
+threat entirely. `AVD_GND_DEB` then requires a fast reading to be confirmed by a later
+sample, not just one, before the exclusion is withdrawn — a contact's reported groundspeed
+can read as nonzero for a few seconds purely from GPS noise while its own fix is still
+acquiring, and a raw MAVLink contact carries none of a real ADS-B squawk's transponder-side
+filtering of that noise.
+
+**Known limitation:** `AVD_GND_DEB`'s benefit-of-the-doubt window applies to any contact
+currently reading fast, including one that has never previously been seen parked — a
+genuinely fast, low-altitude contact can therefore be excluded for up to `AVD_GND_DEB` from
+the moment it is first detected, not just a contact recovering from a stationary state.
+Narrow and low severity (bounded by the window length, and by the altitude check excluding
+it outright once it climbs or moves far enough away), so left as a known limitation rather
+than tracked separately.
 
 ### Known issue — a masked contact behind two dismissed contacts is not found
 
