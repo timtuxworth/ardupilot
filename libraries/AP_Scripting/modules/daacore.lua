@@ -1558,9 +1558,9 @@ function DAAcore.new(deps)
 
     -- One shared release-validation path for every way a horizontal avoidance can lapse
     -- this cycle - the sweep finding nothing at all, or a moving obstacle opening up -
-    -- and, since round ten (00000196.BIN), also called every cycle a moving obstacle is
-    -- STILL the live winner, so a fence eroding underneath a long-running moving-obstacle
-    -- avoidance is not invisible until whatever cycle that avoidance happens to end on.
+    -- and also called every cycle a moving obstacle is STILL the live winner, so a fence
+    -- eroding underneath a long-running moving-obstacle avoidance is not invisible until
+    -- whatever cycle that avoidance happens to end on.
     -- Never called while a fence is the live winner - resolve_fence_bearing() already
     -- applies its own hysteresis in that case.
     --
@@ -1612,8 +1612,14 @@ function DAAcore.new(deps)
     -- independently-opening contacts is a known, deliberately deferred gap: excluding
     -- more than one id needs find_threats_excluding() to take a set, not a single
     -- src_id. See planedaa.md's "Known issues".
+    --
+    -- active_obstacle is only non-nil when a moving obstacle is STILL the live winner
+    -- this cycle (no dismissal happened - dismissed_obstacle and active_obstacle are
+    -- never both set). A fence candidate accepted here must not cross back into THIS
+    -- contact's own keep-out either, not just whatever got dismissed - see
+    -- candidate_blocked()'s own comment.
     local function validate_horizontal_release(target_loc, candidate_bearing_deg, candidate_distance_m,
-                                                direct_bearing_deg, dismissed_obstacle)
+                                                direct_bearing_deg, dismissed_obstacle, active_obstacle)
         local near_loc = project_current_trajectory(target_loc)
 
         -- The path actually about to be flown if avoidance releases: the DIRECT bearing
@@ -1680,20 +1686,44 @@ function DAAcore.new(deps)
         end
 
         -- A fence-driven bearing (held or freshly found below) must be checked against
-        -- the masked contact too, not just against fences - candidate_blocked() below
-        -- folds both tests together so a candidate is only ever accepted once it
-        -- clears BOTH. last_avoid_bearing_deg is nil at this point in the dismissal
-        -- cycle, so refine_avoidance_bearing() cannot be relied on to turn a
-        -- fence-only bearing away from a contact behind it: with nothing to damp
-        -- against, it returns its input unchanged, only the obstacle label differing.
+        -- traffic too, not just against fences - candidate_blocked() below folds both
+        -- tests together so a candidate is only ever accepted once it clears BOTH.
+        -- Walks the same bank-aware turn-then-leg path fence_blocks_path() does, not a
+        -- straight ray from current_loc: a candidate's actual turn transition can clip a
+        -- keep-out that a straight probe to the same endpoint would miss entirely.
+        --
+        -- Two contacts can need this check, never both at once (resolve_moving_bearing()
+        -- never sets both in the same cycle): dismissed_obstacle - just released this
+        -- cycle, excluded from the query since the goal is to find a DIFFERENT contact
+        -- masked behind it - or active_obstacle - still the live winner this cycle,
+        -- included directly since the goal here is to catch the candidate swinging back
+        -- at the very contact already being avoided. last_avoid_bearing_deg is nil right
+        -- after a dismissal, so refine_avoidance_bearing() cannot be relied on to turn a
+        -- fence-only bearing away from either: with nothing to damp against, it returns
+        -- its input unchanged, only the obstacle label differing.
         local function masked_contact_on_bearing(bearing_test_deg)
-            if dismissed_obstacle == nil then
+            if dismissed_obstacle == nil and active_obstacle == nil then
                 return FLT_MAX, nil
             end
-            local end_loc = location_project(current_loc, bearing_test_deg, detect_m, target_loc)
-            interpolate_alt(end_loc, current_loc, target_loc, detect_m)
-            local distance_m, found = obstacles.find_closest_obstacle_excluding(
-                    current_loc, end_loc, detect_m, wind_speed, dismissed_obstacle.sysid)
+            local adjusted_loc = location_for_candidate(bearing_test_deg, target_loc)
+            local distance_m, found
+            if dismissed_obstacle ~= nil then
+                distance_m, found = obstacles.find_closest_obstacle_excluding(
+                        current_loc, adjusted_loc, detect_m, wind_speed, dismissed_obstacle.sysid)
+            else
+                distance_m, found = obstacles.find_closest_obstacle(
+                        current_loc, adjusted_loc, detect_m, wind_speed)
+            end
+            if found == nil or not assess_obstacle_motion(found).is_conflict then
+                local leg_loc = location_project(adjusted_loc, bearing_test_deg, detect_m, target_loc)
+                if dismissed_obstacle ~= nil then
+                    distance_m, found = obstacles.find_closest_obstacle_excluding(
+                            adjusted_loc, leg_loc, detect_m, wind_speed, dismissed_obstacle.sysid)
+                else
+                    distance_m, found = obstacles.find_closest_obstacle(
+                            adjusted_loc, leg_loc, detect_m, wind_speed)
+                end
+            end
             if found ~= nil and assess_obstacle_motion(found).is_conflict then
                 return distance_m, found
             end
@@ -1866,7 +1896,8 @@ function DAAcore.new(deps)
             local resolved_bearing_deg, resolved_distance_m, resolved_obstacle
             resolved_bearing_deg, resolved_distance_m, resolved_obstacle, held =
                     validate_horizontal_release(target_loc, best_bearing_deg, best_distance_m,
-                                                 bearing_deg, dismissed_obstacle)
+                                                 bearing_deg, dismissed_obstacle,
+                                                 (was_moving_avoidance and obstacle_avoiding) or nil)
             if was_release_candidate or resolved_obstacle ~= nil then
                 -- A genuine release (fence confirmed clear too - resolved_obstacle is
                 -- nil), a release the fence just vetoed, OR the fence overriding an
