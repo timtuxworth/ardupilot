@@ -8707,11 +8707,14 @@ return update()
         # altitude within the ~25 m UAV vertical gate by matching ours.
         tstart = self.get_sim_time()
         avoided = False
+        sample_count = [0]
         while self.get_sim_time() - tstart < 120:
             here = self.get_location()
+            sample_count[0] += 1
+            # see PlaneDAAParkedAircraftIgnored's inject() for why this jitters
             self.mav.mav.adsb_vehicle_send(
                 icao,
-                int(drone_loc.lat * 1e7),
+                int(drone_loc.lat * 1e7) + (sample_count[0] % 2),
                 int(drone_loc.lng * 1e7),
                 mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
                 int(here.get_alt_m(AltFrame.ABSOLUTE) * 1000 + 10000),   # 10 m up, well inside the 25 m gate
@@ -8793,11 +8796,14 @@ return update()
 
         tstart = self.get_sim_time()
         avoided = False
+        sample_count = [0]
         while self.get_sim_time() - tstart < 120:
             here = self.get_location()
+            sample_count[0] += 1
+            # see PlaneDAAParkedAircraftIgnored's inject() for why this jitters
             self.mav.mav.adsb_vehicle_send(
                 parked_icao,
-                int(parked_loc.lat * 1e7),
+                int(parked_loc.lat * 1e7) + (sample_count[0] % 2),
                 int(parked_loc.lng * 1e7),
                 mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
                 int(home.get_alt_m(AltFrame.ABSOLUTE) * 1000),
@@ -8808,7 +8814,7 @@ return update()
             )
             self.mav.mav.adsb_vehicle_send(
                 drone_icao,
-                int(drone_loc.lat * 1e7),
+                int(drone_loc.lat * 1e7) + (sample_count[0] % 2),
                 int(drone_loc.lng * 1e7),
                 mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
                 int(here.get_alt_m(AltFrame.ABSOLUTE) * 1000 + 10000),   # 10 m up, inside the 25 m gate
@@ -8885,10 +8891,17 @@ return update()
         self.wait_current_waypoint(2, timeout=120)
         self.wait_text("Plane DAA", check_context=True, timeout=60)
 
+        sample_count = [0]
+
         def inject():
+            # A real GPS/EKF-sourced position always carries sample-to-sample jitter - an
+            # exactly-repeating one looks like a frozen feed to AVD_LOC_STALE_S, which is
+            # not what this test means to exercise. Alternating +0/+1 units of 1e-7 deg
+            # (~1.1 cm, negligible for geometry) guarantees consecutive samples never match.
+            sample_count[0] += 1
             self.mav.mav.adsb_vehicle_send(
                 parked_icao,
-                int(parked_loc.lat * 1e7),
+                int(parked_loc.lat * 1e7) + (sample_count[0] % 2),
                 int(parked_loc.lng * 1e7),
                 mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
                 int(home.get_alt_m(AltFrame.ABSOLUTE) * 1000),
@@ -8947,10 +8960,14 @@ return update()
         self.wait_current_waypoint(2, timeout=120)
         self.wait_text("Plane DAA", check_context=True, timeout=60)
 
+        sample_count = [0]
+
         def inject():
+            # see PlaneDAAParkedAircraftIgnored's inject() for why this jitters
+            sample_count[0] += 1
             self.mav.mav.adsb_vehicle_send(
                 parked_icao,
-                int(parked_loc.lat * 1e7),
+                int(parked_loc.lat * 1e7) + (sample_count[0] % 2),
                 int(parked_loc.lng * 1e7),
                 mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
                 int(home.get_alt_m(AltFrame.ABSOLUTE) * 1000),
@@ -9022,9 +9039,10 @@ return update()
         def inject():
             sample_count[0] += 1
             noisy = (sample_count[0] % 10 == 0)
+            # see PlaneDAAParkedAircraftIgnored's inject() for why this jitters
             self.mav.mav.adsb_vehicle_send(
                 parked_icao,
-                int(parked_loc.lat * 1e7),
+                int(parked_loc.lat * 1e7) + (sample_count[0] % 2),
                 int(parked_loc.lng * 1e7),
                 mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
                 int(home.get_alt_m(AltFrame.ABSOLUTE) * 1000),
@@ -9088,9 +9106,10 @@ return update()
         def inject():
             sample_count[0] += 1
             noisy = (sample_count[0] % 10 == 0)
+            # see PlaneDAAParkedAircraftIgnored's inject() for why this jitters
             self.mav.mav.adsb_vehicle_send(
                 parked_icao,
-                int(parked_loc.lat * 1e7),
+                int(parked_loc.lat * 1e7) + (sample_count[0] % 2),
                 int(parked_loc.lng * 1e7),
                 mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
                 int(home.get_alt_m(AltFrame.ABSOLUTE) * 1000),
@@ -9118,6 +9137,75 @@ return update()
                 "AVD_GND_DEB=0 never produced a reaction to the noisy parked contact - "
                 "this geometry cannot tell whether AVD_GND_DEB does anything")
 
+        self.disarm_vehicle(force=True)
+
+    def PlaneDAAStaleLocationExcluded(self):
+        '''A contact whose reported lat/lng/alt stop changing, even while messages keep
+        arriving, must be excluded from avoidance entirely after AVD_LOC_STALE_S - not
+        just from the parked exclusion. A frozen feed can carry a wrong altitude or
+        velocity with nothing downstream able to tell: AP_Avoidance::is_parked()'s own
+        altitude gate was defeated this way by a genuinely-grounded contact whose
+        direct-MAVLink feed had stalled at an altitude from early in its own EKF
+        convergence, well above AVD_GND_ALT, with no further samples ever correcting it.
+
+        Same geometry as PlaneDAADroneAvoidance (drone 1000 m ahead, well clear of the
+        parked-exclusion altitude/speed gates - this is a genuine, confirmed-avoidable
+        threat, not a parked one) - that test is this one's positive control, proving
+        the same contact IS avoided once its position is allowed to update normally.
+        Here the exact same lat/lng/alt is sent every cycle: no reaction must ever
+        occur, because the contact goes stale within AVD_LOC_STALE_S and is never
+        trusted again.'''
+        self.install_planedaa_scripts()
+
+        self.set_parameters({
+            "SCR_ENABLE": 1,
+            "SCR_VM_I_COUNT": 1000000,
+            "ADSB_TYPE": 1,
+            "AVD_ENABLE": 1,
+            "AVD_UAV_XY": 150,
+            "AVD_UAV_Z": 25,
+            "AVD_LOC_STALE_S": 2,
+        })
+
+        self.context_collect('STATUSTEXT')
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+
+        home = self.home_position_as_location()
+        drone_loc = self.offset_location_ne(home, 1000, 0)
+        icao = 0xF00081
+
+        self.start_flying_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 50),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 2000, 0, 80),
+            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+        ])
+        self.wait_current_waypoint(2, timeout=120)
+        self.wait_text("Plane DAA", check_context=True, timeout=60)
+
+        def inject():
+            # deliberately NOT jittered, and a fixed altitude rather than tracking the
+            # vehicle's own - the point here is a feed that never changes at all. Fixed
+            # 90 m above home: close to the 80 m cruise leg (well inside the 25 m gate
+            # for most of it), not just the brief climb-out.
+            self.mav.mav.adsb_vehicle_send(
+                icao,
+                int(drone_loc.lat * 1e7),
+                int(drone_loc.lng * 1e7),
+                mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
+                int(home.get_alt_m(AltFrame.ABSOLUTE) * 1000 + 90000),
+                0, 0, 0,
+                "STALEUAV".encode("ascii"),
+                mavutil.mavlink.ADSB_EMITTER_TYPE_UAV,
+                1, 65535, 1200,
+            )
+
+        self.daa_watch_no_reaction(120, [
+            "AVOIDING", "LOITERING", "LOITER AIRCRAFT", "TRAPPED",
+            "Near Miss", "Loss of Well Clear",
+        ], inject)
+
+        self.wait_current_waypoint(3, timeout=400)
         self.disarm_vehicle(force=True)
 
     def PlaneDAAStandoffNotDoubleCounted(self):
@@ -9191,11 +9279,14 @@ return update()
 
             # fly the leg past the drone, re-sending it because contacts prune after 5 s
             tstart = self.get_sim_time()
+            sample_count = [0]
             while self.get_sim_time() - tstart < 200:
                 here = self.get_location()
+                sample_count[0] += 1
+                # see PlaneDAAParkedAircraftIgnored's inject() for why this jitters
                 self.mav.mav.adsb_vehicle_send(
                     icao,
-                    int(drone_loc.lat * 1e7),
+                    int(drone_loc.lat * 1e7) + (sample_count[0] % 2),
                     int(drone_loc.lng * 1e7),
                     mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
                     int(here.get_alt_m(AltFrame.ABSOLUTE) * 1000 + 10000),  # inside AVD_UAV_Z
@@ -10103,6 +10194,7 @@ return update()
         drone_loc = self.offset_location_ne(home, 900, 0)
         aircraft_icao = 0xA1A1A1
         drone_icao = 0xD2D2D2
+        drone_sample_count = [0]
 
         def inject_aircraft(closing):
             # kept a fixed 300 m ahead of wherever the vehicle is right now (same
@@ -10126,11 +10218,13 @@ return update()
 
         def inject_drone():
             # fixed position, zero velocity: genuinely closing as the vehicle itself
-            # flies toward it (same technique as PlaneDAADroneAvoidance).
+            # flies toward it (same technique as PlaneDAADroneAvoidance). Jittered -
+            # see PlaneDAAParkedAircraftIgnored's inject() for why.
             here = self.get_location()
+            drone_sample_count[0] += 1
             self.mav.mav.adsb_vehicle_send(
                 drone_icao,
-                int(drone_loc.lat * 1e7),
+                int(drone_loc.lat * 1e7) + (drone_sample_count[0] % 2),
                 int(drone_loc.lng * 1e7),
                 mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
                 int(here.get_alt_m(AltFrame.ABSOLUTE) * 1000 + 10000),
@@ -10272,11 +10366,15 @@ return update()
             "DAA_LKAHD_M": 500,
         })
 
+        drone_sample_count = [0]
+
         def inject_drone():
             here = self.get_location()
+            drone_sample_count[0] += 1
+            # see PlaneDAAParkedAircraftIgnored's inject() for why this jitters
             self.mav.mav.adsb_vehicle_send(
                 drone_icao,
-                int(drone_loc.lat * 1e7),
+                int(drone_loc.lat * 1e7) + (drone_sample_count[0] % 2),
                 int(drone_loc.lng * 1e7),
                 mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
                 int(here.get_alt_m(AltFrame.ABSOLUTE) * 1000 + 10000),
@@ -11828,11 +11926,15 @@ return update()
         drone_loc = self.offset_location_ne(home, 900, 0)  # on the path, early in the climb
         icao = 0xF000A0
 
+        drone_sample_count = [0]
+
         def inject_drone():
             here = self.get_location()
+            drone_sample_count[0] += 1
+            # see PlaneDAAParkedAircraftIgnored's inject() for why this jitters
             self.mav.mav.adsb_vehicle_send(
                 icao,
-                int(drone_loc.lat * 1e7),
+                int(drone_loc.lat * 1e7) + (drone_sample_count[0] % 2),
                 int(drone_loc.lng * 1e7),
                 mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
                 int(here.get_alt_m(AltFrame.ABSOLUTE) * 1000 + 10000),  # 10 m above CURRENT altitude
@@ -11908,11 +12010,15 @@ return update()
         drone_loc = self.offset_location_ne(home, 900, 0)
         icao = 0xF000A1
 
+        drone_sample_count = [0]
+
         def inject_drone():
             here = self.get_location()
+            drone_sample_count[0] += 1
+            # see PlaneDAAParkedAircraftIgnored's inject() for why this jitters
             self.mav.mav.adsb_vehicle_send(
                 icao,
-                int(drone_loc.lat * 1e7),
+                int(drone_loc.lat * 1e7) + (drone_sample_count[0] % 2),
                 int(drone_loc.lng * 1e7),
                 mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
                 int(here.get_alt_m(AltFrame.ABSOLUTE) * 1000 + 10000),  # 10 m above CURRENT altitude
@@ -14294,6 +14400,7 @@ return update()
             Test(self.PlaneDAAParkedDroneIgnored),
             Test(self.PlaneDAAParkedAircraftGPSNoiseIgnored),
             Test(self.PlaneDAAParkedAircraftGPSNoiseDebounceMatters),
+            Test(self.PlaneDAAStaleLocationExcluded),
             Test(self.PlaneDAAStandoffNotDoubleCounted),
             Test(self.PlaneDAADroneCrossing),
             Test(self.PlaneDAAAircraftLoiterNoFlip),
