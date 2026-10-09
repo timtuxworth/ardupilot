@@ -72,6 +72,11 @@ public:
         // single instantaneous fast sample is not trusted on its own to mean genuinely
         // moving.
         uint32_t fast_since_ms;
+        // millis() this contact's reported lat/lng/alt last actually differed from the
+        // previous sample (0 only before the very first sample is seen) - see
+        // is_location_stale()'s own comment for why a position that stops changing, even
+        // if messages keep arriving, cannot be trusted.
+        uint32_t position_update_ms;
 #endif // AP_OA_SCRIPTING_ENABLED
         Location _location;
         Vector3f _velocity_ned_ms;
@@ -155,6 +160,16 @@ public:
     // like POINT_OBSTACLE: those are always stationary at ground level by design, and are
     // meant to be avoided regardless of reported speed.
     bool is_parked(const Obstacle &obstacle) const;
+
+    // True if this contact's reported position (lat/lng/alt together) has not changed at
+    // all for AVD_LOC_STALE_S, whether or not messages are still arriving - a live
+    // GPS/EKF-sourced position always carries some sample-to-sample jitter, so an exact,
+    // sustained repeat means the feed is not live tracking (regardless of source - direct
+    // MAVLink and ADS-B are both susceptible). Nothing about a stale contact can be
+    // trusted, so it is excluded from avoidance entirely, the same way is_parked() is -
+    // not folded into is_parked() itself since the two are independent reasons to
+    // distrust a contact, not a package deal.
+    bool is_location_stale(const Obstacle &obstacle) const;
 #endif // AP_OA_SCRIPTING_ENABLED
 
     // for holding parameters
@@ -272,6 +287,7 @@ private:
     AP_Float    _ground_alt_m;
     AP_Float    _ground_speed_ms;
     AP_Float    _ground_debounce_s;
+    AP_Float    _location_stale_s;
 #endif  // AP_OA_SCRIPTING_ENABLED
     // multi-thread support for avoidance
     mutable HAL_Semaphore _rsem;

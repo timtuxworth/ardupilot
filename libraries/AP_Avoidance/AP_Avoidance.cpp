@@ -200,6 +200,14 @@ const AP_Param::GroupInfo AP_Avoidance::var_info[] = {
     // @User: Standard
     AP_GROUPINFO("GND_DEB",    21, AP_Avoidance, _ground_debounce_s, 2),
 
+    // @Param: LOC_STALE_S
+    // @DisplayName: Stale location detection time
+    // @Description: A traffic contact's reported position (lat/lng/alt together) unchanged for this long, whether or not messages are still arriving, is treated as a frozen feed rather than live tracking and is excluded from avoidance entirely until it starts updating again. A genuine GPS/EKF-sourced position always carries some sample-to-sample jitter; an exact, sustained repeat is not that. 0 disables stale detection (a contact is trusted regardless of how long its position has been unchanged).
+    // @Units: s
+    // @Range: 0 10
+    // @User: Standard
+    AP_GROUPINFO("LOC_STALE_S", 22, AP_Avoidance, _location_stale_s, 2),
+
 #endif // AP_AVOIDANCE_OA_SCRIPTING_PLANE_ENABLED
 
     AP_GROUPEND
@@ -351,6 +359,7 @@ void AP_Avoidance::add_obstacle(const uint32_t obstacle_timestamp_ms,
         _obstacles[index].src_id = src_id;
 #if AP_OA_SCRIPTING_ENABLED
         _obstacles[index].fast_since_ms = 0;
+        _obstacles[index].position_update_ms = 0;
 #endif // AP_OA_SCRIPTING_ENABLED
     }
 
@@ -367,6 +376,15 @@ void AP_Avoidance::add_obstacle(const uint32_t obstacle_timestamp_ms,
         }
     } else {
         _obstacles[index].fast_since_ms = 0;
+    }
+    // Track when this contact's position last genuinely changed, for is_location_stale() -
+    // see its own comment. Compared against the STILL-OLD _location below, before it is
+    // overwritten a few lines down.
+    if (_obstacles[index].position_update_ms == 0 ||
+        loc.lat != _obstacles[index]._location.lat ||
+        loc.lng != _obstacles[index]._location.lng ||
+        loc.alt != _obstacles[index]._location.alt) {
+        _obstacles[index].position_update_ms = obstacle_timestamp_ms;
     }
 #endif // AP_OA_SCRIPTING_ENABLED
     _obstacles[index]._location = loc;
@@ -915,6 +933,22 @@ bool AP_Avoidance::is_parked(const Obstacle &obstacle) const
     return (obstacle.timestamp_ms - obstacle.fast_since_ms) < uint32_t(_ground_debounce_s * 1000.0f);
 }
 
+// True if this contact's position has stopped updating - see position_update_ms's own
+// declaration and add_obstacle()'s comment for how it is maintained. Uses AP_HAL::millis(),
+// not obstacle.timestamp_ms: unlike is_parked()'s debounce, a feed that goes completely
+// quiet must still age into "stale" by wall-clock time, not just one that keeps resending an
+// unchanged position - both mean the same thing here (nothing new has actually arrived).
+bool AP_Avoidance::is_location_stale(const Obstacle &obstacle) const
+{
+    if (_location_stale_s <= 0) {
+        return false;  // AVD_LOC_STALE_S = 0: never distrust a contact for this reason
+    }
+    if (obstacle.position_update_ms == 0) {
+        return false;  // no sample seen yet to judge staleness from
+    }
+    return (AP_HAL::millis() - obstacle.position_update_ms) >= uint32_t(_location_stale_s * 1000.0f);
+}
+
 // ADS-B surface (ground) vehicle categories. We deliberately do not avoid these:
 // an airborne vehicle has no requirement to manoeuvre around a vehicle on the ground.
 bool AP_Avoidance::is_ground_vehicle(uint8_t emitter_type)
@@ -1008,6 +1042,10 @@ float AP_Avoidance::distance_to_obstacle(const Vector3f &start_NED_m, const Vect
         if (is_parked(obstacle)) {
             continue;
         }
+        // ditto a contact whose position has stopped changing - see is_location_stale()
+        if (is_location_stale(obstacle)) {
+            continue;
+        }
         // the caller's explicitly-excluded contact (see this function's header comment) -
         // identity, not geometry, so it is skipped regardless of where it is relative to
         // the path
@@ -1077,6 +1115,10 @@ float AP_Avoidance::distance_to_aircraft(const Vector3f &vehicle_NED_m, const fl
         }
         // ditto a parked/taxiing contact - see is_parked() and distance_to_obstacle()
         if (is_parked(obstacle)) {
+            continue;
+        }
+        // ditto a stale contact - see is_location_stale() and distance_to_obstacle()
+        if (is_location_stale(obstacle)) {
             continue;
         }
         const Location obstacle_loc     = _obstacles[i]._location;
