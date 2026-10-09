@@ -907,7 +907,12 @@ bool AP_Avoidance::is_parked(const Obstacle &obstacle) const
     if (_ground_debounce_s <= 0) {
         return false;  // AVD_GND_DEB = 0: any single fast sample withdraws the exclusion immediately
     }
-    return (AP_HAL::millis() - obstacle.fast_since_ms) < uint32_t(_ground_debounce_s * 1000.0f);
+    // obstacle.timestamp_ms, not AP_HAL::millis(): the exclusion must only be withdrawn once a
+    // LATER sample actually confirms the fast reading persisted, not merely once enough wall-clock
+    // time has passed since a single sample. A lone fast sample with no follow-up (a dropout, or a
+    // feed slower than AVD_GND_DEB) leaves timestamp_ms pinned at that same sample, so the gap
+    // never grows and the exclusion holds.
+    return (obstacle.timestamp_ms - obstacle.fast_since_ms) < uint32_t(_ground_debounce_s * 1000.0f);
 }
 
 // ADS-B surface (ground) vehicle categories. We deliberately do not avoid these:
