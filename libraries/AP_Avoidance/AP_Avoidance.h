@@ -66,6 +66,12 @@ public:
 
 #if AP_OA_SCRIPTING_ENABLED
         uint8_t  emitter_type;
+        // millis() this contact first read faster than AVD_GND_SPD, continuously ever
+        // since (reset to 0 the moment a fresh sample reads slow again; 0 also means "not
+        // currently in a fast streak at all") - see is_parked()'s own comment for why a
+        // single instantaneous fast sample is not trusted on its own to mean genuinely
+        // moving.
+        uint32_t fast_since_ms;
 #endif // AP_OA_SCRIPTING_ENABLED
         Location _location;
         Vector3f _velocity_ned_ms;
@@ -265,6 +271,7 @@ private:
     AP_Float    _uav_z;
     AP_Float    _ground_alt_m;
     AP_Float    _ground_speed_ms;
+    AP_Float    _ground_debounce_s;
 #endif  // AP_OA_SCRIPTING_ENABLED
     // multi-thread support for avoidance
     mutable HAL_Semaphore _rsem;

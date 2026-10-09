@@ -192,6 +192,14 @@ const AP_Param::GroupInfo AP_Avoidance::var_info[] = {
     // @User: Standard
     AP_GROUPINFO("GND_SPD",    20, AP_Avoidance, _ground_speed_ms, 2),
 
+    // @Param: GND_DEB
+    // @DisplayName: Ground contact debounce time
+    // @Description: Once a contact is excluded by AVD_GND_ALT/AVD_GND_SPD as parked, a sample reading faster than AVD_GND_SPD must persist continuously for this long before the exclusion is withdrawn - a single instantaneous fast sample does not immediately conclude it is now moving. A contact's reported groundspeed can read as nonzero for a few seconds purely from GPS noise while its own GPS fix is still acquiring or settling, with no transponder-side filtering of that noise on a raw MAVLink contact the way a real ADS-B squawk often has. 0 disables the debounce (any single fast sample withdraws the exclusion immediately, the prior behaviour). Trade-off: a contact that genuinely starts moving is still treated as parked for up to this long afterwards, bounded by AVD_GND_ALT also excluding it once it climbs or moves far enough away regardless.
+    // @Units: s
+    // @Range: 0 10
+    // @User: Standard
+    AP_GROUPINFO("GND_DEB",    21, AP_Avoidance, _ground_debounce_s, 2),
+
 #endif // AP_AVOIDANCE_OA_SCRIPTING_PLANE_ENABLED
 
     AP_GROUPEND
@@ -341,10 +349,25 @@ void AP_Avoidance::add_obstacle(const uint32_t obstacle_timestamp_ms,
 
         _obstacles[index].src = src;
         _obstacles[index].src_id = src_id;
+#if AP_OA_SCRIPTING_ENABLED
+        _obstacles[index].fast_since_ms = 0;
+#endif // AP_OA_SCRIPTING_ENABLED
     }
 
 #if AP_OA_SCRIPTING_ENABLED
     _obstacles[index].emitter_type = emitter_type;
+    // Track how long this contact has read continuously faster than AVD_GND_SPD, for
+    // is_parked()'s debounce - see its own comment and fast_since_ms's declaration for why
+    // a single fast sample is not trusted on its own. Updated here (every refresh, from the
+    // same fresh velocity just received) rather than inside is_parked() itself, since
+    // is_parked() has no "was the LAST sample also fast" state of its own to compare against.
+    if (vel_ned_ms.xy().length() > _ground_speed_ms) {
+        if (_obstacles[index].fast_since_ms == 0) {
+            _obstacles[index].fast_since_ms = obstacle_timestamp_ms;
+        }
+    } else {
+        _obstacles[index].fast_since_ms = 0;
+    }
 #endif // AP_OA_SCRIPTING_ENABLED
     _obstacles[index]._location = loc;
     _obstacles[index]._velocity_ned_ms = vel_ned_ms;
@@ -847,7 +870,21 @@ bool AP_Avoidance::is_adsb_uav(uint8_t emitter_type)
 }
 
 // True if this contact's own altitude and groundspeed say it is parked or taxiing, not flying -
-// see the header comment for why is_ground_vehicle() alone is not enough.
+// see the header comment for why is_ground_vehicle() alone is not enough. A contact that is
+// currently reading slow (fast_since_ms == 0) is trusted as parked immediately - the common
+// case. One that is currently reading faster than AVD_GND_SPD is given the benefit of the
+// doubt for up to AVD_GND_DEB before the exclusion is withdrawn: a contact's reported
+// groundspeed (and sometimes altitude) can read as genuinely nonzero for a few seconds purely
+// from GPS noise while its own GPS fix is still acquiring/settling, and a raw MAVLink
+// GLOBAL_POSITION_INT contact in particular carries no transponder-side filtering of that
+// noise the way a real ADS-B squawk often does. fast_since_ms (add_obstacle() maintains it
+// every refresh) is the continuous fast-streak
+// start time. AVD_GND_DEB = 0 restores the single-sample behaviour (any instantaneous fast
+// reading withdraws the exclusion immediately).
+//
+// Trade-off, deliberately accepted: a contact that genuinely starts moving (e.g. taking off)
+// is still treated as parked for up to AVD_GND_DEB after the fact - bounded by the altitude
+// check above also excluding it once it climbs or moves far enough from home regardless.
 bool AP_Avoidance::is_parked(const Obstacle &obstacle) const
 {
     if (_ground_alt_m <= 0) {
@@ -864,8 +901,13 @@ bool AP_Avoidance::is_parked(const Obstacle &obstacle) const
     if (fabsf((obstacle._location.alt - home.alt) * 0.01f) > _ground_alt_m) {
         return false;
     }
-    const float ground_speed_ms = obstacle._velocity_ned_ms.xy().length();
-    return ground_speed_ms <= _ground_speed_ms;
+    if (obstacle.fast_since_ms == 0) {
+        return true;  // currently reading slow - parked
+    }
+    if (_ground_debounce_s <= 0) {
+        return false;  // AVD_GND_DEB = 0: any single fast sample withdraws the exclusion immediately
+    }
+    return (AP_HAL::millis() - obstacle.fast_since_ms) < uint32_t(_ground_debounce_s * 1000.0f);
 }
 
 // ADS-B surface (ground) vehicle categories. We deliberately do not avoid these:
