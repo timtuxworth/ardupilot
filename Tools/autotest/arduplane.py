@@ -8832,18 +8832,22 @@ return update()
         self.disarm_vehicle(force=True)
 
     def daa_watch_no_reaction(self, duration, forbidden_texts, inject):
-        '''Common body for the two ParkedXIgnored tests below: call inject() and check for
-        no STATUSTEXT containing any of forbidden_texts, repeatedly for duration seconds.'''
+        '''Common body for the ParkedXIgnored tests below: call inject() and check for no
+        STATUSTEXT containing any of forbidden_texts, repeatedly for duration (sim) seconds.
+        Paced by wait_heartbeat(), not a real-time-blocking recv_match() - the default
+        autotest SITL speedup (100x) means a real-time wait of even one second lets the sim
+        clock run far past a modest duration budget, starving inject() of most of its
+        intended calls. Relies on the caller's own context_collect('STATUSTEXT') rather than
+        consuming messages itself, so it never races a caller also reading STATUSTEXT
+        directly (e.g. to wait for an expected, non-forbidden announcement).'''
         tstart = self.get_sim_time()
         while self.get_sim_time() - tstart < duration:
             inject()
-            m = self.mav.recv_match(type='STATUSTEXT', blocking=True, timeout=1)
-            if m is None:
-                continue
+            self.wait_heartbeat()
             for text in forbidden_texts:
-                if text in m.text:
+                if self.statustext_in_collections(text) is not None:
                     raise NotAchievedException(
-                        "planedaa reacted to a parked contact: %s" % m.text)
+                        "planedaa reacted to a parked contact: %s" % text)
 
     def PlaneDAAParkedAircraftIgnored(self):
         '''A crewed aircraft parked near home (within AVD_GND_ALT/AVD_GND_SPD) must never
@@ -8977,7 +8981,13 @@ return update()
         One contact, injected continuously; every 10th sample reports 5 m/s instead of
         0 - isolated single-sample spikes, never two in a row, so they never accumulate a
         continuous AVD_GND_DEB-long fast streak. Must never trigger any reaction, same
-        assertion as PlaneDAAParkedAircraftIgnored.'''
+        assertion as PlaneDAAParkedAircraftIgnored.
+
+        Placed 400 m out on the direct leg, not just 30 m - close to home the vehicle
+        is already past the contact (behind it) by the time it is established on the
+        leg, climbing out, so a spike there would never have a chance to matter
+        regardless of AVD_GND_DEB - see PlaneDAAParkedAircraftGPSNoiseDebounceMatters,
+        which proves a spike WOULD matter here if AVD_GND_DEB did not suppress it.'''
         self.install_planedaa_scripts()
 
         self.set_parameters({
@@ -8996,7 +9006,7 @@ return update()
         self.set_parameter("DAA_TRAP_ACT", 1)  # non-default, so the "TRAPPED" check below has teeth
 
         home = self.home_position_as_location()
-        parked_loc = self.offset_location_ne(home, 30, 0)
+        parked_loc = self.offset_location_ne(home, 400, 0)
         parked_icao = 0xF00093
 
         self.start_flying_simple_relhome_mission([
@@ -9032,6 +9042,82 @@ return update()
         ], inject)
 
         self.wait_current_waypoint(3, timeout=400)
+        self.disarm_vehicle(force=True)
+
+    def PlaneDAAParkedAircraftGPSNoiseDebounceMatters(self):
+        '''Companion to PlaneDAAParkedAircraftGPSNoiseIgnored, proving AVD_GND_DEB is
+        actually doing something in that same geometry rather than the spike simply
+        never mattering - same contact, same position, same noisy-sample injection,
+        AVD_GND_DEB=0 (the prior, single-sample behaviour) instead of 2. A reaction
+        must occur: AVD_WCLR_XY (609.6 m default) comfortably covers a contact sitting
+        400 m directly ahead, so the very first noisy sample should be read as a
+        genuine moving aircraft and avoided - a crewed-aircraft emitter type takes the
+        loiter-to-altitude path (ALERT/LOITERING), not the generic bendy-ruler
+        "AVOIDING" text, so any of the same texts PlaneDAAParkedAircraftGPSNoiseIgnored
+        treats as forbidden here count as the reaction this test wants to see.'''
+        self.install_planedaa_scripts()
+
+        self.set_parameters({
+            "SCR_ENABLE": 1,
+            "SCR_VM_I_COUNT": 1000000,
+            "ADSB_TYPE": 1,
+            "AVD_ENABLE": 1,
+            "AVD_GND_ALT": 3,
+            "AVD_GND_SPD": 2,
+            "AVD_GND_DEB": 0,
+        })
+
+        self.context_collect('STATUSTEXT')
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+
+        home = self.home_position_as_location()
+        parked_loc = self.offset_location_ne(home, 400, 0)
+        parked_icao = 0xF00094
+
+        self.start_flying_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 50),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 500, 0, 80),
+            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+        ])
+        self.wait_current_waypoint(2, timeout=120)
+        self.wait_text("Plane DAA", check_context=True, timeout=60)
+
+        sample_count = [0]
+
+        def inject():
+            sample_count[0] += 1
+            noisy = (sample_count[0] % 10 == 0)
+            self.mav.mav.adsb_vehicle_send(
+                parked_icao,
+                int(parked_loc.lat * 1e7),
+                int(parked_loc.lng * 1e7),
+                mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
+                int(home.get_alt_m(AltFrame.ABSOLUTE) * 1000),
+                0,
+                500 if noisy else 0,   # 5 m/s horizontal "velocity" on the noisy sample only
+                0,
+                "PARKED05".encode("ascii"),
+                mavutil.mavlink.ADSB_EMITTER_TYPE_SMALL,
+                1, 65535, 1200,
+            )
+
+        reaction_texts = [
+            "AVOIDING", "LOITERING", "LOITER AIRCRAFT", "TRAPPED",
+            "Near Miss", "Loss of Well Clear",
+        ]
+        reacted = False
+        tstart = self.get_sim_time()
+        while self.get_sim_time() - tstart < 60 and not reacted:
+            inject()
+            self.wait_heartbeat()
+            reacted = any(self.statustext_in_collections(text) is not None
+                          for text in reaction_texts)
+        if not reacted:
+            raise NotAchievedException(
+                "AVD_GND_DEB=0 never produced a reaction to the noisy parked contact - "
+                "this geometry cannot tell whether AVD_GND_DEB does anything")
+
         self.disarm_vehicle(force=True)
 
     def PlaneDAAStandoffNotDoubleCounted(self):
@@ -10102,6 +10188,143 @@ return update()
             raise NotAchievedException(
                 "never saw DAAR.ObjT==MAV_SYSID with Gon==1 after the aircraft was "
                 "dismissed - the masked-contact re-probe did not find/adopt the drone")
+
+    def PlaneDAAFenceCandidateChecksActiveTraffic(self):
+        '''validate_horizontal_release() also runs every cycle a moving obstacle is
+        STILL the live winner (not dismissed), so a fence appearing nearby can replace
+        an ongoing drone avoidance with a fence-driven bearing instead. That candidate
+        bearing was only ever checked against fences, never against the drone still
+        being avoided - unlike the dismissed-contact case next door
+        (PlaneDAAMaskedDroneBehindDismissedAircraft), nothing stopped it from swinging
+        back into the drone's own keep-out.
+
+        A drone sits fixed off one side of a long straight leg, close enough that
+        avoiding it is unavoidable and sustained (never opens past well-clear, so it is
+        never dismissed - DAAR.Gon stays 0 throughout). A thin exclusion strip sits
+        along the real lateral path that detour takes, tight enough (DAA_MARGIN_FENCE=0,
+        the real turn-radius fallback) that the fence-driven candidate has little room
+        to spare.
+
+        Asserted via the dataflash DAAR log: on every cycle the drone was the
+        pre-resolver pick (Sel==MAV_SYSID) and still live (Gon==0) and a fence
+        candidate was adopted (Held==1), CmdD - the clearance of the path actually
+        being commanded, which find_closest_obstacle() computes against every obstacle
+        type, not just fences - must never show a real breach of the drone. This
+        geometry does reliably hit that exact decision path (confirmed via a captured
+        DAAR/POS log, cross-checked against the real flown track) - Sel==MAV_SYSID,
+        Gon==0 and Held==1 all together, several cycles running, every time this was
+        tried. What it does NOT reliably do is discriminate the fix on its own: CmdD's
+        margin here comes out close to the same few metres whether or not the active-
+        traffic check in masked_contact_on_bearing() is present, so a real omission can
+        still pass this test by chance on a given geometry - same caveat, and same
+        reason (a tuned SITL geometry settling to a stable margin either way rather
+        than eroding), as PlaneDAAFenceDriftReversal's own docstring. Kept because it
+        is still a genuine exercise of the was_moving_avoidance+fence-override path
+        with a real (if not wide) safety margin checked every run; retune or replace
+        with a direct unit-style probe of candidate_blocked() if a sharper
+        reproduction is found later.'''
+        self.install_planedaa_scripts()
+
+        self.set_parameters({
+            "SCR_ENABLE": 1,
+            "SCR_VM_I_COUNT": 1000000,
+            "ADSB_TYPE": 1,     # MAVLink: ingest ADSB_VEHICLE with no ADS-B hardware
+            "AVD_ENABLE": 1,
+            "AVD_UAV_XY": 100,
+            "AVD_UAV_Z": 25,
+            "FENCE_ENABLE": 0,      # enabled in-flight so arming is unimpeded
+            "FENCE_TYPE": 4,        # polyfence (circle exclusion)
+            "FENCE_ACTION": 0,      # report only - a breach must fail the test, not RTL
+            "ROLL_LIMIT_DEG": 65,
+            "AIRSPEED_CRUISE": 25,
+            "RLL2SRV_RMAX": 0,
+            "RLL2SRV_TCONST": 0.5,
+        })
+
+        home = self.home_position_as_location()
+        # Fixed 60 m east of the direct home->WP2 line, close enough with AVD_UAV_XY +
+        # DAA_MARGIN_UAV below (130 m total) that avoiding it needs a real detour to the
+        # west - a detour is unavoidable, and never opens past well-clear (fixed, zero
+        # velocity, vehicle closes on it the whole leg) so it is never dismissed.
+        drone_loc = self.offset_location_ne(home, 500, 60)
+        # A thin exclusion strip along the west side of the direct line, spanning the
+        # real lateral deviation this geometry's avoidance turn produces (measured from
+        # a prior run's DAAR/POS log: ~10-22 m west of the line over roughly N 150-350) -
+        # not a shape derived from the drone's own keep-out radius, which is a dynamic
+        # CPA threshold, not a static area the flown path avoids wholesale.
+        self.upload_fences_from_locations([
+            (mavutil.mavlink.MAV_CMD_NAV_FENCE_POLYGON_VERTEX_EXCLUSION, [
+                self.offset_location_ne(home, 150, -4),
+                self.offset_location_ne(home, 350, -4),
+                self.offset_location_ne(home, 350, -32),
+                self.offset_location_ne(home, 150, -32),
+            ]),
+        ])
+        drone_icao = 0xD3D3D3
+
+        self.context_collect('STATUSTEXT')
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+        self.set_parameters({
+            "DAA_MARGIN_UAV": 30,      # drone standoff = 130 m total with AVD_UAV_XY
+            "DAA_MARGIN_FENCE": 0,
+            "DAA_PLAN_M": 200,
+            "DAA_LKAHD_M": 500,
+        })
+
+        def inject_drone():
+            here = self.get_location()
+            self.mav.mav.adsb_vehicle_send(
+                drone_icao,
+                int(drone_loc.lat * 1e7),
+                int(drone_loc.lng * 1e7),
+                mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
+                int(here.get_alt_m(AltFrame.ABSOLUTE) * 1000 + 10000),
+                0, 0, 0,
+                "ACTVDR1".encode("ascii"),
+                mavutil.mavlink.ADSB_EMITTER_TYPE_UAV,     # -> AVD_UAV_XY radius
+                1, 65535, 1200,
+            )
+
+        self.start_flying_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 60),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 1000, 0, 80),
+            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+        ])
+        self.wait_current_waypoint(2, timeout=120)
+        self.do_fence_enable()
+        self.wait_text("Plane DAA", check_context=True, timeout=60)
+
+        tstart = self.get_sim_time()
+        while self.get_sim_time() - tstart < 90:
+            inject_drone()
+            self.wait_heartbeat()
+
+        log_filepath = self.current_onboard_log_filepath()
+        self.disarm_vehicle(force=True)
+
+        self.progress("Inspecting DFReader for a fence candidate breaching the active drone")
+        dfreader = self.dfreader_for_path(log_filepath)
+        OBSTACLE_TYPE_MAV_SYSID = 1
+        saw_fence_override_of_active_drone = False
+        breach_m = None
+        while True:
+            m = dfreader.recv_match(type=['DAAR'])
+            if m is None:
+                break
+            if m.Sel == OBSTACLE_TYPE_MAV_SYSID and m.Gon == 0 and m.Held == 1:
+                saw_fence_override_of_active_drone = True
+                if m.CmdD < -1.0 and (breach_m is None or m.CmdD < breach_m):
+                    breach_m = m.CmdD
+        if not saw_fence_override_of_active_drone:
+            raise NotAchievedException(
+                "never saw DAAR.Sel==MAV_SYSID with Gon==0 and Held==1 - the fence "
+                "candidate never overrode an actively-avoided (non-dismissed) drone, "
+                "geometry did not reproduce")
+        if breach_m is not None:
+            raise NotAchievedException(
+                "a fence-driven candidate crossed %.1fm into the still-active drone's "
+                "own keep-out (DAAR.CmdD)" % (-breach_m,))
 
     def PlaneDAAAircraftPreemptsAvoidance(self):
         '''Crewed traffic must be able to take over from an avoidance already in progress.
@@ -14070,6 +14293,7 @@ return update()
             Test(self.PlaneDAAParkedAircraftIgnored),
             Test(self.PlaneDAAParkedDroneIgnored),
             Test(self.PlaneDAAParkedAircraftGPSNoiseIgnored),
+            Test(self.PlaneDAAParkedAircraftGPSNoiseDebounceMatters),
             Test(self.PlaneDAAStandoffNotDoubleCounted),
             Test(self.PlaneDAADroneCrossing),
             Test(self.PlaneDAAAircraftLoiterNoFlip),
@@ -14079,6 +14303,7 @@ return update()
             Test(self.PlaneDAALoiterTurnDirection),
             Test(self.PlaneDAALoiterHomeFenceOnly),
             Test(self.PlaneDAAMaskedDroneBehindDismissedAircraft),
+            Test(self.PlaneDAAFenceCandidateChecksActiveTraffic),
             Test(self.PlaneDAAAircraftPreemptsAvoidance),
             Test(self.PlaneDAAAircraftCpaGate),
             Test(self.PlaneDAAAircraftConverging),
