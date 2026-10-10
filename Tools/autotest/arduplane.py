@@ -9140,21 +9140,87 @@ return update()
         self.disarm_vehicle(force=True)
 
     def PlaneDAAStaleLocationExcluded(self):
-        '''A contact whose reported lat/lng/alt stop changing, even while messages keep
-        arriving, must be excluded from avoidance entirely after AVD_LOC_STALE_S - not
-        just from the parked exclusion. A frozen feed can carry a wrong altitude or
-        velocity with nothing downstream able to tell: AP_Avoidance::is_parked()'s own
-        altitude gate was defeated this way by a genuinely-grounded contact whose
-        direct-MAVLink feed had stalled at an altitude from early in its own EKF
-        convergence, well above AVD_GND_ALT, with no further samples ever correcting it.
+        '''A direct-MAVLink (GLOBAL_POSITION_INT) contact whose reported lat/lng/alt stop
+        changing, even while messages keep arriving, must be excluded from avoidance
+        entirely after AVD_LOC_STALE_S - not just from the parked exclusion. A frozen
+        feed can carry a wrong altitude or velocity with nothing downstream able to
+        tell: this reproduces the live incident (T2Cruza/Silverback, 00000409.BIN /
+        00000125.BIN, 2026-10) where `GCS_MAVLink::send_global_position_int()` kept
+        resending a stale AHRS location after a transient EKF/GPS hiccup on the sender,
+        with no staleness flag in the message.
 
-        Same geometry as PlaneDAADroneAvoidance (drone 1000 m ahead, well clear of the
-        parked-exclusion altitude/speed gates - this is a genuine, confirmed-avoidable
-        threat, not a parked one) - that test is this one's positive control, proving
-        the same contact IS avoided once its position is allowed to update normally.
-        Here the exact same lat/lng/alt is sent every cycle: no reaction must ever
-        occur, because the contact goes stale within AVD_LOC_STALE_S and is never
-        trusted again.'''
+        AVD_LOC_STALE_S applies ONLY to MAV_COLLISION_SRC_MAVLINK_GPS_GLOBAL_INT - never
+        to an ADS-B contact (its timestamp is back-dated by tslc at arrival, which this
+        check cannot tell apart from a genuinely frozen feed) and never to a
+        POINT_OBSTACLE (deliberately stationary by design, must never be excluded).
+        PlaneDAADroneAvoidance is this test's positive control for the direct-MAVLink
+        geometry otherwise working; PlaneDAAStaleAdsbNotExcluded below is its negative
+        control for the source restriction itself.'''
+        self.install_planedaa_scripts()
+
+        self.set_parameters({
+            "SCR_ENABLE": 1,
+            "SCR_VM_I_COUNT": 1000000,
+            "AVD_ENABLE": 1,
+            "AVD_UAV_XY": 150,
+            "AVD_UAV_Z": 25,
+            "AVD_LOC_STALE_S": 2,
+        })
+
+        self.context_collect('STATUSTEXT')
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+
+        home = self.home_position_as_location()
+        drone_loc = self.offset_location_ne(home, 1000, 0)
+        drone_sysid = 30  # matches the real Silverback incident's MAV_SYSID
+
+        self.start_flying_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 50),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 2000, 0, 80),
+            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+        ])
+        self.wait_current_waypoint(2, timeout=120)
+        self.wait_text("Plane DAA", check_context=True, timeout=60)
+
+        old_srcSystem = self.mav.mav.srcSystem
+
+        def inject():
+            # deliberately NOT jittered, and a fixed altitude rather than tracking the
+            # vehicle's own - the point here is a feed that never changes at all. Fixed
+            # 90 m above home: close to the 80 m cruise leg (well inside the 25 m gate
+            # for most of it), not just the brief climb-out.
+            self.mav.mav.srcSystem = drone_sysid
+            try:
+                self.mav.mav.global_position_int_send(
+                    0,
+                    int(drone_loc.lat * 1e7),
+                    int(drone_loc.lng * 1e7),
+                    int(home.get_alt_m(AltFrame.ABSOLUTE) * 1000 + 90000),
+                    90000,
+                    0, 0, 0,
+                    65535,
+                )
+            finally:
+                self.mav.mav.srcSystem = old_srcSystem
+
+        self.daa_watch_no_reaction(120, [
+            "AVOIDING", "LOITERING", "LOITER AIRCRAFT", "TRAPPED",
+            "Near Miss", "Loss of Well Clear",
+        ], inject)
+
+        self.wait_current_waypoint(3, timeout=400)
+        self.disarm_vehicle(force=True)
+
+    def PlaneDAAStaleAdsbNotExcluded(self):
+        '''Negative control for PlaneDAAStaleLocationExcluded's source restriction:
+        an ADS-B contact (not direct-MAVLink) whose position never changes must still
+        be avoided normally - AVD_LOC_STALE_S must not apply to it. ADS-B's own
+        timestamp (tslc) is back-dated at arrival, which the staleness check cannot
+        tell apart from a genuinely frozen feed, and excluding it would also wrongly
+        catch POINT_OBSTACLE, which is deliberately stationary by design. Same
+        geometry as PlaneDAAStaleLocationExcluded, but the reaction MUST occur here
+        (same assertion style as PlaneDAADroneAvoidance).'''
         self.install_planedaa_scripts()
 
         self.set_parameters({
@@ -9173,7 +9239,7 @@ return update()
 
         home = self.home_position_as_location()
         drone_loc = self.offset_location_ne(home, 1000, 0)
-        icao = 0xF00081
+        icao = 0xF00082
 
         self.start_flying_simple_relhome_mission([
             (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 50),
@@ -9183,11 +9249,12 @@ return update()
         self.wait_current_waypoint(2, timeout=120)
         self.wait_text("Plane DAA", check_context=True, timeout=60)
 
-        def inject():
-            # deliberately NOT jittered, and a fixed altitude rather than tracking the
-            # vehicle's own - the point here is a feed that never changes at all. Fixed
-            # 90 m above home: close to the 80 m cruise leg (well inside the 25 m gate
-            # for most of it), not just the brief climb-out.
+        tstart = self.get_sim_time()
+        avoided = False
+        while self.get_sim_time() - tstart < 120:
+            # deliberately NOT jittered, unlike PlaneDAADroneAvoidance - the point
+            # here is an unchanging ADS-B feed, with tslc=2 so a sample is already
+            # back-dated past AVD_LOC_STALE_S by the time it arrives.
             self.mav.mav.adsb_vehicle_send(
                 icao,
                 int(drone_loc.lat * 1e7),
@@ -9197,13 +9264,14 @@ return update()
                 0, 0, 0,
                 "STALEUAV".encode("ascii"),
                 mavutil.mavlink.ADSB_EMITTER_TYPE_UAV,
-                1, 65535, 1200,
+                2, 65535, 1200,
             )
-
-        self.daa_watch_no_reaction(120, [
-            "AVOIDING", "LOITERING", "LOITER AIRCRAFT", "TRAPPED",
-            "Near Miss", "Loss of Well Clear",
-        ], inject)
+            m = self.mav.recv_match(type='STATUSTEXT', blocking=True, timeout=1)
+            if m is not None and "AVOIDING" in m.text:
+                avoided = True
+                break
+        if not avoided:
+            raise NotAchievedException("planedaa did not avoid the unchanging ADS-B drone")
 
         self.wait_current_waypoint(3, timeout=400)
         self.disarm_vehicle(force=True)
@@ -10303,20 +10371,23 @@ return update()
         pre-resolver pick (Sel==MAV_SYSID) and still live (Gon==0) and a fence
         candidate was adopted (Held==1), CmdD - the clearance of the path actually
         being commanded, which find_closest_obstacle() computes against every obstacle
-        type, not just fences - must never show a real breach of the drone. This
-        geometry does reliably hit that exact decision path (confirmed via a captured
-        DAAR/POS log, cross-checked against the real flown track) - Sel==MAV_SYSID,
-        Gon==0 and Held==1 all together, several cycles running, every time this was
-        tried. What it does NOT reliably do is discriminate the fix on its own: CmdD's
-        margin here comes out close to the same few metres whether or not the active-
-        traffic check in masked_contact_on_bearing() is present, so a real omission can
-        still pass this test by chance on a given geometry - same caveat, and same
-        reason (a tuned SITL geometry settling to a stable margin either way rather
-        than eroding), as PlaneDAAFenceDriftReversal's own docstring. Kept because it
-        is still a genuine exercise of the was_moving_avoidance+fence-override path
-        with a real (if not wide) safety margin checked every run; retune or replace
-        with a direct unit-style probe of candidate_blocked() if a sharper
-        reproduction is found later.'''
+        type, not just fences - must never show a real breach of the drone.
+
+        WP2's altitude (200m) is deliberately far above the cruise altitude the
+        vehicle is actually at while avoiding the drone (climbing out from 60m, still
+        well under 100m over this geometry's drone/fence window) - more than
+        AVD_UAV_Z apart. masked_contact_on_bearing()'s probe locations are built from
+        target_loc (WP2), so if they adopt its altitude outright instead of the
+        vehicle's own current altitude (the bug this test exists to catch -
+        location_for_candidate() and location_project() both do that unless
+        corrected, the same near-end flattening probe_bearing() already guards
+        against with copy_alt_from()/interpolate_alt()), the drone - injected at the
+        vehicle's own live altitude every cycle - reads as more than AVD_UAV_Z below
+        the probe and is never flagged as a conflict, and the fence candidate is
+        adopted straight through it. Confirmed as a real negative control: reverting
+        just the copy_alt_from()/interpolate_alt() calls in
+        masked_contact_on_bearing() makes this fail with a genuine CmdD breach on
+        this geometry; the production code passes with real margin.'''
         self.install_planedaa_scripts()
 
         self.set_parameters({
@@ -10386,7 +10457,7 @@ return update()
 
         self.start_flying_simple_relhome_mission([
             (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 60),
-            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 1000, 0, 80),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 1000, 0, 200),
             (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
         ])
         self.wait_current_waypoint(2, timeout=120)
@@ -14401,6 +14472,7 @@ return update()
             Test(self.PlaneDAAParkedAircraftGPSNoiseIgnored),
             Test(self.PlaneDAAParkedAircraftGPSNoiseDebounceMatters),
             Test(self.PlaneDAAStaleLocationExcluded),
+            Test(self.PlaneDAAStaleAdsbNotExcluded),
             Test(self.PlaneDAAStandoffNotDoubleCounted),
             Test(self.PlaneDAADroneCrossing),
             Test(self.PlaneDAAAircraftLoiterNoFlip),
