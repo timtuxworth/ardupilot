@@ -203,7 +203,9 @@ reuses the existing core `AVD_` parameters (`AVD_WCLR_XY`, `AVD_WCLR_Z`,
 `AVD_NMAC_XY`, `AVD_NMAC_Z`, etc.) that define the Well Clear and Near Mid-Air
 Collision volumes, `AVD_GND_ALT`/`AVD_GND_SPD`/`AVD_GND_DEB` that exclude a parked
 or taxiing contact from avoidance (see _Parked and taxiing contacts are excluded_
-below), and the `FENCE_*` parameters for the altitude/geo fences.
+below), `AVD_LOC_STALE_S` that excludes a frozen direct-MAVLink position (see
+_Stale direct-MAVLink position is excluded_ below), and the `FENCE_*` parameters
+for the altitude/geo fences.
 
 | Parameter | Default | Units | Description |
 |-----------|---------|-------|-------------|
@@ -433,6 +435,21 @@ the moment it is first detected, not just a contact recovering from a stationary
 Narrow and low severity (bounded by the window length, and by the altitude check excluding
 it outright once it climbs or moves far enough away), so left as a known limitation rather
 than tracked separately.
+
+### Stale direct-MAVLink position is excluded
+
+`AVD_LOC_STALE_S` (default 2s) excludes a contact whose reported lat/lng/alt have not
+changed at all for that long, whether or not messages are still arriving. This applies
+only to a direct-MAVLink (`GLOBAL_POSITION_INT`) contact, never to an ADS-B one: a
+sending vehicle's own `GCS_MAVLink::send_global_position_int()` resends its last
+successfully-fetched location unchanged whenever a transient EKF/GPS hiccup makes a
+fresh fix unavailable, with nothing in the message to say the data is stale, so a frozen
+feed can broadcast a wrong altitude or position indefinitely. A genuine GPS/EKF-sourced
+position always carries some sample-to-sample jitter; an exact, sustained repeat means
+the feed is not live tracking. ADS-B is excluded because its timestamp (`tslc`) is
+back-dated at arrival, which this check cannot distinguish from a genuinely frozen feed,
+and because a fixed hazard like `POINT_OBSTACLE` is deliberately stationary and must
+never be excluded this way.
 
 ### Known issue — a masked contact behind two dismissed contacts is not found
 
