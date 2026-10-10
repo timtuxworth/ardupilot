@@ -9440,6 +9440,20 @@ return update()
             finally:
                 self.mav.mav.srcSystem = old_srcSystem
 
+        # add_obstacle() trusts a contact's first-ever sample outright -
+        # position_update_ms only starts counting from that sample's own arrival
+        # time (see its comment in AP_Avoidance.cpp) - so checking for "no
+        # reaction" from the very first inject() races AVD_LOC_STALE_S: whether the
+        # vehicle has already closed enough to be flagged inside that first window
+        # is incidental, not something this test is about. Age the contact well
+        # past AVD_LOC_STALE_S here, tolerating any reaction, before the watched
+        # window (where a reaction is the test failing) begins.
+        stale_s = self.get_parameter("AVD_LOC_STALE_S")
+        warmup_tstart = self.get_sim_time()
+        while self.get_sim_time() - warmup_tstart < 2 * stale_s:
+            inject()
+            self.wait_heartbeat()
+
         self.daa_watch_no_reaction(120, [
             "AVOIDING", "LOITERING", "LOITER AIRCRAFT", "TRAPPED",
             "Near Miss", "Loss of Well Clear",
@@ -10623,7 +10637,18 @@ return update()
         adopted straight through it. Confirmed as a real negative control: reverting
         just the copy_alt_from()/interpolate_alt() calls in
         masked_contact_on_bearing() makes this fail with a genuine CmdD breach on
-        this geometry; the production code passes with real margin.'''
+        this geometry; the production code passes with real margin.
+
+        CmdD (find_closest_obstacle() over every obstacle type) is only a drone
+        check while the fence itself stays clear: enabling the fence in-flight,
+        after the drone-avoidance turn was already under way, could itself land the
+        vehicle inside the exclusion strip before the fence ever engages, making
+        CmdD<0 reflect that pre-existing fence breach (ObjT==FENCE_POLYGON_EXCLUSION)
+        and not the drone at all. The fence is enabled here before the mission
+        starts - home is outside the strip, so arming is unaffected - and the
+        breach check only trusts CmdD<0 on a cycle where the separately-logged
+        fence-only clearance (FPrD) is NOT itself breached, so a real fence breach
+        can never be misread as a drone breach.'''
         self.install_planedaa_scripts()
 
         self.set_parameters({
@@ -10633,7 +10658,7 @@ return update()
             "AVD_ENABLE": 1,
             "AVD_UAV_XY": 100,
             "AVD_UAV_Z": 25,
-            "FENCE_ENABLE": 0,      # enabled in-flight so arming is unimpeded
+            "FENCE_ENABLE": 0,      # set by do_fence_enable() below, before the mission starts
             "FENCE_TYPE": 4,        # polyfence (circle exclusion)
             "FENCE_ACTION": 0,      # report only - a breach must fail the test, not RTL
             "ROLL_LIMIT_DEG": 65,
@@ -10672,6 +10697,12 @@ return update()
             "DAA_PLAN_M": 200,
             "DAA_LKAHD_M": 500,
         })
+        # Enabled here, before the mission starts - home is outside the exclusion
+        # strip, so this does not block arming. Enabling it only once the vehicle
+        # was already turning to avoid the drone let it reach the strip before the
+        # fence ever engaged, landing it already inside the exclusion area the
+        # moment the fence turned on - a breach with nothing to do with this test.
+        self.do_fence_enable()
 
         drone_sample_count = [0]
 
@@ -10697,7 +10728,6 @@ return update()
             (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
         ])
         self.wait_current_waypoint(2, timeout=120)
-        self.do_fence_enable()
         self.wait_text("Plane DAA", check_context=True, timeout=60)
 
         tstart = self.get_sim_time()
@@ -10719,7 +10749,12 @@ return update()
                 break
             if m.Sel == OBSTACLE_TYPE_MAV_SYSID and m.Gon == 0 and m.Held == 1:
                 saw_fence_override_of_active_drone = True
-                if m.CmdD < -1.0 and (breach_m is None or m.CmdD < breach_m):
+                # FPrD is the same candidate path's fence-only clearance (also
+                # signed, positive clear): only trust CmdD<0 as a DRONE breach when
+                # the fence itself was not also breached that cycle, or a real fence
+                # breach (ObjT==FENCE_POLYGON_EXCLUSION winning find_closest_obstacle())
+                # reads as a false drone breach here.
+                if m.CmdD < -1.0 and m.FPrD >= -1.0 and (breach_m is None or m.CmdD < breach_m):
                     breach_m = m.CmdD
         if not saw_fence_override_of_active_drone:
             raise NotAchievedException(
