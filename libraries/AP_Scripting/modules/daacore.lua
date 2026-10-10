@@ -1706,6 +1706,10 @@ function DAAcore.new(deps)
                 return FLT_MAX, nil
             end
             local adjusted_loc = location_for_candidate(bearing_test_deg, target_loc)
+            -- location_for_candidate() routes through location_project(), which always
+            -- adopts target_loc's altitude outright - the same near-end flattening
+            -- probe_bearing() corrects for (see its own comment just above).
+            copy_alt_from(adjusted_loc, current_loc)
             local distance_m, found
             if dismissed_obstacle ~= nil then
                 distance_m, found = obstacles.find_closest_obstacle_excluding(
@@ -1716,6 +1720,7 @@ function DAAcore.new(deps)
             end
             if found == nil or not assess_obstacle_motion(found).is_conflict then
                 local leg_loc = location_project(adjusted_loc, bearing_test_deg, detect_m, target_loc)
+                interpolate_alt(leg_loc, adjusted_loc, target_loc, detect_m)
                 if dismissed_obstacle ~= nil then
                     distance_m, found = obstacles.find_closest_obstacle_excluding(
                             adjusted_loc, leg_loc, detect_m, wind_speed, dismissed_obstacle.sysid)
