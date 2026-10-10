@@ -938,10 +938,21 @@ bool AP_Avoidance::is_parked(const Obstacle &obstacle) const
 // not obstacle.timestamp_ms: unlike is_parked()'s debounce, a feed that goes completely
 // quiet must still age into "stale" by wall-clock time, not just one that keeps resending an
 // unchanged position - both mean the same thing here (nothing new has actually arrived).
+//
+// Restricted to MAV_COLLISION_SRC_MAVLINK_GPS_GLOBAL_INT: that is the only source where
+// position_update_ms is stamped from true arrival time (add_obstacle() is called with
+// AP_HAL::millis() directly). ADS-B's obstacle_timestamp_ms is back-dated by the message's
+// own tslc field, so comparing it against AP_HAL::millis() here would flag a feed as stale
+// almost immediately even while it keeps updating. It would also wrongly catch
+// POINT_OBSTACLE, which is_parked() already documents as deliberately stationary and never
+// to be excluded.
 bool AP_Avoidance::is_location_stale(const Obstacle &obstacle) const
 {
     if (_location_stale_s <= 0) {
         return false;  // AVD_LOC_STALE_S = 0: never distrust a contact for this reason
+    }
+    if (obstacle.src != MAV_COLLISION_SRC_MAVLINK_GPS_GLOBAL_INT) {
+        return false;  // only this source's timestamp is true arrival time - see above
     }
     if (obstacle.position_update_ms == 0) {
         return false;  // no sample seen yet to judge staleness from
