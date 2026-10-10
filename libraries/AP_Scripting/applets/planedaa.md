@@ -451,6 +451,13 @@ back-dated at arrival, which this check cannot distinguish from a genuinely froz
 and because a fixed hazard like `POINT_OBSTACLE` is deliberately stationary and must
 never be excluded this way.
 
+For a direct-MAVLink contact this also acts as an implicit feed timeout: messages that
+stop arriving entirely leave the last reported position unchanged just as much as a
+frozen-but-still-sending feed does, so the contact is excluded the same way. At the
+`AVD_LOC_STALE_S` default of 2s this is shorter than `DAA_STALE_S`'s own default (3s,
+see below), so for this source `AVD_LOC_STALE_S` silently pre-empts `DAA_STALE_S`'s
+watchdog warning - the contact is dropped before the warning would ever fire.
+
 ### Known issue — a masked contact behind two dismissed contacts is not found
 
 When a wide-radius contact (typically a crewed aircraft) wins the single-closest-obstacle
@@ -503,7 +510,7 @@ time-to-conflict falls below `DAA_SLEW_URG`, and also whenever slewing at
 
 If traffic reaches the autopilot over a network link (a companion computer, an LTE
 or telemetry feed) rather than a directly attached receiver, the feed usually
-arrives in bursts rather than at a steady cadence. Two consequences:
+arrives in bursts rather than at a steady cadence. Consequences:
 
 - The obstacle's position is held stale between bursts, so the geometry the bendy
   ruler works from lags reality by up to one gap. **Add that lag, times the closing
@@ -511,12 +518,20 @@ arrives in bursts rather than at a steady cadence. Two consequences:
   position error before any of the turn-radius sizing applies.
 - Set `DAA_STALE_S` just above the feed's normal gap, not far above it. Too high and
   it only reports a link that has already collapsed rather than one degrading.
+- For a direct-MAVLink contact, `AVD_LOC_STALE_S` is also a feed timeout (see above) at
+  a shorter default (2s) than `DAA_STALE_S` (3s), so that watchdog cannot fire for this
+  source at the defaults — the contact is excluded before `DAA_STALE_S` would warn.
 
 The `Age` field in the `DAAV` log record measures the time since the last update
-_arrived_, so it reveals gaps and jitter but **cannot see a constant transport
-delay** — a uniformly delayed feed looks perfectly fresh. To characterise the feed
-itself, set `ADSB_LOG=2` (log all) for a per-message `ADSB` record across the whole
-flight; `DAAV` is only written while actively avoiding, so on its own it cannot show
+_arrived_ for a direct-MAVLink contact. For an ADS-B contact it instead reads `tslc`
+(the message's own self-reported age) **plus** the time since that message arrived,
+since ADS-B's `timestamp_ms` is itself back-dated by `tslc` at arrival — so a steady
+1Hz feed sent with `tslc=2` reads `Age` as 2-3s and can trip a `traffic stale 3s`
+warning even though nothing is actually late. Either way `Age` reveals gaps and jitter
+but **cannot see a constant transport delay** — a uniformly delayed feed looks
+perfectly fresh. To characterise the feed itself, set `ADSB_LOG=2` (log all) for a
+per-message `ADSB` record across the whole flight; `DAAV` is only written while
+actively avoiding, so on its own it cannot show
 what the feed was doing before an obstacle was acquired.
 
 ### Trapped failsafe
