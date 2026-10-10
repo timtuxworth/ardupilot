@@ -11,7 +11,12 @@
 
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
- */
+
+   Based on the "Bendy Ruler" obstacle avoidance algorithm originally
+   designed by Andrew Tridgell (Tridge) and the CanberraUAV team in 2018.
+ 
+   Inspired by the Copter/Rover AC_Avoidance implementation by Randy Mackay and Rishabh Singh
+*/
 
 #include "AP_OAScripting.h"
 

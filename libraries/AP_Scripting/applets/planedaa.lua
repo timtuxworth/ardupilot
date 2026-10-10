@@ -33,11 +33,16 @@ Avoid - implements bendy ruler based heuristic avoidance for most obstacles
             The intention is to come up with a standard library of crewed-aircraft avoidance
             manoeuvres, will also allowing users to implement there own due to this
             being implemented as Lua.
+
+Based on the "Bendy Ruler" obstacle avoidance algorithm originally
+designed by Andrew Tridgell (Tridge) and the CanberraUAV team in 2018.
+
+Inspired by the Copter/Rover AC_Avoidance implementation by Randy Mackay and Rishabh Singh
 --]]
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-115"
+SCRIPT_VERSION      = "4.8.0-116"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
