@@ -202,7 +202,7 @@ const AP_Param::GroupInfo AP_Avoidance::var_info[] = {
 
     // @Param: LOC_STALE_S
     // @DisplayName: Stale location detection time
-    // @Description: A traffic contact's reported position (lat/lng/alt together) unchanged for this long, whether or not messages are still arriving, is treated as a frozen feed rather than live tracking and is excluded from avoidance entirely until it starts updating again. A genuine GPS/EKF-sourced position always carries some sample-to-sample jitter; an exact, sustained repeat is not that. 0 disables stale detection (a contact is trusted regardless of how long its position has been unchanged).
+    // @Description: A traffic contact's reported position (lat/lng/alt together) unchanged for this long, whether or not messages are still arriving, is treated as a frozen feed rather than live tracking and is excluded from avoidance entirely until it starts updating again. A genuine GPS/EKF-sourced position always carries some sample-to-sample jitter; an exact, sustained repeat is not that. Applies only to a direct-MAVLink (GLOBAL_POSITION_INT) contact, never to an ADS-B one: ADS-B's own timestamp is back-dated at arrival by the message's reported age, which this check cannot tell apart from a genuinely frozen feed. 0 disables stale detection (a contact is trusted regardless of how long its position has been unchanged).
     // @Units: s
     // @Range: 0 10
     // @User: Standard

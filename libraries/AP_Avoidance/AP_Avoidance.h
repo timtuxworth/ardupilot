@@ -164,11 +164,12 @@ public:
     // True if this contact's reported position (lat/lng/alt together) has not changed at
     // all for AVD_LOC_STALE_S, whether or not messages are still arriving - a live
     // GPS/EKF-sourced position always carries some sample-to-sample jitter, so an exact,
-    // sustained repeat means the feed is not live tracking (regardless of source - direct
-    // MAVLink and ADS-B are both susceptible). Nothing about a stale contact can be
-    // trusted, so it is excluded from avoidance entirely, the same way is_parked() is -
-    // not folded into is_parked() itself since the two are independent reasons to
-    // distrust a contact, not a package deal.
+    // sustained repeat means the feed is not live tracking. Restricted to direct-MAVLink
+    // (MAV_COLLISION_SRC_MAVLINK_GPS_GLOBAL_INT) contacts in the implementation below: that
+    // is the only source whose position_update_ms is true arrival time, not a back-dated
+    // embedded timestamp. Nothing about a stale contact can be trusted, so it is excluded
+    // from avoidance entirely, the same way is_parked() is - not folded into is_parked()
+    // itself since the two are independent reasons to distrust a contact, not a package deal.
     bool is_location_stale(const Obstacle &obstacle) const;
 #endif // AP_OA_SCRIPTING_ENABLED
 
