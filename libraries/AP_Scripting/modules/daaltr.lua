@@ -325,8 +325,14 @@ function DAAloiter.new(deps)
         if not self.active then
             return
         end
-        if current_mode ~= PLANE_MODE.GUIDED then
-            gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": Pilot changed from GUIDED to: %.0f", current_mode ))
+        -- Read the mode live rather than trust the cached current_mode: update_state()
+        -- caches it at the START of this cycle, but the trapped-failsafe (trap_update(),
+        -- planedaa.lua) can restore GUIDED mid-cycle, before this runs - the cached value
+        -- would then still read the pre-restore mode and misreport it as a pilot change,
+        -- dropping the saved pre-loiter mode the trap needs to return to.
+        local live_mode = vehicle:get_mode()
+        if live_mode ~= PLANE_MODE.GUIDED then
+            gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": Pilot changed from GUIDED to: %.0f", live_mode ))
             previous_mode = -1
             self.stop(true)
             return
