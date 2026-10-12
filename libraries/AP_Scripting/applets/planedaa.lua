@@ -759,8 +759,22 @@ local function get_vehicle_state()
     -- does not enter until the launch itself triggers (throttle no longer
     -- suppressed) - not vehicle:get_likely_flying() additionally covers the window
     -- from arming through that trigger, where a commanded avoidance target could
-    -- otherwise divert the vehicle before it ever launches.
+    -- otherwise divert the vehicle before it ever launches. Both of those only work
+    -- in AUTO (ArduPlane/Plane.cpp's update_flight_stage() and is_flying.cpp's
+    -- pre-launch override are both gated on control_mode == mode_auto) - in the
+    -- dedicated Takeoff flight mode, flight_stage never reaches TAKEOFF at all, and
+    -- GPS ground speed above 1.5 m/s (e.g. a carried or bungee launch, before the
+    -- launch trigger fires) already reads as flying. A height-above-home backstop
+    -- covers that mode instead.
+    local height_above_home = 0
+    if current_mode == PLANE_MODE.TAKEOFF then
+        local ned_home = ahrs:get_relative_position_NED_home()
+        if ned_home then
+            height_above_home = -ned_home:z()
+        end
+    end
     in_takeoff_or_landing = vehicle:is_taking_off() or vehicle:is_landing() or not vehicle:get_likely_flying()
+        or (current_mode == PLANE_MODE.TAKEOFF and height_above_home < 5)
 
     now_ms = millis()
 

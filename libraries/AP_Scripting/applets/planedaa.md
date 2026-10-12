@@ -209,18 +209,23 @@ Avoidance manoeuvres are also withheld during takeoff and landing
 (`vehicle:is_taking_off()`/`vehicle:is_landing()`), and from arming through the
 launch trigger itself (`not vehicle:get_likely_flying()`, since
 `is_taking_off()` only reads true once Plane's flight stage reaches `TAKEOFF`,
-which it does not do until the launch suppresses throttle) - hijacking the nav
-target in any of these stages is unsafe, the same reason the existing Plane
-ADS-B avoidance (`avoidance_adsb.cpp`) withholds action before takeoff
-completes and during the LAND flight stage. Detection and alerting keep
-running throughout; only the commanded target is withheld, and any avoidance
-already in progress is reverted (the aircraft resumes its real takeoff/landing
-path) rather than left stale.
+which it does not do until the launch itself ends throttle suppression) -
+hijacking the nav target in any of these stages is unsafe, the same reason the
+existing Plane ADS-B avoidance (`avoidance_adsb.cpp`) withholds action before
+takeoff completes and during the LAND flight stage. Both of those checks only
+work in AUTO - in the dedicated Takeoff flight mode, flight stage never
+reaches `TAKEOFF` at all, and GPS ground speed above 1.5 m/s before the launch
+trigger (e.g. a carried or bungee launch) can already read as flying, so a
+height-above-home backstop additionally withholds in that mode until climbing
+above 5 m. Detection and alerting keep running throughout; only the commanded
+target is withheld, and any avoidance already in progress is reverted (the
+aircraft resumes its real takeoff/landing path) rather than left stale.
 
-The hung/no-progress trap failsafe (`DAA_TRAP_ACT`) is NOT withheld in these
-stages - it runs before the takeoff/landing check and can still act (e.g. an
-RTL during rollout, or before the aircraft has launched) if it fires. This is
-only a live concern with `DAA_TRAP_ACT` set non-default.
+The trap failsafe (`DAA_TRAP_ACT` - a sustained fence breach, near-miss, or
+hung avoidance) is NOT withheld in these stages - it runs before the
+takeoff/landing check and can still act (e.g. an RTL during rollout, or before
+the aircraft has launched) if it fires. This is only a live concern with
+`DAA_TRAP_ACT` set non-default.
 
 **Known limitation:** on exit, crosstrack is restored to whatever it was when
 avoidance STARTED, not whatever it should be for the leg currently flown. If
