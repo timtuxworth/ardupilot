@@ -10639,10 +10639,12 @@ return update()
         against with copy_alt_from()/interpolate_alt()), the drone - injected at the
         vehicle's own live altitude every cycle - reads as more than AVD_UAV_Z below
         the probe and is never flagged as a conflict, and the fence candidate is
-        adopted straight through it. Confirmed as a real negative control: reverting
-        just the copy_alt_from()/interpolate_alt() calls in
-        masked_contact_on_bearing() makes this fail with a genuine CmdD breach on
-        this geometry; the production code passes with real margin.
+        adopted straight through it. This is a weak negative control: reverting just
+        the copy_alt_from()/interpolate_alt() calls in masked_contact_on_bearing()
+        does make it fail, but only a small fraction of repeated runs, and with a
+        small CmdD breach - the climb-out itself crosses the exclusion strip before
+        the deliberate drone-avoidance detour, so most of the discriminating signal
+        this test wants is masked by that incidental breach.
 
         CmdD (find_closest_obstacle() over every obstacle type) is only a drone
         check while the fence itself stays clear: enabling the fence in-flight,
