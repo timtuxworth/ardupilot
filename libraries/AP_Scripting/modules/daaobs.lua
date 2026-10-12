@@ -301,9 +301,11 @@ function DAAobstacles.new()
     }
 
     -- Most severe horizontal fence clearance (m) at loc, independent of whatever obstacle
-    -- actually won the single-obstacle sweep this cycle - diagnostic only (DAAR logging), so
-    -- a fence that is present but currently masked by a closer moving obstacle is still
-    -- visible.  SIGNED (positive clear, negative breached) - loops every fence category and
+    -- actually won the single-obstacle sweep this cycle, so a fence that is present but
+    -- currently masked by a closer moving obstacle is still visible. Used both for DAAR
+    -- logging and as a control input by the aircraft loiter (daaltr.lua), which has no
+    -- other fence awareness of its own orbit. SIGNED (positive clear, negative breached) -
+    -- loops every fence category and
     -- asks C++ for its real edge clearance, keeping the smallest (most severe: a breach
     -- anywhere dominates a merely-close boundary elsewhere); nil if there is no fence of any
     -- category. Not on the hot sweep path - once per cycle, same cost class as
