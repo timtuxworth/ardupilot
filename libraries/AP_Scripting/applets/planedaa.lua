@@ -755,7 +755,12 @@ local function get_vehicle_state()
     -- hijacking the nav target during takeoff or landing is unsafe: the existing
     -- Plane ADS-B avoidance (avoidance_adsb.cpp) already withholds action before
     -- takeoff completes and during the LAND flight stage for the same reason.
-    in_takeoff_or_landing = vehicle:is_taking_off() or vehicle:is_landing()
+    -- is_taking_off() only goes true once flight_stage reaches TAKEOFF, which Plane
+    -- does not enter until the launch itself triggers (throttle no longer
+    -- suppressed) - not vehicle:get_likely_flying() additionally covers the window
+    -- from arming through that trigger, where a commanded avoidance target could
+    -- otherwise divert the vehicle before it ever launches.
+    in_takeoff_or_landing = vehicle:is_taking_off() or vehicle:is_landing() or not vehicle:get_likely_flying()
 
     now_ms = millis()
 

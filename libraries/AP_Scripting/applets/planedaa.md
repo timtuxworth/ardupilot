@@ -206,12 +206,16 @@ For quadplanes, set `Q_ENABLE = 1` as usual (avoidance manoeuvres are only
 commanded while the vehicle is in fixed-wing flight).
 
 Avoidance manoeuvres are also withheld during takeoff and landing
-(`vehicle:is_taking_off()`/`vehicle:is_landing()`) - hijacking the nav target in
-either stage is unsafe, the same reason the existing Plane ADS-B avoidance
-(`avoidance_adsb.cpp`) withholds action before takeoff completes and during the
-LAND flight stage. Detection and alerting keep running throughout; only the
-commanded target is withheld, and any avoidance already in progress is reverted
-(the aircraft resumes its real takeoff/landing path) rather than left stale.
+(`vehicle:is_taking_off()`/`vehicle:is_landing()`), and from arming through the
+launch trigger itself (`not vehicle:get_likely_flying()`, since
+`is_taking_off()` only reads true once Plane's flight stage reaches `TAKEOFF`,
+which it does not do until the launch suppresses throttle) - hijacking the nav
+target in any of these stages is unsafe, the same reason the existing Plane
+ADS-B avoidance (`avoidance_adsb.cpp`) withholds action before takeoff
+completes and during the LAND flight stage. Detection and alerting keep
+running throughout; only the commanded target is withheld, and any avoidance
+already in progress is reverted (the aircraft resumes its real takeoff/landing
+path) rather than left stale.
 
 ## Parameters
 
