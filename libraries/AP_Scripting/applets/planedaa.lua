@@ -1442,13 +1442,11 @@ local DAA = {
         end
 
         if loiteralt.active then
-            -- The aircraft loiter owns the vehicle's target exclusively while it runs.
-            --
-            -- Consequence, accepted deliberately: the loiter circle (see loiteralt.start(),
-            -- offset from the heading at the moment it engaged) has no fence awareness at
-            -- all, so this return also suppresses ordinary fence avoidance for as long as
-            -- the loiter runs - a fence that happens to sit near the loiter point can be
-            -- breached.
+            -- The aircraft loiter owns the vehicle's target exclusively while it runs,
+            -- so this return also suppresses ordinary fence avoidance for as long as the
+            -- loiter runs. The loiter checks its own orbit's fence clearance (start()
+            -- picks a clear side, update() keeps checking) but is not immune to a fence
+            -- appearing mid-loiter that neither side clears.
             do_loitering()
             return
         -- Crewed traffic outranks whatever we are already avoiding, so the loiter trigger is
