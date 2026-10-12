@@ -9453,6 +9453,11 @@ return update()
         while self.get_sim_time() - warmup_tstart < 2 * stale_s:
             inject()
             self.wait_heartbeat()
+        # Any ALERT/AVOIDING from the warm-up above is legitimate (the contact was
+        # not yet stale) and still sits in the STATUSTEXT collection - clear it so
+        # daa_watch_no_reaction()'s very first check isn't failed by a message the
+        # watched window itself never produced.
+        self.context_clear_collection('STATUSTEXT')
 
         self.daa_watch_no_reaction(120, [
             "AVOIDING", "LOITERING", "LOITER AIRCRAFT", "TRAPPED",
