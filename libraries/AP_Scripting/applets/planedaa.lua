@@ -678,6 +678,7 @@ MIN_VM_I_COUNT = 150000
 local current_loc           = ahrs:get_position()
 local current_mode          = vehicle:get_mode()
 local in_fw_flight          = true
+local in_takeoff_or_landing = false
 
 local now_ms                = millis()
 local now_params_ms         = now_ms
@@ -751,6 +752,10 @@ local function get_vehicle_state()
         -- not a quadplane, so we are always in fixed wing flight
         in_fw_flight    = true
     end
+    -- hijacking the nav target during takeoff or landing is unsafe: the existing
+    -- Plane ADS-B avoidance (avoidance_adsb.cpp) already withholds action before
+    -- takeoff completes and during the LAND flight stage for the same reason.
+    in_takeoff_or_landing = vehicle:is_taking_off() or vehicle:is_landing()
 
     now_ms = millis()
 
@@ -1850,12 +1855,13 @@ local function update()
         -- stop issuing avoidance); otherwise avoid, but only in FW forward flight
         local trapped = DAA.trap_update()
         if not trapped then
-            if in_fw_flight then
+            if in_fw_flight and not in_takeoff_or_landing then
                 DAA.avoid(suggested_target_loc)
             else
                 -- transiently out of forward flight (e.g. a quadplane assist-flight
-                -- blip) - revert rather than leave a stale avoidance target steering
-                -- for the whole time it lasts
+                -- blip), or taking off/landing where hijacking the nav target is
+                -- unsafe - revert rather than leave a stale avoidance target
+                -- steering for the whole time it lasts
                 DAA.clear_avoidance()
             end
         end
