@@ -165,6 +165,15 @@ not of planedaa's use of it, and there is no fix at this layer - raise
 `DAA_MARGIN_FENCE` itself if you routinely fly headwind-on-approach geometries near
 fences and want margin that does not depend on the wind estimate.
 
+**Known limitation: `INCLUSION_UNION` can false-report a breach between two
+overlapping inclusion areas.** The underlying fence-clearance check
+(`distance_line_to_inclusion()`) only confirms that a **single** inclusion area
+contains both ends of the path being tested; a path that legally crosses from one
+overlapping inclusion area into a neighbouring one has no single area containing
+both ends, so it reads as breached even though the union of the two areas covers
+it the whole way. Only disjoint inclusion areas are unaffected. No fix at this
+layer yet - tracked as a follow-up.
+
 ### 5. Terrain (default altitude frame)
 
 `DAA_AVD_ALT_TP` defaults to **3 (above terrain)**, and altitude-fence avoidance
@@ -195,6 +204,14 @@ function to an RC channel:
 
 For quadplanes, set `Q_ENABLE = 1` as usual (avoidance manoeuvres are only
 commanded while the vehicle is in fixed-wing flight).
+
+Avoidance manoeuvres are also withheld during takeoff and landing
+(`vehicle:is_taking_off()`/`vehicle:is_landing()`) - hijacking the nav target in
+either stage is unsafe, the same reason the existing Plane ADS-B avoidance
+(`avoidance_adsb.cpp`) withholds action before takeoff completes and during the
+LAND flight stage. Detection and alerting keep running throughout; only the
+commanded target is withheld, and any avoidance already in progress is reverted
+(the aircraft resumes its real takeoff/landing path) rather than left stale.
 
 ## Parameters
 
