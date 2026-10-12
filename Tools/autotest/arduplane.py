@@ -11318,9 +11318,9 @@ return update()
             "DAA_TRAP_ACT": 1,    # RTL
             # Fire on the first near-miss cycle.  update() calls trap_update() before
             # DAA.avoid(), so a zero dwell means the trap is decided before the aircraft
-            # loiter can start.  With any dwell the loiter always wins the race and its
-            # mode change perturbs the trap - and DAA_AVD_ALT=0 does NOT suppress it, the
-            # loiter still starts and merely fails to command the 0 altitude.
+            # loiter can start.  DAA_AVD_ALT=0 above already suppresses the loiter
+            # entirely (it is only started if DAA_AVD_ALT > 0), so the zero dwell here is
+            # belt-and-braces against the loiter's own mode change perturbing the trap.
             "DAA_TRAP_S": 0,
         })
 
@@ -11378,6 +11378,101 @@ return update()
                 % trapped_text)
         if "(moving)" not in trapped_text:
             raise NotAchievedException("unexpected trap message: %s" % trapped_text)
+        self.disarm_vehicle(force=True)
+
+    def PlaneDAATrapResumeDuringLoiter(self):
+        '''A trapped-failsafe that fires and clears WHILE the aircraft loiter is active
+        must not strand the mission in GUIDED.
+
+        The aircraft loiter (daaltr.lua) treats any mode other than GUIDED as the pilot
+        taking over, and drops its saved pre-loiter mode when that happens. It cached
+        the mode once per cycle (get_vehicle_state(), read at the START of the cycle)
+        rather than reading it live - so when the trap's own recovery (DAA_TRAP_CLR_S)
+        restores GUIDED, the loiter's next update() in that same cycle still saw the
+        stale pre-restore mode and misread the trap's OWN restore as a pilot mode
+        change, dropping the state and leaving the AUTO mission stuck in GUIDED forever
+        instead of eventually resuming.
+
+        AVD_NMAC_XY/Z are widened so the same contact that engages the aircraft loiter
+        also counts as a near-miss once it closes in further, firing the trap without a
+        second contact. DAA_TRAP_S/CLR_S are both shortened for test speed; the contact
+        is withdrawn before DAA_TRAP_CLR_S elapses so the trap resumes GUIDED into a
+        clear sky and does not immediately re-trap.'''
+        self.install_planedaa_scripts()
+
+        self.set_parameters({
+            "SCR_ENABLE": 1,
+            "SCR_VM_I_COUNT": 1000000,
+            "ADSB_TYPE": 1,     # MAVLink: ingest ADSB_VEHICLE with no ADS-B hardware
+            "AVD_ENABLE": 1,
+            "FENCE_ENABLE": 0,
+            "AVD_WCLR_XY": 300,
+            "AVD_WCLR_Z": 50,
+            "AVD_NMAC_XY": 100,
+            "AVD_NMAC_Z": 50,
+        })
+
+        self.context_collect('STATUSTEXT')
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+
+        self.set_parameters({
+            "DAA_AVD_ALT": 50,     # required for the aircraft loiter (GUIDED) to engage
+            "DAA_TRAP_ACT": 1,     # RTL
+            "DAA_TRAP_S": 2,
+            "DAA_TRAP_CLR_S": 3,
+        })
+
+        icao = 0xF000A4
+
+        def inject_aircraft(distance_m):
+            here = self.get_location()
+            contact = self.offset_location_ne(here, 0, distance_m)
+            self.mav.mav.adsb_vehicle_send(
+                icao,
+                int(contact.lat * 1e7),
+                int(contact.lng * 1e7),
+                mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
+                int(here.get_alt_m(AltFrame.ABSOLUTE) * 1000),
+                0, 0, 0,
+                "GAJET04".encode("ascii"),
+                mavutil.mavlink.ADSB_EMITTER_TYPE_LIGHT,   # crewed -> find_aircraft/loiter path
+                1, 65535, 1200,
+            )
+
+        self.start_flying_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 60),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 3000, 0, 80),
+            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+        ])
+        self.wait_current_waypoint(2, timeout=120)
+        self.wait_text("Plane DAA", check_context=True, timeout=60)
+
+        # --- engage the aircraft loiter (GUIDED) with the contact outside NMAC range
+        tstart = self.get_sim_time()
+        while self.get_sim_time() - tstart < 60:
+            inject_aircraft(200)
+            if self.mav.flightmode == "GUIDED":
+                break
+            self.wait_heartbeat()
+        if self.mav.flightmode != "GUIDED":
+            raise NotAchievedException("did not engage the aircraft loiter (GUIDED)")
+
+        # --- close to inside NMAC range and hold until the trap fires (RTL)
+        tstart = self.get_sim_time()
+        while self.get_sim_time() - tstart < 30:
+            inject_aircraft(60)
+            if self.mav.flightmode == "RTL":
+                break
+            self.wait_heartbeat()
+        if self.mav.flightmode != "RTL":
+            raise NotAchievedException("trapped-failsafe never fired for the near-miss contact")
+
+        # --- withdraw the contact (stop injecting - AP_Avoidance prunes it after 5 s)
+        #     so the trap's recovery resumes into a clear sky rather than immediately
+        #     re-tripping, then wait past DAA_TRAP_CLR_S for the recovery to GUIDED and,
+        #     since the contact is gone, the aircraft loiter's own release back to AUTO.
+        self.wait_mode("AUTO", timeout=60)
         self.disarm_vehicle(force=True)
 
     def PlaneDAAHungTrapFires(self):
@@ -14852,6 +14947,7 @@ return update()
             Test(self.PlaneDAADroneCpaGate),
             Test(self.PlaneDAATrapNoFalseFire),
             Test(self.PlaneDAATrapCauseClassified),
+            Test(self.PlaneDAATrapResumeDuringLoiter),
             Test(self.PlaneDAAHungTrapFires),
             Test(self.PlaneDAADisableRevertsTarget),
             Test(self.PlaneDAADisableDuringLoiter),
