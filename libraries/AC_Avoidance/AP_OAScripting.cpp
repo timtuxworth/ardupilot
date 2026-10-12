@@ -14,7 +14,7 @@
 
    Based on the "Bendy Ruler" obstacle avoidance algorithm originally
    designed by Andrew Tridgell (Tridge) and the CanberraUAV team in 2018.
- 
+
    Inspired by the Copter/Rover AC_Avoidance implementation by Randy Mackay and Rishabh Singh
 */
 
