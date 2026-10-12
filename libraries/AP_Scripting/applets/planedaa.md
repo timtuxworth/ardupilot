@@ -217,6 +217,18 @@ running throughout; only the commanded target is withheld, and any avoidance
 already in progress is reverted (the aircraft resumes its real takeoff/landing
 path) rather than left stale.
 
+The hung/no-progress trap failsafe (`DAA_TRAP_ACT`) is NOT withheld in these
+stages - it runs before the takeoff/landing check and can still act (e.g. an
+RTL during rollout, or before the aircraft has launched) if it fires. This is
+only a live concern with `DAA_TRAP_ACT` set non-default.
+
+**Known limitation:** on exit, crosstrack is restored to whatever it was when
+avoidance STARTED, not whatever it should be for the leg currently flown. If
+the mission advances to a new leg while avoidance is still active, that leg's
+own crosstrack state (which the mission's waypoint-advance sets independently)
+is overwritten by the stale saved value once avoidance ends - possibly leaving
+the new leg flown direct-to-waypoint instead of along the leg, or vice versa.
+
 ## Parameters
 
 The script adds the following `DAA_` parameters to control its behaviour. It also
