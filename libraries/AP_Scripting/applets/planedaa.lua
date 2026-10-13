@@ -778,9 +778,8 @@ local function get_vehicle_state()
 
     now_ms = millis()
 
-    -- after current_mode and now_ms are current, not before: the loiter watches for the
-    -- pilot leaving GUIDED and times its cool-down off these
-    loiteralt.update_state(current_loc, current_mode, now_ms)
+    -- after now_ms is current, not before: the loiter times its cool-down off it
+    loiteralt.update_state(current_loc, now_ms)
 
     -- refresh parameters every 5 seconds, its not that urgent we know about changs
     if (now_ms - now_params_ms) > 5000 then
