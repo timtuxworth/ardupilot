@@ -63,7 +63,7 @@ function DAAloiter.new(deps)
     -- pushed in by configure()
     local loiter_cool_ms, wp_loiter_rad_m, margin_fence_m
     -- pushed in by update_state()
-    local current_loc, current_mode, now_ms
+    local current_loc, now_ms
     -- the cool-down clock is ours alone: nothing outside this module reads it
     local aircraft_seen_now_ms = millis()
     -- consecutive-refusal tracking, reset on any success: nothing outside this module reads it
@@ -84,9 +84,8 @@ function DAAloiter.new(deps)
 
     -- Positional, not a table: called every cycle, and a table literal here would be one
     -- more transient allocation the run never keeps.
-    local function update_state(new_current_loc, new_current_mode, new_now_ms)
+    local function update_state(new_current_loc, new_now_ms)
         current_loc  = new_current_loc
-        current_mode = new_current_mode
         now_ms       = new_now_ms
     end
 
@@ -325,11 +324,11 @@ function DAAloiter.new(deps)
         if not self.active then
             return
         end
-        -- Read the mode live rather than trust the cached current_mode: update_state()
-        -- caches it at the START of this cycle, but the trapped-failsafe (trap_update(),
-        -- planedaa.lua) can restore GUIDED mid-cycle, before this runs - the cached value
-        -- would then still read the pre-restore mode and misreport it as a pilot change,
-        -- dropping the saved pre-loiter mode the trap needs to return to.
+        -- Read the mode live rather than cache it at the start of the cycle: the
+        -- trapped-failsafe (trap_update(), planedaa.lua) can restore GUIDED mid-cycle,
+        -- before this runs - a cached value would still read the pre-restore mode and
+        -- misreport it as a pilot change, dropping the saved pre-loiter mode the trap
+        -- needs to return to.
         local live_mode = vehicle:get_mode()
         if live_mode ~= PLANE_MODE.GUIDED then
             gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. string.format(": Pilot changed from GUIDED to: %.0f", live_mode ))
