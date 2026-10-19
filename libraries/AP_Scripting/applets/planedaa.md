@@ -212,12 +212,12 @@ launch trigger itself (`not vehicle:get_likely_flying()`, since
 which it does not do until the launch itself ends throttle suppression) -
 hijacking the nav target in any of these stages is unsafe, the same reason the
 existing Plane ADS-B avoidance (`avoidance_adsb.cpp`) withholds action before
-takeoff completes and during the LAND flight stage. Both of those checks only
-work in AUTO - in the dedicated Takeoff flight mode, flight stage never
-reaches `TAKEOFF` at all, and GPS ground speed above 1.5 m/s before the launch
-trigger (e.g. a carried or bungee launch) can already read as flying, so a
-height-above-home backstop additionally withholds in that mode until climbing
-above 5 m. Detection and alerting keep running throughout; only the commanded
+takeoff completes and during the LAND flight stage. In dedicated Takeoff mode,
+`ModeTakeoff::update()` sets the `TAKEOFF` stage, but pre-launch cycles can still
+read `NORMAL`. AUTO's pre-launch likely-flying override does not apply there,
+and GPS ground speed above 1.5 m/s (e.g. a carried or bungee launch) can already
+read as flying. A height-above-home backstop additionally withholds in that
+mode until climbing above 5 m. Detection and alerting keep running throughout; only the commanded
 target is withheld, and any avoidance already in progress is reverted (the
 aircraft resumes its real takeoff/landing path) rather than left stale.
 
@@ -274,7 +274,7 @@ for the altitude/geo fences.
 | `DAA_SLEW_DPS` | 20 | deg/s | Maximum rate the commanded avoidance heading is allowed to change. Rate-limiting the heading smooths the oscillation a per-cycle bendy ruler produces against moving obstacles and near fences. Bypassed when the estimated time-to-conflict is below `DAA_SLEW_URG`, and also when a change larger than `DAA_BR_ANGLE` could not be slewed through before the conflict, so an urgent manoeuvre keeps full authority. Set to 0 to disable the slew limit. Must be below the turn rate the airframe can actually fly or it has no effect — see _Tuning for your vehicle_. |
 | `DAA_SLEW_URG` | 4 | s | If the estimated time-to-conflict with a moving obstacle is below this, the `DAA_SLEW_DPS` slew limit is bypassed so the aircraft can turn at full authority. Set to 0 to always apply the slew limit. |
 | `DAA_SIDE_HOLD` | 3 | s | Once a left/right avoidance side is committed for an obstacle, the opposite side must be preferred by the bendy ruler for at least this long before the aircraft is allowed to switch sides. Stops the left/right flip-flop when avoiding a moving obstacle. Set to 0 to disable side commitment. |
-| `DAA_CPA_MIN` | 2 | m/s | Minimum closing speed for a moving obstacle to be treated as a conflict. CPA (Closest Point of Approach) is the predicted minimum separation between the vehicle and a moving obstacle on their current tracks. An obstacle whose CPA stays beyond the well-clear distance and which is opening range faster than this is not avoided (it is leaving). Set to 0 to avoid regardless of closing speed. |
+| `DAA_CPA_MIN` | 2 | m/s | Minimum closing speed for a moving obstacle to be treated as a conflict. CPA (Closest Point of Approach) is the predicted minimum separation between the vehicle and a moving obstacle on their current tracks. An obstacle whose CPA stays beyond the well-clear distance and which is opening range faster than this is not avoided (it is leaving). Set to 0 to remove the minimum closing speed; an opening contact whose CPA remains beyond well clear is still ignored. |
 | `DAA_TAU_S` | 30 | s | Crewed-aircraft modified-tau conflict threshold — a crewed aircraft (not a drone/UAV) is treated as a conflict when its measured range is predicted to cross the `AVD_WCLR_XY` keep-out radius within this many seconds, using RTCA DO-365C style modified-tau (time to keep-out, not time to zero range). An aircraft already inside `AVD_WCLR_XY` is always a conflict regardless of this setting. |
 | `DAA_STALE_S` | 3 | s | Traffic-feed staleness warning threshold. When avoiding a network-sourced moving obstacle (ADS-B drone/aircraft) whose position has not updated for longer than this, a `traffic stale Ns` warning is sent to the GCS (the DAA is acting on lagged data, e.g. from an intermittent telemetry/ADS-B link), and a `lost <label>` warning if it then disappears. Fences are on-board and never go stale. Set to 0 to disable. |
 | `DAA_TRAP_ACT` | 0 | | Trapped-failsafe action when avoidance cannot get the vehicle out of trouble — a sustained fence breach, a crewed aircraft inside the near-miss volume, a drone inside its own near-miss volume (`DAA_NMAC_UAV_XY/Z`), or a hung avoidance (see `DAA_HUNG_ALRT_S`) — for `DAA_TRAP_S`. `0`: disabled (avoidance just keeps trying), `1`: RTL, `2`: QRTL, `3`: QLOITER, `4`: QLAND. QLOITER/QRTL/QLAND have zero turn radius (safest in a tight space); the VTOL options fall back to RTL if `Q_ENABLE=0`. See _Trapped failsafe_ below. |

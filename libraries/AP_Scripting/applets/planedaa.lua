@@ -42,7 +42,7 @@ Inspired by the Copter/Rover AC_Avoidance implementation by Randy Mackay and Ris
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-117"
+SCRIPT_VERSION      = "4.8.0-118"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -314,7 +314,7 @@ PARAM.SIDE_HOLD = bind_add_param('SIDE_HOLD', 26, 3)
 --[[
     // @Param: DAA_CPA_MIN
     // @DisplayName: Avoidance minimum closing speed
-    // @Description: Minimum closing speed for a moving obstacle to be treated as a conflict. CPA (Closest Point of Approach) is the predicted minimum separation between the vehicle and a moving obstacle on their current tracks. A moving obstacle whose CPA stays beyond the well-clear distance and which is opening range faster than this is not avoided (it is leaving). 0 avoids regardless of closing speed.
+    // @Description: Minimum closing speed for a moving obstacle to be treated as a conflict. CPA (Closest Point of Approach) is the predicted minimum separation between the vehicle and a moving obstacle on their current tracks. A moving obstacle whose CPA stays beyond the well-clear distance and which is opening range faster than this is not avoided (it is leaving). 0 removes the minimum closing speed; an opening contact whose CPA remains beyond well clear is still ignored.
     // @Units: m/s
     // @Range: 0 20
     // @Increment: 0.5
@@ -759,13 +759,11 @@ local function get_vehicle_state()
     -- does not enter until the launch itself triggers (throttle no longer
     -- suppressed) - not vehicle:get_likely_flying() additionally covers the window
     -- from arming through that trigger, where a commanded avoidance target could
-    -- otherwise divert the vehicle before it ever launches. Both of those only work
-    -- in AUTO (ArduPlane/Plane.cpp's update_flight_stage() and is_flying.cpp's
-    -- pre-launch override are both gated on control_mode == mode_auto) - in the
-    -- dedicated Takeoff flight mode, flight_stage never reaches TAKEOFF at all, and
-    -- GPS ground speed above 1.5 m/s (e.g. a carried or bungee launch, before the
-    -- launch trigger fires) already reads as flying. A height-above-home backstop
-    -- covers that mode instead.
+    -- otherwise divert the vehicle before it ever launches. In dedicated Takeoff
+    -- mode, ModeTakeoff::update() sets the TAKEOFF stage, but pre-launch cycles can
+    -- still read NORMAL. AUTO's pre-launch likely-flying override does not apply
+    -- there, and GPS ground speed above 1.5 m/s (e.g. a carried or bungee launch)
+    -- can already read as flying. A height-above-home backstop covers that window.
     local height_above_home = 0
     if current_mode == PLANE_MODE.TAKEOFF then
         local ned_home = ahrs:get_relative_position_NED_home()
