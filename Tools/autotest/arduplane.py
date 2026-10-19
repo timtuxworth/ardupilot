@@ -11983,9 +11983,6 @@ return update()
             "FENCE_ENABLE": 0,     # enabled in-flight so arming is unimpeded
             "FENCE_TYPE": 4,       # polyfence (circle exclusion)
             "FENCE_ACTION": 0,     # report only
-            "SIM_WIND_TURB": 0,
-            "SIM_WIND_SPD": 11,
-            "SIM_WIND_DIR": 90,
         })
 
         home = self.home_position_as_location()
@@ -12007,6 +12004,9 @@ return update()
             self.reboot_sitl()
             self.wait_ready_to_arm()
             self.set_parameters({
+                "SIM_WIND_TURB": 0,
+                "SIM_WIND_SPD": 11,
+                "SIM_WIND_DIR": 90,
                 "DAA_MARGIN_FENCE": base_margin,
                 "DAA_WIND_MARG": wind_marg,
             })
@@ -12712,6 +12712,7 @@ return update()
                 report = self.assert_receive_message('TERRAIN_REPORT', timeout=60)
                 if report.pending == 0:
                     break
+                self.delay_sim_time(1)
             self.progress("Terrain ready")
 
         # With FENCE_MARGIN=2 and DAA_MARGIN_ALT=20 the script clamps to
