@@ -42,7 +42,7 @@ Inspired by the Copter/Rover AC_Avoidance implementation by Randy Mackay and Ris
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-116"
+SCRIPT_VERSION      = "4.8.0-117"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -1432,6 +1432,11 @@ local DAA = {
 
     -- execute avoidance maneuvers depending on the nature of the obstacle
     function DAA.avoid(new_target_loc)
+        -- Detection can span a pilot or failsafe mode change. Do not take control
+        -- using the navigation state captured before that change.
+        if vehicle:get_mode() ~= current_mode then
+            return
+        end
         if daa_action == 0 then
             -- DAA_AVD_ACTION can be used to disable avoidance manoeuvres - revert any
             -- target already commanded rather than leaving it hijacked if this changes
@@ -1790,6 +1795,10 @@ local DAA = {
         local mode_now = vehicle:get_mode()
 
         if not trap_active then
+            if mode_now ~= current_mode then
+                trap_since_ms = uint32_t(0)
+                return false
+            end
             local compromised, cause = daa_compromised_now()
             if not compromised then
                 trap_since_ms = uint32_t(0)
