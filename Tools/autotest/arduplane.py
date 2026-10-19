@@ -10871,6 +10871,166 @@ return update()
         self.progress("crewed traffic preempted the fence avoidance")
         self.disarm_vehicle(force=True)
 
+    def _PlaneDAAModeChangeDuringDetection(self, trap):
+        '''Place a pilot mode change inside the cycle, after the navigation snapshot.
+
+        Changing mode from the test over MAVLink cannot reliably hit this window.
+        Instrument only the installed applet, immediately before the decision under
+        test, and require the production guard to leave that change in force.
+        '''
+        self.install_planedaa_scripts()
+        script = self.installed_script_path("planedaa.lua")
+        with open(script) as f:
+            content = f.read()
+        if trap:
+            anchor = "        local mode_now = vehicle:get_mode()\n"
+        else:
+            anchor = "    function DAA.avoid(new_target_loc)\n"
+        injection = '''        if aircraft_avoiding ~= nil and current_mode == PLANE_MODE.AUTO then
+            assert(vehicle:set_mode(PLANE_MODE.MANUAL))
+            gcs:send_text(MAV_SEVERITY.WARNING, "DAA test pilot takeover")
+        end
+'''
+        if content.count(anchor) != 1:
+            raise NotAchievedException("DAA takeover injection point changed")
+        if trap:
+            content = content.replace(anchor, injection + anchor)
+        else:
+            content = content.replace(anchor, anchor + injection)
+        self.install_script_content("planedaa.lua", content)
+        self.set_parameters({
+            "SCR_ENABLE": 1,
+            "SCR_VM_I_COUNT": 1000000,
+            "ADSB_TYPE": 1,
+            "AVD_ENABLE": 1,
+            "AVD_WCLR_XY": 300,
+            "AVD_WCLR_Z": 100,
+            "AVD_NMAC_XY": 150,
+            "AVD_NMAC_Z": 50,
+        })
+        self.context_collect('STATUSTEXT')
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+        self.set_parameters({
+            "DAA_AVD_ALT": 50,
+            "DAA_AVD_ALT_TP": 1,
+            "DAA_TRAP_ACT": 1 if trap else 0,
+            "DAA_TRAP_S": 0,
+        })
+        self.start_flying_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 60),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 3000, 0, 100),
+            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+        ])
+        self.wait_current_waypoint(2, timeout=120)
+        self.wait_text("Plane DAA", check_context=True, timeout=60)
+
+        tstart = self.get_sim_time()
+        while self.get_sim_time() - tstart < 30:
+            here = self.get_location()
+            contact = self.offset_location_ne(here, 0, 100)
+            self.mav.mav.adsb_vehicle_send(
+                0xABC123, int(contact.lat * 1e7), int(contact.lng * 1e7),
+                mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
+                int(here.get_alt_m(AltFrame.ABSOLUTE) * 1000),
+                0, 0, 0, b"TAKEOVER", mavutil.mavlink.ADSB_EMITTER_TYPE_LIGHT,
+                1, 65535, 1200,
+            )
+            self.wait_heartbeat()
+            if self.statustext_in_collections("DAA test pilot takeover") is not None:
+                break
+        else:
+            raise NotAchievedException("Did not exercise the DAA takeover window")
+
+        # Watch long enough to see a command sent in the injection cycle. Force
+        # disarm afterwards: MANUAL is intentionally left in the pilot's control.
+        tstart = self.get_sim_time()
+        while self.get_sim_time() - tstart < 5:
+            self.wait_heartbeat()
+            if self.mav.flightmode != "MANUAL":
+                raise NotAchievedException("DAA overrode pilot takeover: %s" % self.mav.flightmode)
+        for text in ("LOITER AIRCRAFT", "TRAPPED ("):
+            if self.statustext_in_collections(text) is not None:
+                raise NotAchievedException("DAA commanded takeover after pilot change: %s" % text)
+        self.disarm_vehicle(force=True)
+
+    def PlaneDAALoiterRespectsPilotTakeover(self):
+        '''A mode change after detection starts must prevent the aircraft loiter.'''
+        self._PlaneDAAModeChangeDuringDetection(trap=False)
+
+    def PlaneDAATrapRespectsPilotTakeover(self):
+        '''A mode change after detection starts must prevent a new trapped failsafe.'''
+        self._PlaneDAAModeChangeDuringDetection(trap=True)
+
+    def PlaneDAAAircraftModifiedTau(self):
+        '''A physically closing contact must trigger the measured-range tau branch.
+
+        Warm up with the loiter disabled so the first-fix velocity fallback cannot
+        pass the test. Then enable the loiter and require it before entering the
+        standoff. Unlike the existing converging test, the contact follows a fixed
+        world trajectory rather than following the vehicle at a constant range.
+        '''
+        self.install_planedaa_scripts()
+        self.set_parameters({
+            "SCR_ENABLE": 1,
+            "SCR_VM_I_COUNT": 1000000,
+            "ADSB_TYPE": 1,
+            "AVD_ENABLE": 1,
+            "AVD_WCLR_XY": 300,
+            # Above the bendy-ruler vertical gate, inside the aircraft detector's
+            # extended gate: horizontal avoidance cannot change the approach.
+            "AVD_WCLR_Z": 20,
+        })
+        self.context_collect('STATUSTEXT')
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+        self.set_parameters({
+            "DAA_AVD_ALT": 0,
+            "DAA_AVD_ALT_TP": 1,
+            "DAA_MARGIN_CA": 2000,
+            "DAA_MARGIN_CA_Z": 100,
+            "DAA_TAU_S": 30,
+            "DAA_TRAP_ACT": 0,
+        })
+        self.start_flying_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 100),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 5000, 0, 100),
+            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+        ])
+        self.wait_current_waypoint(2, timeout=120)
+        self.wait_text("Plane DAA", check_context=True, timeout=60)
+        self.wait_altitude(95, 105, relative=True, timeout=120)
+        self.delay_sim_time(8, reason="settle before the closing contact")
+        origin = self.get_location()
+        tstart = self.get_sim_time()
+        enabled = False
+        while self.get_sim_time() - tstart < 80:
+            elapsed = self.get_sim_time() - tstart
+            # A southbound aircraft at 15 m/s, initially 2 km north of us.
+            contact = self.offset_location_ne(origin, 2000 - 15 * elapsed, 0)
+            self.mav.mav.adsb_vehicle_send(
+                0xABC124, int(contact.lat * 1e7), int(contact.lng * 1e7),
+                mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
+                int((origin.get_alt_m(AltFrame.ABSOLUTE) + 50) * 1000),
+                18000, 1500, 0, b"TAUCLOSE", mavutil.mavlink.ADSB_EMITTER_TYPE_LIGHT,
+                1, 65535, 1200,
+            )
+            if elapsed >= 8 and not enabled:
+                self.set_parameter("DAA_AVD_ALT", 50)
+                enabled = True
+            self.wait_heartbeat()
+            distance = self.get_distance(contact, self.get_location())
+            if distance <= 400:
+                raise NotAchievedException("Modified tau did not engage before the standoff: %.0fm" % distance)
+            if self.mav.flightmode == "GUIDED":
+                if not enabled:
+                    raise NotAchievedException("Loiter engaged during tau warm-up")
+                self.progress("Modified tau engaged at %.0fm" % distance)
+                break
+        else:
+            raise NotAchievedException("Modified tau never engaged the aircraft loiter")
+        self.disarm_vehicle(force=True)
+
     def PlaneDAAAircraftCpaGate(self):
         '''planedaa's conservative CPA gate must SUPPRESS the aircraft loiter for a
         detected crewed aircraft that is in the outer well-clear band and clearly diverging
@@ -12712,7 +12872,7 @@ return update()
                 report = self.assert_receive_message('TERRAIN_REPORT', timeout=60)
                 if report.pending == 0:
                     break
-                self.delay_sim_time(1)
+                self.delay_sim_time(1, reason="wait for terrain requests")
             self.progress("Terrain ready")
 
         # With FENCE_MARGIN=2 and DAA_MARGIN_ALT=20 the script clamps to
@@ -15022,6 +15182,9 @@ return update()
             Test(self.PlaneDAAMaskedDroneBehindDismissedAircraft),
             Test(self.PlaneDAAFenceCandidateChecksActiveTraffic),
             Test(self.PlaneDAAAircraftPreemptsAvoidance),
+            Test(self.PlaneDAALoiterRespectsPilotTakeover),
+            Test(self.PlaneDAATrapRespectsPilotTakeover),
+            Test(self.PlaneDAAAircraftModifiedTau),
             Test(self.PlaneDAAAircraftCpaGate),
             Test(self.PlaneDAAAircraftConverging),
             Test(self.PlaneDAAAlertClearsPerVolume),
