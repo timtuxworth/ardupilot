@@ -10962,6 +10962,111 @@ return update()
         '''A mode change after detection starts must prevent a new trapped failsafe.'''
         self._PlaneDAAModeChangeDuringDetection(trap=True)
 
+    def _PlaneDAALoiterHandbackModeChange(self, force_stop):
+        '''Inject an external mode change at the handback boundary.
+
+        Instrument only the installed loiter module so the takeover lands after
+        the applet's live-mode guard, immediately before stop() can restore AUTO.
+        Cover expired-cooldown release and forced cleanup with a cooldown pending.
+        '''
+        self.install_planedaa_scripts()
+        module = self.installed_script_module_path("daaltr.lua")
+        with open(module) as f:
+            content = f.read()
+        anchor = "    function self.stop(force_stop)\n"
+        if content.count(anchor) != 1:
+            raise NotAchievedException("DAA handback injection point changed")
+        injection = '''        if self.active and force_stop == %s then
+            assert(vehicle:set_mode(PLANE_MODE.RTL))
+            gcs:send_text(MAV_SEVERITY.WARNING, "DAA test handback takeover")
+        end
+''' % ("true" if force_stop else "false")
+        with open(module, "w") as f:
+            f.write(content.replace(anchor, anchor + injection))
+
+        self.set_parameters({
+            "SCR_ENABLE": 1,
+            "SCR_VM_I_COUNT": 1000000,
+            "ADSB_TYPE": 1,
+            "AVD_ENABLE": 1,
+            "AVD_WCLR_XY": 300,
+            "AVD_WCLR_Z": 100,
+            "FENCE_ENABLE": 0,
+            "RC7_OPTION": 308,
+        })
+        self.context_collect('STATUSTEXT')
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+        self.set_parameters({
+            "DAA_AVD_ALT": 50,
+            "DAA_AVD_ALT_TP": 1,
+            "DAA_TRAP_ACT": 0,
+            "DAA_LTR_COOL_S": 60 if force_stop else 0,
+        })
+        self.set_rc(7, 1000)
+        self.start_flying_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 60),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 3000, 0, 100),
+            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+        ])
+        self.wait_current_waypoint(2, timeout=120)
+        self.wait_text("Plane DAA", check_context=True, timeout=60)
+
+        def inject_aircraft():
+            here = self.get_location()
+            contact = self.offset_location_ne(here, 0, 100)
+            self.mav.mav.adsb_vehicle_send(
+                0xABC125, int(contact.lat * 1e7), int(contact.lng * 1e7),
+                mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
+                int(here.get_alt_m(AltFrame.ABSOLUTE) * 1000),
+                0, 0, 0, b"HANDBACK", mavutil.mavlink.ADSB_EMITTER_TYPE_LIGHT,
+                1, 65535, 1200,
+            )
+
+        tstart = self.get_sim_time()
+        while self.get_sim_time() - tstart < 60:
+            inject_aircraft()
+            self.wait_heartbeat()
+            if self.mav.flightmode == "GUIDED":
+                break
+        else:
+            raise NotAchievedException("Did not engage the aircraft loiter before handback")
+
+        if force_stop:
+            # Keep the contact present: switching DAA off must exercise forced
+            # cleanup, rather than passing through an ordinary traffic release.
+            self.set_rc(7, 2000)
+        # Otherwise stop injecting and let the contact expire. With zero cooldown
+        # stop(false) must release immediately, which exposed the original defect.
+        tstart = self.get_sim_time()
+        while self.get_sim_time() - tstart < 30:
+            if force_stop:
+                inject_aircraft()
+            self.wait_heartbeat()
+            if self.statustext_in_collections("DAA test handback takeover") is not None:
+                break
+        else:
+            raise NotAchievedException("Did not exercise the DAA handback window")
+
+        tstart = self.get_sim_time()
+        while self.get_sim_time() - tstart < 5:
+            if force_stop:
+                inject_aircraft()
+            self.wait_heartbeat()
+            if self.mav.flightmode != "RTL":
+                raise NotAchievedException("DAA overrode handback takeover: %s" % self.mav.flightmode)
+        if self.statustext_in_collections("Loiter Done set mode:") is not None:
+            raise NotAchievedException("DAA restored the saved mode over the handback takeover")
+        self.disarm_vehicle(force=True)
+
+    def PlaneDAALoiterHandbackRespectsPilotTakeover(self):
+        '''Expired-cooldown loiter release must preserve an external mode change.'''
+        self._PlaneDAALoiterHandbackModeChange(force_stop=False)
+
+    def PlaneDAALoiterForcedStopRespectsPilotTakeover(self):
+        '''Forced loiter cleanup must preserve an external mode change.'''
+        self._PlaneDAALoiterHandbackModeChange(force_stop=True)
+
     def PlaneDAAAircraftModifiedTau(self):
         '''A physically closing contact must trigger the measured-range tau branch.
 
@@ -15183,6 +15288,8 @@ return update()
             Test(self.PlaneDAAFenceCandidateChecksActiveTraffic),
             Test(self.PlaneDAAAircraftPreemptsAvoidance),
             Test(self.PlaneDAALoiterRespectsPilotTakeover),
+            Test(self.PlaneDAALoiterHandbackRespectsPilotTakeover),
+            Test(self.PlaneDAALoiterForcedStopRespectsPilotTakeover),
             Test(self.PlaneDAATrapRespectsPilotTakeover),
             Test(self.PlaneDAAAircraftModifiedTau),
             Test(self.PlaneDAAAircraftCpaGate),
