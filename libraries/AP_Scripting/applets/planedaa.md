@@ -237,7 +237,7 @@ is overwritten by the stale saved value once avoidance ends - possibly leaving
 the new leg flown direct-to-waypoint instead of along the leg, or vice versa.
 
 Some unclassified traffic contacts can delay drone alerts and early avoidance.
-A pilot mode change made at the exact moment DAA starts a manoeuvre may still
+A pilot mode change made at the exact moment DAA starts or ends a manoeuvre may still
 be overridden; the script checks for mode changes, but the check and command
 are not atomic.
 
@@ -659,6 +659,10 @@ and nothing else:
 | `stop(force)` | end it; returns false if it declined (the cool-down is still running) |
 | `update()` | call regularly while active; notices the pilot leaving GUIDED |
 | `aircraft_seen()` | refresh the cool-down timer |
+
+If the pilot or another failsafe changes flight mode during an aircraft loiter,
+DAA relinquishes the loiter without restoring the saved mode. This takes
+priority over the loiter cooldown and forced cleanup.
 
 So a different policy is a different module providing those five. Write `daaltr2.lua`,
 change one line in `planedaa.lua`:
