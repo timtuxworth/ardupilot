@@ -227,12 +227,19 @@ takeoff/landing check and can still act (e.g. an RTL during rollout, or before
 the aircraft has launched) if it fires. This is only a live concern with
 `DAA_TRAP_ACT` set non-default.
 
+## Known limitations
+
 **Known limitation:** on exit, crosstrack is restored to whatever it was when
 avoidance STARTED, not whatever it should be for the leg currently flown. If
 the mission advances to a new leg while avoidance is still active, that leg's
 own crosstrack state (which the mission's waypoint-advance sets independently)
 is overwritten by the stale saved value once avoidance ends - possibly leaving
 the new leg flown direct-to-waypoint instead of along the leg, or vice versa.
+
+Some unclassified traffic contacts can delay drone alerts and early avoidance.
+A pilot mode change made at the exact moment DAA starts a manoeuvre may still
+be overridden; the script checks for mode changes, but the check and command
+are not atomic.
 
 ## Parameters
 
