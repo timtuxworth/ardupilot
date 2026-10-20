@@ -22,7 +22,7 @@
 
 local DAAloiter = {}
 
-DAAloiter.SCRIPT_VERSION = "4.8.0-005"
+DAAloiter.SCRIPT_VERSION = "4.8.0-006"
 DAAloiter.SCRIPT_NAME = "DAA loiter"
 DAAloiter.SCRIPT_NAME_SHORT = "DAAloiter"
 
@@ -267,6 +267,14 @@ function DAAloiter.new(deps)
     end
 
     function self.stop(force_stop)
+        -- A pilot or failsafe mode change ends our ownership, even if the
+        -- cooldown expired or this is forced cleanup. Never restore over it.
+        if vehicle:get_mode() ~= PLANE_MODE.GUIDED then
+            previous_mode = -1
+            saved_guided_target_loc = nil
+            self.active = false
+            return true
+        end
         if not force_stop then
             -- hold the loiter for DAA_LTR_COOL_S after the aircraft was last seen, so a
             -- briefly-dropped or laggy feed cannot thrash GUIDED<->AUTO
