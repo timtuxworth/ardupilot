@@ -42,7 +42,7 @@ Inspired by the Copter/Rover AC_Avoidance implementation by Randy Mackay and Ris
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-118"
+SCRIPT_VERSION      = "4.8.0-119"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -1055,6 +1055,37 @@ local DAA = {
 
     end
 
+    local arm_auth_id = assert(arming:get_aux_auth_id(), SCRIPT_NAME_SHORT .. ": failed to get arm auth ID")
+    local home_check_ms = uint32_t(0)
+
+    -- A landing site inside the fixed-wing fence buffer can conflict with RTL.
+    -- Use auxiliary authorization so the normal pre-arm checks report the failure.
+    function DAA.pre_arm_check()
+        if arming:is_armed() then
+            return
+        end
+        if not DAA.enabled or daa_action == 0 then
+            arming:set_aux_auth_passed(arm_auth_id)
+            return
+        end
+        if (now_ms - home_check_ms) < 500 then
+            return
+        end
+        home_check_ms = now_ms
+        if not ahrs:home_is_set() then
+            arming:set_aux_auth_failed(arm_auth_id, SCRIPT_NAME_SHORT .. ": Waiting for home")
+            return
+        end
+        local clearance_m = obstacles.nearest_fence_clearance_m(ahrs:get_home())
+        local wind_ms = calculate_windspeed()
+        local margin_m = margin_fence_m + PARAM.WIND_MARG:get() * math.max(0, wind_ms - PARAM.WIND_MIN:get())
+        if clearance_m ~= nil and clearance_m <= margin_m then
+            arming:set_aux_auth_failed(arm_auth_id, SCRIPT_NAME_SHORT .. ": Fence too close to home for safe DAA")
+        else
+            arming:set_aux_auth_passed(arm_auth_id)
+        end
+    end
+
     function DAA.disable()
         DAA.enabled = false
         gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. " disabled")
@@ -1869,6 +1900,8 @@ local function update()
         end
         last_switch_state = switch_state
     end
+
+    DAA.pre_arm_check()
 
     if DAA.isactive() then
         local suggested_target_loc = DAA.take_report(core.detect())
