@@ -236,7 +236,21 @@ area. It uses auxiliary arming authorization, like `arming-checks.lua`, and
 clears automatically when home, the fence or the margin changes enough to pass.
 The check applies while DAA avoidance is enabled; disabling DAA or setting
 `DAA_AVD_ACTION=0` releases this check. It does not change avoidance in flight.
-Passing this check does not guarantee sufficient turning or stopping room for RTL.
+The clearance already includes ArduPilot's horizontal fence margin; DAA compares
+that clearance against its own buffer. Wind allowance uses the current AHRS
+wind estimate, which may be unavailable or inaccurate before flight. A calm
+pre-arm estimate does not guarantee enough clearance for wind encountered later.
+
+Only currently enabled fences are checked. A fence that remains disabled until
+arming or takeoff (automatic fence enable) is not assessed by this check while
+disarmed. Passing this check does not guarantee sufficient turning or stopping
+room for RTL, or prevent every VTOL-transition overshoot.
+
+DAA uses one of ArduPilot's three shared auxiliary arming authorization slots.
+Other scripts, including `arming-checks.lua`, also consume slots. If none is
+available, DAA fails to load and normal arming is rejected with
+`Too many auxiliary authorisers`. Before DAA's delayed startup completes,
+arming waits for auxiliary authorization.
 
 **Known limitation:** on exit, crosstrack is restored to whatever it was when
 avoidance STARTED, not whatever it should be for the leg currently flown. If
