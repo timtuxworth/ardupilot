@@ -229,6 +229,15 @@ the aircraft has launched) if it fires. This is only a live concern with
 
 ## Known limitations
 
+The pre-arm check reports `pDAA: Fence too close to home for safe DAA` and
+prevents arming when home is within the DAA fence margin (including wind
+allowance) of an enabled horizontal fence, or is already outside its permitted
+area. It uses auxiliary arming authorization, like `arming-checks.lua`, and
+clears automatically when home, the fence or the margin changes enough to pass.
+The check applies while DAA avoidance is enabled; disabling DAA or setting
+`DAA_AVD_ACTION=0` releases this check. It does not change avoidance in flight.
+Passing this check does not guarantee sufficient turning or stopping room for RTL.
+
 **Known limitation:** on exit, crosstrack is restored to whatever it was when
 avoidance STARTED, not whatever it should be for the leg currently flown. If
 the mission advances to a new leg while avoidance is still active, that leg's
