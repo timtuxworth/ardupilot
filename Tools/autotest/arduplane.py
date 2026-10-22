@@ -8716,6 +8716,38 @@ return update()
         self.set_parameter("FENCE_ENABLE", 0)
         expect_arm_success()
 
+        self.set_parameter("FENCE_ENABLE", 1)
+
+        # Home is inside an inclusion circle, but only 40 m from its edge.
+        # A smaller DAA margin must permit arming; the normal margin must not.
+        self.upload_fences_from_locations([(
+            mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_INCLUSION,
+            {"radius": 100, "loc": self.offset_location_ne(home, 60, 0)},
+        )])
+        refresh_check()
+        self.assert_arm_failure(failure)
+        self.set_parameter("DAA_MARGIN_FENCE", 20)
+        expect_arm_success()
+        self.set_parameter("DAA_MARGIN_FENCE", 60)
+
+        # Keep the vehicle inside a generous inclusion polygon, then move only
+        # home outside it. This isolates DAA's home check from the core check
+        # for a vehicle that is itself breaching the fence.
+        self.upload_fences_from_locations([(
+            mavutil.mavlink.MAV_CMD_NAV_FENCE_POLYGON_VERTEX_INCLUSION, [
+                self.offset_location_ne(home, -200, -200),
+                self.offset_location_ne(home, -200, 200),
+                self.offset_location_ne(home, 200, 200),
+                self.offset_location_ne(home, 200, -200),
+            ],
+        )])
+        expect_arm_success()
+        self.set_home(self.offset_location_ne(home, 240, 0))
+        refresh_check()
+        self.assert_arm_failure(failure)
+        self.set_home(home)
+        expect_arm_success()
+
     def PlaneDAAFenceBreachEscape(self):
         '''planedaa must not trap the plane inside an exclusion fence after a breach.
         Home is inside a large exclusion circle.  The fence is enabled after takeoff
