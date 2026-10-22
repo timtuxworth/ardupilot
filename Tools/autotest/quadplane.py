@@ -441,14 +441,16 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
                 status = self.poll_message('FENCE_STATUS', quiet=True)
                 if status.breach_status == 0:
                     break
-                if self.mode_is('QRTL', drain_mav=False):
+                # These checks must share a heartbeat: drain_mav=False
+                # still waits for another one unless cached=True is set.
+                if self.mode_is('QRTL', cached=True):
                     # A heartbeat can precede the periodic fence-status
                     # message. Query the current state before judging it.
                     status = self.poll_message('FENCE_STATUS', quiet=True)
                     if status.breach_status != 0:
                         raise NotAchievedException('QRTL started before the fence breach cleared')
                     break
-                if not self.mode_is('RTL', drain_mav=False):
+                if not self.mode_is('RTL', cached=True):
                     raise NotAchievedException('Left RTL during fence recovery')
             self.wait_mode('QRTL')
             self.wait_disarmed(timeout=180)
