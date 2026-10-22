@@ -427,12 +427,13 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
             self.set_rc(7, 1000)
             if enable_method == 'auxiliary':
                 self.set_rc(7, 2000)
+            self.context_collect('HEARTBEAT')
             self.start_flying_simple_relhome_mission([
                 (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 80),
                 (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 1200, 0, 80),
             ])
             self.wait_message_field_values('FENCE_STATUS', {'breach_status': 1}, timeout=120)
-            self.wait_mode('RTL')
+            rtl_mode = self.get_mode_from_mode_mapping('RTL')
             tstart = self.get_sim_time()
             while True:
                 if self.get_sim_time_cached() - tstart > 120:
@@ -450,8 +451,13 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
                     if status.breach_status != 0:
                         raise NotAchievedException('QRTL started before the fence breach cleared')
                     break
-                if not self.mode_is('RTL', cached=True):
+                seen_rtl = any(m.custom_mode == rtl_mode for m in self.context_collection('HEARTBEAT'))
+                if not self.mode_is('RTL', cached=True) and (seen_rtl or not self.mode_is('AUTO', cached=True)):
                     raise NotAchievedException('Left RTL during fence recovery: mode=%u' % self.get_mode(cached=True))
+            # RTL may already have completed by the time breach telemetry is
+            # consumed. Check its history instead of waiting for it to recur.
+            if not any(m.custom_mode == rtl_mode for m in self.context_collection('HEARTBEAT')):
+                raise NotAchievedException('Fence recovery never entered RTL')
             self.wait_mode('QRTL')
             self.wait_disarmed(timeout=180)
         finally:
