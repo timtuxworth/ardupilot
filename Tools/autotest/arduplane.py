@@ -8637,6 +8637,85 @@ return update()
         # planedaa + its modules need more than the default 200 KB SITL heap to run.
         self.set_parameters({"SCR_HEAP_SIZE": 262144})
 
+    def PlaneDAAHomeFencePreArm(self):
+        """Home inside the DAA fence buffer must fail auxiliary arming checks."""
+        self.install_planedaa_scripts()
+        self.set_parameters({
+            "SCR_ENABLE": 1,
+            "SCR_VM_I_COUNT": 1000000,
+            "FENCE_ENABLE": 0,
+            "FENCE_TYPE": 4,
+            "FENCE_ACTION": 0,
+            "RC7_OPTION": 308,
+        })
+        self.context_collect('STATUSTEXT')
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+        home = self.home_position_as_location()
+        self.upload_fences_from_locations([(
+            mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION,
+            {"radius": 60, "loc": self.offset_location_ne(home, 100, 0)},
+        )])
+        self.wait_text("Plane DAA", check_context=True, timeout=60)
+        self.set_rc(7, 1000)
+        failure = "pDAA: Fence too close to home for safe DAA"
+
+        def refresh_check():
+            self.delay_sim_time(6, reason="allow DAA parameters and pre-arm check to refresh")
+
+        def expect_arm_success():
+            refresh_check()
+            self.arm_vehicle()
+            self.disarm_vehicle()
+
+        # Stored but disabled fences must not block arming. Once enabled, home
+        # is physically clear by 40 m, but inside the default turn-radius buffer.
+        expect_arm_success()
+        self.set_parameter("FENCE_ENABLE", 1)
+        refresh_check()
+        self.assert_arm_failure(failure)
+
+        # Clearance changes must release and re-apply authorization without
+        # restarting the script. Successful arms prove this is not just text.
+        self.set_parameter("DAA_MARGIN_FENCE", 20)
+        expect_arm_success()
+        self.set_parameter("DAA_MARGIN_FENCE", 60)
+        refresh_check()
+        self.assert_arm_failure(failure)
+
+        self.set_rc(7, 2000)
+        expect_arm_success()
+        self.set_rc(7, 1000)
+        refresh_check()
+        self.assert_arm_failure(failure)
+
+        self.set_parameter("DAA_AVD_ACTION", 0)
+        expect_arm_success()
+        self.set_parameter("DAA_AVD_ACTION", 1)
+        refresh_check()
+        self.assert_arm_failure(failure)
+
+        # Uploading a fence farther from home must also clear the failure.
+        self.upload_fences_from_locations([(
+            mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION,
+            {"radius": 60, "loc": self.offset_location_ne(home, 200, 0)},
+        )])
+        expect_arm_success()
+
+        # Match the flight-log case with a polygon boundary close to home.
+        self.upload_fences_from_locations([(
+            mavutil.mavlink.MAV_CMD_NAV_FENCE_POLYGON_VERTEX_EXCLUSION, [
+                self.offset_location_ne(home, 40, -100),
+                self.offset_location_ne(home, 40, 100),
+                self.offset_location_ne(home, 100, 100),
+                self.offset_location_ne(home, 100, -100),
+            ],
+        )])
+        refresh_check()
+        self.assert_arm_failure(failure)
+        self.set_parameter("FENCE_ENABLE", 0)
+        expect_arm_success()
+
     def PlaneDAAFenceBreachEscape(self):
         '''planedaa must not trap the plane inside an exclusion fence after a breach.
         Home is inside a large exclusion circle.  The fence is enabled after takeoff
@@ -15263,6 +15342,7 @@ return update()
             self.MAV_CMD_NAV_LOITER_TURNS_zero_turn,
             self.RudderArmingWithArmingChecksSkipped,
             self.FenceDoubleBreach,
+            Test(self.PlaneDAAHomeFencePreArm),
             Test(self.PlaneDAAFenceBreachEscape),
             Test(self.PlaneDAAFenceAvoidance),
             Test(self.PlaneDAAFenceLabelScoped),
