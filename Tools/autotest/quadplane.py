@@ -448,7 +448,8 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
                     if status.breach_status != 0:
                         raise NotAchievedException('QRTL started before the fence breach cleared')
                     break
-                self.assert_mode_is('RTL')
+                if not self.mode_is('RTL', drain_mav=False):
+                    raise NotAchievedException('Left RTL during fence recovery')
             self.wait_mode('QRTL')
             self.wait_disarmed(timeout=180)
         finally:
