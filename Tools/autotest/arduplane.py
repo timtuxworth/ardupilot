@@ -9384,9 +9384,10 @@ return update()
             "AVD_ENABLE": 1,
             "AVD_UAV_XY": 150,
             "AVD_UAV_Z": 25,
-            "AVD_GND_ALT": 3,
             "AVD_GND_SPD": 2,
         })
+
+        self.assert_parameter_value_pct("AVD_GND_ALT", 10, 0)
 
         self.context_collect('STATUSTEXT')
         self.reboot_sitl()
@@ -9420,7 +9421,8 @@ return update()
                 int(parked_loc.lat * 1e7) + (sample_count[0] % 2),
                 int(parked_loc.lng * 1e7),
                 mavutil.mavlink.ADSB_ALTITUDE_TYPE_PRESSURE_QNH,
-                int(home.get_alt_m(AltFrame.ABSOLUTE) * 1000),
+                # Parked contact with an 8 m altitude-reference error, inside the default 10 m gate.
+                int((home.get_alt_m(AltFrame.ABSOLUTE) + 8) * 1000),
                 0, 0, 0,       # heading, hor/vert velocity: stationary
                 "PARKED03".encode("ascii"),
                 mavutil.mavlink.ADSB_EMITTER_TYPE_UAV,     # emitter 14 -> MAV_SYSID
