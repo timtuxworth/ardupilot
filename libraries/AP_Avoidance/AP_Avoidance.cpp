@@ -182,7 +182,7 @@ const AP_Param::GroupInfo AP_Avoidance::var_info[] = {
     // @Units: m
     // @Range: 0 20
     // @User: Standard
-    AP_GROUPINFO("GND_ALT",    19, AP_Avoidance, _ground_alt_m, 3),
+    AP_GROUPINFO("GND_ALT",    19, AP_Avoidance, _ground_alt_m, 10),
 
     // @Param: GND_SPD
     // @DisplayName: Ground contact groundspeed threshold
