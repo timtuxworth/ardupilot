@@ -30,7 +30,7 @@
 // whether to compile a source per-vehicle by searching the .cpp text for that token,
 // and it does not follow macros through headers.
 #ifndef AP_OA_SCRIPTING_ENABLED
-#define AP_OA_SCRIPTING_ENABLED (AP_SCRIPTING_ENABLED && APM_BUILD_TYPE(APM_BUILD_ArduPlane) && AP_AVOIDANCE_ENABLED && AP_ADSB_AVOIDANCE_ENABLED && (HAL_PROGRAM_SIZE_LIMIT_KB > 2048))
+#define AP_OA_SCRIPTING_ENABLED (AP_SCRIPTING_LUA_ENABLED && APM_BUILD_TYPE(APM_BUILD_ArduPlane) && AP_AVOIDANCE_ENABLED && AP_ADSB_AVOIDANCE_ENABLED && (HAL_PROGRAM_SIZE_LIMIT_KB > 2048))
 #endif  // AP_OA_SCRIPTING_ENABLED
 
 // Proximity and AIS obstacles reach the scripting layer through AP_OADatabase, which is a
