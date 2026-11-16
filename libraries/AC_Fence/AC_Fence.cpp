@@ -1234,7 +1234,7 @@ const AC_PolyFence_loader &AC_Fence::polyfence() const
 float AC_Fence::distance_line_to_home_inclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const
 {
     float distance_new_m = FLT_MAX;
-    if ( !(get_enabled_fences() & AC_FENCE_TYPE_CIRCLE) ) {
+    if (!(get_enabled_fences() & AC_FENCE_TYPE_CIRCLE)) {
         return distance_new_m;
     }
     Vector2f home_NE_cm;
@@ -1256,7 +1256,7 @@ float AC_Fence::distance_line_to_home_inclusion(const Vector2f& start_NE_cm, con
 float AC_Fence::distance_line_to_inclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm,
                                             AC_PolyFenceType &fence_type) const
 {
-    if ( !(get_enabled_fences() & AC_FENCE_TYPE_POLYGON) ) {    // Yes POLYGON - a circle (in AC_Fence) is a type of polygon
+    if (!(get_enabled_fences() & AC_FENCE_TYPE_POLYGON)) {    // Yes POLYGON - a circle (in AC_Fence) is a type of polygon
         return FLT_MAX;
     }
     return _poly_loader.distance_line_to_inclusion(start_NE_cm, end_NE_cm, fence_type) - get_margin_ne_m();
@@ -1266,7 +1266,7 @@ float AC_Fence::distance_line_to_inclusion(const Vector2f& start_NE_cm, const Ve
 // the distanced will be positive if we are outside the exclusion circle, or -ve if inside the circle
 float AC_Fence::distance_line_to_circle_exclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const
 {
-    if ( !(get_enabled_fences() & AC_FENCE_TYPE_POLYGON) ) { // Yes POLYGON - a circle (in AC_Fence) is a type of polygon
+    if (!(get_enabled_fences() & AC_FENCE_TYPE_POLYGON)) { // Yes POLYGON - a circle (in AC_Fence) is a type of polygon
         return FLT_MAX;
     }
 
@@ -1277,7 +1277,7 @@ float AC_Fence::distance_line_to_circle_exclusion(const Vector2f& start_NE_cm, c
 // the distance will be positive if the vehicle is outside the exclusion, or -ve if inside it
 float AC_Fence::distance_line_to_polygon_exclusion(const Vector2f& start_NE_cm, const Vector2f &end_NE_cm) const
 {
-    if ( !(get_enabled_fences() & AC_FENCE_TYPE_POLYGON) ) {
+    if (!(get_enabled_fences() & AC_FENCE_TYPE_POLYGON)) {
         return FLT_MAX;
     }
 
