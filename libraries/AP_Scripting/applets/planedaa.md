@@ -48,7 +48,7 @@ To confirm a binary has it, `Tools/scripts/extract_features.py <binary>` lists
 ### 2. Scripting engine
 
 | Parameter | Value | Notes |
-|-----------|-------|-------|
+| ----------- | ------- | ------- |
 | `SCR_ENABLE` | `1` | Enable Lua scripting (reboot required). |
 | `SCR_VM_I_COUNT` | `1000000` | **Increase from the default.** `planedaa.lua` is large and the per-loop instruction budget must be raised or the VM will fault. The applet warns at startup below `150000`; every autotest uses `1000000` (see below for why that costs nothing to set generously). |
 | `SCR_HEAP_SIZE` | `262144` | **Increase from the default** (200 kB on SITL/Linux, 100 kB on most flight-controller boards). `planedaa.lua` and its modules (`daacore`/`daageo`/`daaltr`/`daaobs`) need more heap than that to load and run; without raising it the script fails to load with an out-of-memory error. |
@@ -96,7 +96,7 @@ The applet and its modules live in different source folders and must be copied
 to different destination folders:
 
 | Source (in the ArduPilot tree) | Destination (on the SD card) |
-|--------------------------------|------------------------------|
+| -------------------------------- | ------------------------------ |
 | `AP_Scripting/applets/planedaa.lua` | `APM/scripts/planedaa.lua` |
 | `AP_Scripting/modules/daageo.lua` | `APM/scripts/modules/daageo.lua` |
 | `AP_Scripting/modules/daaobs.lua` | `APM/scripts/modules/daaobs.lua` |
@@ -120,7 +120,7 @@ Detection of aircraft, drones and other MAVLink/ADS-B traffic is served from the
 `AP_Avoidance` database, which is only populated when avoidance is enabled.
 
 | Parameter | Value | Notes |
-|-----------|-------|-------|
+| ----------- | ------- | ------- |
 | `AVD_ENABLE` | `1` | **Required.** Without it the avoidance database stays empty and `OAScripting:find_aircraft()`/`find_threats()` see no dynamic traffic. |
 | `ADSB_TYPE` | per hardware | Set to match your ADS-B receiver so `ADSB_VEHICLE` messages are processed. Use `1` (MAVLink) when the traffic arrives as `ADSB_VEHICLE` over a MAVLink link with no ADS-B hardware attached, such as a feed from a companion computer. In SITL this is the path used to inject simulated traffic. |
 
@@ -131,7 +131,7 @@ itself define NMAC). The firmware defaults are already these values — change
 them only with good reason:
 
 | Parameter | Default | Equivalent | Source |
-|-----------|---------|------------|--------|
+| ----------- | --------- | ------------ | -------- |
 | `AVD_WCLR_XY` | `609.6` m | 2000 ft | ASTM F3442M-23 Well Clear horizontal |
 | `AVD_WCLR_Z` | `76.2` m | 250 ft | ASTM F3442M-23 Well Clear vertical |
 | `AVD_NMAC_XY` | `152.4` m | 500 ft | FAA NMAC horizontal |
@@ -140,7 +140,7 @@ them only with good reason:
 ### 4. Fence avoidance
 
 | Parameter | Value | Notes |
-|-----------|-------|-------|
+| ----------- | ------- | ------- |
 | `FENCE_ENABLE` | `1` | **Required** for any fence avoidance — `find_threats()` only walks fences when the fence subsystem is enabled. |
 | `FENCE_TYPE` | bitmask | Selects which fences are active. Altitude-fence avoidance specifically needs **bit 0 (`ALT_MAX`)** and/or **bit 3 (`ALT_MIN`)**. |
 | `FENCE_ACTION` | non-zero (autopilot default RTL) | The autopilot's own breach response, active in **all** modes. It fires immediately on a fence breach and **pre-empts** planedaa's trapped-failsafe for the fence case. planedaa adds proactive avoidance and a `DAA_TRAP_ACT` backstop, but only in nav modes (AUTO/GUIDED/RTL/LOITER/CRUISE/FBWB), so keeping `FENCE_ACTION` non-zero is recommended as the all-mode backstop. Set `0` (report-only) only if planedaa should own the fence trap and you never rely on fence protection while hand-flying. |
@@ -181,7 +181,7 @@ reads terrain-relative safe altitudes when the fence frames are terrain. If you
 use any terrain frame you must enable terrain and have terrain data available:
 
 | Parameter | Value | Notes |
-|-----------|-------|-------|
+| ----------- | ------- | ------- |
 | `TERRAIN_ENABLE` | `1` | Required when `DAA_AVD_ALT_TP` or `FENCE_ALT_*_TP` use the terrain frame. |
 
 The MAVLink DO_REPOSITION command the aircraft-avoidance loiter uses has no
@@ -198,7 +198,7 @@ DAA **defaults to ON** at boot. To toggle it in flight, assign the DAA scripting
 function to an RC channel:
 
 | Parameter | Value | Notes |
-|-----------|-------|-------|
+| ----------- | ------- | ------- |
 | `DAA_ACT_FN` | `308` | Scripting/aux function used by the script. |
 | `RCx_OPTION` | `308` | Assign to a switch channel to toggle DAA. Logic is inverted: switch **Low = enabled**, switch **High = disabled**. |
 
@@ -276,7 +276,7 @@ _Stale direct-MAVLink position is excluded_ below), and the `FENCE_*` parameters
 for the altitude/geo fences.
 
 | Parameter | Default | Units | Description |
-|-----------|---------|-------|-------------|
+| ----------- | --------- | ------- | ------------- |
 | `DAA_ACT_FN` | 308 | | RC option / scripting function used to activate the DAA capability. |
 | `DAA_MARGIN_FENCE` | 0 | m | Avoidance margin kept clear of the geofence. `0` (default) uses the achievable turn radius (from `AIRSPEED_CRUISE`/`ROLL_LIMIT_DEG`) doubled for reaction lag and an oblique approach, falling back to `WP_LOITER_RAD` only if no cruise speed is configured yet; set a non-zero value to override. |
 | `DAA_LKAHD_M` | 500 | m | How far along each candidate heading the bendy ruler probes for a clear path (the second leg probes a further 2×). |
@@ -657,7 +657,7 @@ _mechanism_**. If you need behaviour these parameters do not cover — a differe
 different action, your own failsafe — you should only have to edit `planedaa.lua`.
 
 | file | goes in `scripts/` or `scripts/modules/` | holds |
-|---|---|---|
+| --- | --- | --- |
 | `planedaa.lua` | `scripts/` | every parameter, all alerting, all commanding (target hijack, loiter, altitude clamp), the trapped/hung failsafe, the skipped-waypoint notice |
 | `daageo.lua` | `scripts/modules/` | `DAAgeometry` — angles, locations, turn radius and rate, wind-corrected ground speed |
 | `daacore.lua` | `scripts/modules/` | `DAAcore` — the avoidance **mechanism**: the bendy-ruler sweep and its turn lead, closest-point-of-approach assessment, aircraft and altitude-fence detection, and the `DAAD`/`DAAS`/`DAAG` logging |
@@ -676,7 +676,7 @@ module silently disappears from the documentation.
 and nothing else:
 
 | member | |
-|---|---|
+| --- | --- |
 | `.active` | true while the loiter is running |
 | `start(alt_m, frame, right, speed)` | begin; returns true if a loiter is running after the call |
 | `stop(force)` | end it; returns false if it declined (the cool-down is still running) |
@@ -722,7 +722,7 @@ Two settings outside the applet are worth enabling when investigating its
 behaviour, neither of which is on by default:
 
 | Parameter | Value | What it adds |
-|-----------|-------|--------------|
+| ----------- | ------- | -------------- |
 | `SCR_DEBUG_OPTS` | bit 3 (`8`) | an `SCR` record per script run with its runtime and Lua heap use — the only place either is visible in a log, and the way to check headroom against `SCR_VM_I_COUNT` and `SCR_HEAP_SIZE` |
 | `ADSB_LOG` | `2` | an `ADSB` record per received `ADSB_VEHICLE`, across the whole flight rather than only while avoiding |
 
@@ -732,8 +732,8 @@ Written once per avoidance cycle when an obstacle has been detected and a new
 target to dodge it has been computed.
 
 | Field | Description |
-|-------|-------------|
-| `Obs`  | Obstacle found (1/0) |
+| ------- | ------------- |
+| `Obs` | Obstacle found (1/0) |
 | `DstF` | Clearance of the **worst** heading in the sweep (m) — the closest any candidate came to an obstacle, which is what names the obstacle being avoided. It is normal for this to be very negative: some candidate heading usually points straight at the obstacle. **It is not the clearance of the path being flown** — read `DstB` for that. |
 | `DstB` | Clearance of the heading actually **chosen**, `HdgB` (m). Negative means no heading cleared and the best available one still breaches — the genuine boxed-in signal. Clamped to ±9999; a heading that clears everything reports the clamp. For a fence this is exact. For a moving obstacle it is the clearance at the point the clearance-hysteresis check ran; the side-commitment and slew-rate smoothing that can still adjust `HdgB` afterwards do not re-measure, so treat it as the best available figure rather than an exact one in that case. |
 | `DstT` | Distance to the proposed new target that avoids the obstacle (m) |
@@ -750,7 +750,7 @@ target to dodge it has been computed.
 Written when the script commands an avoidance manoeuvre towards a DAA target.
 
 | Field | Description |
-|-------|-------------|
+| ------- | ------------- |
 | `DstO` | Distance to the obstacle being avoided (m) |
 | `TLat` | Latitude of the DAA target (deg) |
 | `TLng` | Longitude of the DAA target (deg) |
@@ -773,7 +773,7 @@ sized on the roll limit is enough, or whether the wider `WP_LOITER_RAD` is warra
 Written when an aircraft (typically with an ICAO/ADSB identifier) is detected.
 
 | Field | Description |
-|-------|-------------|
+| ------- | ------------- |
 | `DstF` | Distance to the detected aircraft (m) |
 | `TLat` | Latitude of the aircraft (deg) |
 | `TLng` | Longitude of the aircraft (deg) |
@@ -788,17 +788,17 @@ Written when an aircraft (typically with an ICAO/ADSB identifier) is detected.
 The `ObjT` field uses the following `OBSTACLE_TYPE` enumeration:
 
 | Value | Name | Description |
-|-------|------|-------------|
-| 0  | GENERAL | Generic obstacle of unknown type |
-| 1  | UNCREWED_AIRCRAFT | Drone/UAV reported through MAVLink or ADS-B |
-| 2  | CREWED_AIRCRAFT | Crewed aircraft, usually with an ICAO ADSB identifier |
-| 3  | FENCE_HOME | All fixed/unmovable fences |
-| 4  | FENCE_CIRCLE_INCLUSION | Circular inclusion fence |
-| 5  | FENCE_CIRCLE_EXCLUSION | Circular exclusion fence |
-| 6  | FENCE_POLYGON_INCLUSION | Polygon inclusion fence |
-| 7  | FENCE_POLYGON_EXCLUSION | Polygon exclusion fence |
-| 8  | FENCE_LUA | Fence defined in Lua |
-| 9  | PROXIMITY | Detected by a proximity sensor, typically close (not active by default) |
+| ------- | ------ | ------------- |
+| 0 | GENERAL | Generic obstacle of unknown type |
+| 1 | UNCREWED_AIRCRAFT | Drone/UAV reported through MAVLink or ADS-B |
+| 2 | CREWED_AIRCRAFT | Crewed aircraft, usually with an ICAO ADSB identifier |
+| 3 | FENCE_HOME | All fixed/unmovable fences |
+| 4 | FENCE_CIRCLE_INCLUSION | Circular inclusion fence |
+| 5 | FENCE_CIRCLE_EXCLUSION | Circular exclusion fence |
+| 6 | FENCE_POLYGON_INCLUSION | Polygon inclusion fence |
+| 7 | FENCE_POLYGON_EXCLUSION | Polygon exclusion fence |
+| 8 | FENCE_LUA | Fence defined in Lua |
+| 9 | PROXIMITY | Detected by a proximity sensor, typically close (not active by default) |
 | 10 | AIS | AIS-tracked maritime (ship) vehicle (not active by default) |
 | 11 | FENCE_ALT_MAX | Max altitude fence (FENCE_TYPE bit 0) |
 | 12 | FENCE_ALT_MIN | Min altitude fence (FENCE_TYPE bit 3) |
