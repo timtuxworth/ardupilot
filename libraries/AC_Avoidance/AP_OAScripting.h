@@ -45,7 +45,7 @@ public:
     // enum of obstacle types for passing back to Lua
     enum class ObstacleType : uint8_t {
         GENERAL                     = 0,
-        UNCREWED_AIRCRAFT            = 1,
+        UNCREWED_AIRCRAFT           = 1,
         // ADS-B carries both crewed aircraft and UAV contacts; classify by emitter
         // type rather than by the transport that delivered the contact.
         CREWED_AIRCRAFT             = 2,

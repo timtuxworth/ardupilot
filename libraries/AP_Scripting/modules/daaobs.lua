@@ -27,7 +27,7 @@ local BANNER_SEVERITY = 6
 -- AP_OAScripting returns these values, and this is the code that interprets them.
 DAAobstacles.OBSTACLE_TYPE = {
     GENERAL                     = 0,    -- generic obstacle, we don't really know what it is
-    UNCREWED_AIRCRAFT            = 1,    -- drone/UAV reported through MAVLink or ADS-B
+    UNCREWED_AIRCRAFT           = 1,    -- drone/UAV reported through MAVLink or ADS-B
     CREWED_AIRCRAFT             = 2,
     -- 3, 4 and 5 were WEATHER, BIRD_MIGRATORY and BIRD_OF_PREY; removed, but the numbering
     -- is left alone because it is what DAAD.ObjT means in every log already recorded.    -- crewed aircraft, usually with an ICAO ADSB identifier
@@ -125,7 +125,7 @@ function DAAobstacles.new()
         }
         detect_margin_by_type = {
             [OBSTACLE_TYPE.CREWED_AIRCRAFT]         = settings.margin_crewed_m,
-            [OBSTACLE_TYPE.UNCREWED_AIRCRAFT]               = settings.margin_uav_m,
+            [OBSTACLE_TYPE.UNCREWED_AIRCRAFT]       = settings.margin_uav_m,
             [OBSTACLE_TYPE.AIS]                     = well_clear_xy + settings.margin_ais_m,
             [OBSTACLE_TYPE.PROXIMITY]               = settings.margin_proximity_m,
             [OBSTACLE_TYPE.FENCE_HOME]              = settings.margin_fence_m,
