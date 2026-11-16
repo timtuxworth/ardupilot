@@ -42,7 +42,7 @@ Inspired by the Copter/Rover AC_Avoidance implementation by Randy Mackay and Ris
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-119"
+SCRIPT_VERSION      = "4.8.0-120"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -437,7 +437,7 @@ PARAM.TAU_S = bind_add_param('TAU_S', 38, 30)
 --[[
     // @Param: DAA_NMAC_UAV_XY
     // @DisplayName: Drone/UAV near-miss horizontal distance
-    // @Description: A drone/UAV (MAV_SYSID, not a crewed aircraft) closer than this horizontally is a genuine near-miss and, together with DAA_NMAC_UAV_Z, is treated as a compromise by the trapped-failsafe (DAA_TRAP_ACT) the same way a crewed-aircraft near-miss is - regardless of whether ordinary avoidance or the aircraft loiter currently has control of the vehicle. This is the hard danger line, not the normal drone avoidance standoff (AVD_UAV_XY/DAA_MARGIN_UAV) that ordinary avoidance tries to stay outside of - it should be smaller than both.
+    // @Description: A drone/UAV (UNCREWED_AIRCRAFT, not a crewed aircraft) closer than this horizontally is a genuine near-miss and, together with DAA_NMAC_UAV_Z, is treated as a compromise by the trapped-failsafe (DAA_TRAP_ACT) the same way a crewed-aircraft near-miss is - regardless of whether ordinary avoidance or the aircraft loiter currently has control of the vehicle. This is the hard danger line, not the normal drone avoidance standoff (AVD_UAV_XY/DAA_MARGIN_UAV) that ordinary avoidance tries to stay outside of - it should be smaller than both.
     // @Units: m
     // @Range: 5 100
     // @Increment: 1
@@ -1675,7 +1675,7 @@ local DAA = {
         -- has taken over the vehicle's target. A drone is dynamic (can move away), so this
         -- classifies the same as an aircraft near-miss.
         if obstacle_avoiding ~= nil
-            and obstacle_avoiding.type == OBSTACLE_TYPE.MAV_SYSID
+            and obstacle_avoiding.type == OBSTACLE_TYPE.UNCREWED_AIRCRAFT
             and obstacle_avoiding.distance_xy ~= nil
             and obstacle_avoiding.distance_xy < near_miss_uav_xy
             and obstacle_avoiding.distance_z < near_miss_uav_z then

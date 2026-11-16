@@ -452,9 +452,9 @@ AP_OAScripting::ObstacleType AP_OAScripting::_get_obstacle_type(uint8_t emitter_
     // no need to also treat a low ICAO address as a drone. For a real ADS-B contact,
     // icao_code is the aircraft's actual 24-bit address, and a low value there is a
     // legitimately-registered crewed aircraft, not a drone: that clause mistyped it as
-    // MAV_SYSID, giving it the drone standoff/NMAC thresholds and no loiter-to-altitude.
+    // UNCREWED_AIRCRAFT, giving it the drone standoff/NMAC thresholds and no loiter-to-altitude.
     if (AP_Avoidance::is_adsb_uav(emitter_type)) {
-        return ObstacleType::MAV_SYSID;
+        return ObstacleType::UNCREWED_AIRCRAFT;
     } else if (AP_Avoidance::is_adsb_aircraft(emitter_type)) {
         return ObstacleType::CREWED_AIRCRAFT;
     }

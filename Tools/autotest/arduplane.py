@@ -9152,7 +9152,7 @@ return update()
     def PlaneDAADroneAvoidance(self):
         '''planedaa must avoid an ADS-B drone (emitter type UAV = 14).  A drone is
         injected on the path to a waypoint 2 km north.  Unlike a crude aircraft it
-        is classified MAV_SYSID and gets the smaller DAA_MARGIN_UAV standoff with a
+        is classified UNCREWED_AIRCRAFT and gets the smaller DAA_MARGIN_UAV standoff with a
         bendy-ruler detour (no loiter-to-altitude), and it is labelled by its ICAO
         in hex rather than a decimal SYSID.  The ADSB_VEHICLE is re-sent
         continuously because AP_Avoidance prunes obstacles after 5 s.'''
@@ -9210,7 +9210,7 @@ return update()
                 0,      # horizontal velocity cm/s
                 0,      # vertical velocity cm/s
                 "SIMTL80".encode("ascii"),
-                mavutil.mavlink.ADSB_EMITTER_TYPE_UAV,   # emitter 14 -> MAV_SYSID
+                mavutil.mavlink.ADSB_EMITTER_TYPE_UAV,   # emitter 14 -> UNCREWED_AIRCRAFT
                 1,      # time since last communication
                 65535,  # flags
                 1200,   # squawk
@@ -9308,7 +9308,7 @@ return update()
                 int(here.get_alt_m(AltFrame.ABSOLUTE) * 1000 + 10000),   # 10 m up, inside the 25 m gate
                 0, 0, 0,
                 "SIMTL81".encode("ascii"),
-                mavutil.mavlink.ADSB_EMITTER_TYPE_UAV,     # emitter 14 -> MAV_SYSID
+                mavutil.mavlink.ADSB_EMITTER_TYPE_UAV,     # emitter 14 -> UNCREWED_AIRCRAFT
                 1, 65535, 1200,
             )
             m = self.mav.recv_match(type='STATUSTEXT', blocking=True, timeout=1)
@@ -9463,7 +9463,7 @@ return update()
                 int((home.get_alt_m(AltFrame.ABSOLUTE) + 8) * 1000),
                 0, 0, 0,       # heading, hor/vert velocity: stationary
                 "PARKED03".encode("ascii"),
-                mavutil.mavlink.ADSB_EMITTER_TYPE_UAV,     # emitter 14 -> MAV_SYSID
+                mavutil.mavlink.ADSB_EMITTER_TYPE_UAV,     # emitter 14 -> UNCREWED_AIRCRAFT
                 1, 65535, 1200,
             )
 
@@ -10737,13 +10737,13 @@ return update()
         non-conflicting). A genuinely-closing drone fixed 900 m from home - within
         DAA_DETECT_M (1000 m default) - must then be adopted instead of releasing.
 
-        Asserted via the dataflash DAAR log (ObjT==MAV_SYSID with Gon==1), not GCS
+        Asserted via the dataflash DAAR log (ObjT==UNCREWED_AIRCRAFT with Gon==1), not GCS
         text: the general bendy-ruler path never changes flight mode (unlike the
         loiter-to-altitude path, it steers within AUTO), and the "AVOIDING"/"ALERT"
         announcements are both throttled (5 s) from the aircraft's own announcement
         moments earlier, so the drone's adoption can be real but never get a chance to
         print before this short episode resolves - confirmed happening exactly that way
-        in an earlier attempt at this test (DAAR showed ObjT flip to MAV_SYSID for
+        in an earlier attempt at this test (DAAR showed ObjT flip to UNCREWED_AIRCRAFT for
         ~1.7s with no matching STATUSTEXT ever appearing).'''
         self.install_planedaa_scripts()
 
@@ -10846,18 +10846,18 @@ return update()
 
         self.progress("Inspecting DFReader for the masked drone's adoption (DAAR ObjT)")
         dfreader = self.dfreader_for_path(log_filepath)
-        OBSTACLE_TYPE_MAV_SYSID = 1
+        OBSTACLE_TYPE_UNCREWED_AIRCRAFT = 1
         adopted_drone = False
         while True:
             m = dfreader.recv_match(type=['DAAR'])
             if m is None:
                 break
-            if m.ObjT == OBSTACLE_TYPE_MAV_SYSID and m.Gon == 1:
+            if m.ObjT == OBSTACLE_TYPE_UNCREWED_AIRCRAFT and m.Gon == 1:
                 adopted_drone = True
                 break
         if not adopted_drone:
             raise NotAchievedException(
-                "never saw DAAR.ObjT==MAV_SYSID with Gon==1 after the aircraft was "
+                "never saw DAAR.ObjT==UNCREWED_AIRCRAFT with Gon==1 after the aircraft was "
                 "dismissed - the masked-contact re-probe did not find/adopt the drone")
 
     def PlaneDAAFenceCandidateChecksActiveTraffic(self):
@@ -10877,7 +10877,7 @@ return update()
         to spare.
 
         Asserted via the dataflash DAAR log: on every cycle the drone was the
-        pre-resolver pick (Sel==MAV_SYSID) and still live (Gon==0) and a fence
+        pre-resolver pick (Sel==UNCREWED_AIRCRAFT) and still live (Gon==0) and a fence
         candidate was adopted (Held==1), CmdD - the clearance of the path actually
         being commanded, which find_closest_obstacle() computes against every obstacle
         type, not just fences - must never show a real breach of the drone.
@@ -11001,14 +11001,14 @@ return update()
 
         self.progress("Inspecting DFReader for a fence candidate breaching the active drone")
         dfreader = self.dfreader_for_path(log_filepath)
-        OBSTACLE_TYPE_MAV_SYSID = 1
+        OBSTACLE_TYPE_UNCREWED_AIRCRAFT = 1
         saw_fence_override_of_active_drone = False
         breach_m = None
         while True:
             m = dfreader.recv_match(type=['DAAR'])
             if m is None:
                 break
-            if m.Sel == OBSTACLE_TYPE_MAV_SYSID and m.Gon == 0 and m.Held == 1:
+            if m.Sel == OBSTACLE_TYPE_UNCREWED_AIRCRAFT and m.Gon == 0 and m.Held == 1:
                 saw_fence_override_of_active_drone = True
                 # FPrD is the same candidate path's fence-only clearance (also
                 # signed, positive clear): only trust CmdD<0 as a DRONE breach when
@@ -11019,7 +11019,7 @@ return update()
                     breach_m = m.CmdD
         if not saw_fence_override_of_active_drone:
             raise NotAchievedException(
-                "never saw DAAR.Sel==MAV_SYSID with Gon==0 and Held==1 - the fence "
+                "never saw DAAR.Sel==UNCREWED_AIRCRAFT with Gon==0 and Held==1 - the fence "
                 "candidate never overrode an actively-avoided (non-dismissed) drone, "
                 "geometry did not reproduce")
         if breach_m is not None:
@@ -11693,7 +11693,7 @@ return update()
             "SCR_VM_I_COUNT": 1000000,
             "ADSB_TYPE": 1,     # MAVLink: ingest ADSB_VEHICLE with no ADS-B hardware
             "AVD_ENABLE": 1,
-            "AVD_UAV_XY": 75,       # drone standoff (get_standoff for MAV_SYSID)
+            "AVD_UAV_XY": 75,       # drone standoff (get_standoff for UNCREWED_AIRCRAFT)
             "AVD_UAV_Z": 50,        # generous so altitude never gates detection here
         })
         self.context_collect('STATUSTEXT')
@@ -12903,7 +12903,7 @@ return update()
                 int(here.get_alt_m(AltFrame.ABSOLUTE) * 1000 + 10000),  # 10 m above CURRENT altitude
                 0, 0, 0,       # heading, hor/vert velocity: stationary
                 "CLIMBUAV".encode("ascii"),
-                mavutil.mavlink.ADSB_EMITTER_TYPE_UAV,   # emitter 14 -> MAV_SYSID
+                mavutil.mavlink.ADSB_EMITTER_TYPE_UAV,   # emitter 14 -> UNCREWED_AIRCRAFT
                 1, 65535, 1200,
             )
 
@@ -12987,7 +12987,7 @@ return update()
                 int(here.get_alt_m(AltFrame.ABSOLUTE) * 1000 + 10000),  # 10 m above CURRENT altitude
                 0, 0, 0,       # heading, hor/vert velocity: stationary
                 "DESCUAV1".encode("ascii"),
-                mavutil.mavlink.ADSB_EMITTER_TYPE_UAV,   # emitter 14 -> MAV_SYSID
+                mavutil.mavlink.ADSB_EMITTER_TYPE_UAV,   # emitter 14 -> UNCREWED_AIRCRAFT
                 1, 65535, 1200,
             )
 

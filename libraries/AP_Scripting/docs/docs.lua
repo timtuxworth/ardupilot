@@ -4692,7 +4692,7 @@ function OAObstacle_ud:emitter_type(value) end
 -- get obstacle_type field - the AP_OAAvoidance::ObstacleType of the obstacle
 ---@return integer -- obstacle type
 ---| '0'  # GENERAL
----| '1'  # MAV_SYSID
+---| '1'  # UNCREWED_AIRCRAFT
 ---| '2'  # CREWED_AIRCRAFT
 ---| '3'  # FENCE_HOME
 ---| '4'  # FENCE_CIRCLE_INCLUSION

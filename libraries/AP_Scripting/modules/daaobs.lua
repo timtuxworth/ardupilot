@@ -15,7 +15,7 @@
 
 local DAAobstacles = {}
 
-DAAobstacles.SCRIPT_VERSION = "4.8.0-010"
+DAAobstacles.SCRIPT_VERSION = "4.8.0-011"
 DAAobstacles.SCRIPT_NAME = "DAA obstacles"
 DAAobstacles.SCRIPT_NAME_SHORT = "DAAobs"
 
@@ -27,7 +27,7 @@ local BANNER_SEVERITY = 6
 -- AP_OAScripting returns these values, and this is the code that interprets them.
 DAAobstacles.OBSTACLE_TYPE = {
     GENERAL                     = 0,    -- generic obstacle, we don't really know what it is
-    MAV_SYSID                   = 1,    -- another MAVLINK drone with a MAV_SYSID
+    UNCREWED_AIRCRAFT            = 1,    -- drone/UAV reported through MAVLink or ADS-B
     CREWED_AIRCRAFT             = 2,
     -- 3, 4 and 5 were WEATHER, BIRD_MIGRATORY and BIRD_OF_PREY; removed, but the numbering
     -- is left alone because it is what DAAD.ObjT means in every log already recorded.    -- crewed aircraft, usually with an ICAO ADSB identifier
@@ -120,12 +120,12 @@ function DAAobstacles.new()
         wind_margin_per_ms   = settings.wind_margin_per_ms
 
         standoff_by_type = {
-            [OBSTACLE_TYPE.MAV_SYSID]               = settings.uav_clear_xy,   -- drone/UAV: AVD_UAV_XY
+            [OBSTACLE_TYPE.UNCREWED_AIRCRAFT]               = settings.uav_clear_xy,   -- drone/UAV: AVD_UAV_XY
             [OBSTACLE_TYPE.PROXIMITY]               = settings.margin_proximity_m,
         }
         detect_margin_by_type = {
             [OBSTACLE_TYPE.CREWED_AIRCRAFT]         = settings.margin_crewed_m,
-            [OBSTACLE_TYPE.MAV_SYSID]               = settings.margin_uav_m,
+            [OBSTACLE_TYPE.UNCREWED_AIRCRAFT]               = settings.margin_uav_m,
             [OBSTACLE_TYPE.AIS]                     = well_clear_xy + settings.margin_ais_m,
             [OBSTACLE_TYPE.PROXIMITY]               = settings.margin_proximity_m,
             [OBSTACLE_TYPE.FENCE_HOME]              = settings.margin_fence_m,
@@ -191,7 +191,7 @@ function DAAobstacles.new()
         if type == OBSTACLE_TYPE.GENERAL then
             return "general"
         end
-        if type == OBSTACLE_TYPE.MAV_SYSID then
+        if type == OBSTACLE_TYPE.UNCREWED_AIRCRAFT then
             -- a small src_id is a real MAVLink drone; a 24-bit ICAO (>0xBFFF) is an
             -- ADS-B drone (matches the label split in pretty_label)
             if src_id ~= nil and src_id > 0xBFFF then
