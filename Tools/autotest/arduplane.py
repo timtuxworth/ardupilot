@@ -13230,7 +13230,7 @@ return update, 200
             self.start_subtest(scenario["name"])
             self.context_push()
             self.context_collect('STATUSTEXT')
-            home_alt = self.home_position_as_location().alt
+            home_alt = self.home_position_as_location().get_alt_m(AltFrame.ABSOLUTE)
             self.set_parameters({
                 "FENCE_ALT_MIN": scenario["lo"],
                 "FENCE_ALT_MAX": scenario["hi"] + (home_alt if scenario["max_frame"] == 0 else 0),
