@@ -327,7 +327,7 @@ bool AP_OAScripting::fence_distance(const Location &loc, uint8_t fence_type, flo
     // scope the search to the fence category the caller is avoiding, so the returned distance
     // belongs to the same kind of fence the AVOIDING message names (e.g. an "Excl. Circle" label
     // no longer reports the distance to a nearer inclusion polygon).  Any non-fence-category value
-    // (0/GENERAL, FENCE_LUA, ...) falls back to searching every fence category.
+    // (0/GENERAL, FENCE_CUSTOM, ...) falls back to searching every fence category.
     //
     // FENCE_CIRCLE_INCLUSION and FENCE_POLYGON_INCLUSION both map onto the one
     // distance_line_to_inclusion() query - they are inseparable once FENCE_OPTIONS

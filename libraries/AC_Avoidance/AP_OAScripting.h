@@ -54,7 +54,7 @@ public:
         FENCE_CIRCLE_EXCLUSION      = 5,
         FENCE_POLYGON_INCLUSION     = 6,
         FENCE_POLYGON_EXCLUSION     = 7,
-        FENCE_LUA                   = 8,    // Placeholder for future integration with Lua/kml fences
+        FENCE_CUSTOM                = 8,    // Placeholder for future integration with Lua/Rust/Ada/kml fences
         PROXIMITY                   = 9,
         AIS                         = 10,
         FENCE_ALT_MAX               = 11,   // max altitude fence (AC_FENCE_TYPE_ALT_MAX, FENCE_TYPE bit 0)

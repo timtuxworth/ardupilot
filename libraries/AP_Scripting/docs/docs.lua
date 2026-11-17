@@ -4699,7 +4699,7 @@ function OAObstacle_ud:emitter_type(value) end
 ---| '5'  # FENCE_CIRCLE_EXCLUSION
 ---| '6'  # FENCE_POLYGON_INCLUSION
 ---| '7'  # FENCE_POLYGON_EXCLUSION
----| '8'  # FENCE_LUA
+---| '8'  # FENCE_CUSTOM
 ---| '9'  # PROXIMITY
 ---| '10' # AIS
 ---| '11' # FENCE_ALT_MAX

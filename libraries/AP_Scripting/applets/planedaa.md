@@ -824,7 +824,7 @@ The `ObjT` field uses the following `OBSTACLE_TYPE` enumeration:
 | 5 | FENCE_CIRCLE_EXCLUSION | Circular exclusion fence |
 | 6 | FENCE_POLYGON_INCLUSION | Polygon inclusion fence |
 | 7 | FENCE_POLYGON_EXCLUSION | Polygon exclusion fence |
-| 8 | FENCE_LUA | Reserved for future Lua/KML fences; not currently reported |
+| 8 | FENCE_CUSTOM | Reserved for custom fence implementations; not currently reported |
 | 9 | PROXIMITY | Detected by a proximity sensor, typically close (not active by default) |
 | 10 | AIS | AIS-tracked maritime (ship) vehicle (not active by default) |
 | 11 | FENCE_ALT_MAX | Max altitude fence (FENCE_TYPE bit 0) |

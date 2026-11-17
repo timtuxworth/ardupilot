@@ -15,7 +15,7 @@
 
 local DAAobstacles = {}
 
-DAAobstacles.SCRIPT_VERSION = "4.8.0-011"
+DAAobstacles.SCRIPT_VERSION = "4.8.0-012"
 DAAobstacles.SCRIPT_NAME = "DAA obstacles"
 DAAobstacles.SCRIPT_NAME_SHORT = "DAAobs"
 
@@ -36,7 +36,7 @@ DAAobstacles.OBSTACLE_TYPE = {
     FENCE_CIRCLE_EXCLUSION      = 5,
     FENCE_POLYGON_INCLUSION     = 6,
     FENCE_POLYGON_EXCLUSION     = 7,
-    FENCE_LUA                   = 8,
+    FENCE_CUSTOM                   = 8,
     PROXIMITY                   = 9,   -- detected by a proximty sensor, typically quite close
     AIS                         = 10,   -- Automatic Identification System for ship (maritime) vehicles
     FENCE_ALT_MAX               = 11,   -- max altitude fence (AC_FENCE_TYPE_ALT_MAX, FENCE_TYPE bit 0)
@@ -56,7 +56,7 @@ function DAAobstacles.is_fence_obstacle(obstacle_type)
         or obstacle_type == DAAobstacles.OBSTACLE_TYPE.FENCE_CIRCLE_EXCLUSION
         or obstacle_type == DAAobstacles.OBSTACLE_TYPE.FENCE_POLYGON_INCLUSION
         or obstacle_type == DAAobstacles.OBSTACLE_TYPE.FENCE_POLYGON_EXCLUSION
-        or obstacle_type == DAAobstacles.OBSTACLE_TYPE.FENCE_LUA
+        or obstacle_type == DAAobstacles.OBSTACLE_TYPE.FENCE_CUSTOM
 end
 
 -- ADS-B emitter categories (MAV_ADSB_EMITTER_TYPE), used only to label a contact.
@@ -133,7 +133,7 @@ function DAAobstacles.new()
             [OBSTACLE_TYPE.FENCE_CIRCLE_EXCLUSION]  = settings.margin_fence_m,
             [OBSTACLE_TYPE.FENCE_POLYGON_INCLUSION] = settings.margin_fence_m,
             [OBSTACLE_TYPE.FENCE_POLYGON_EXCLUSION] = settings.margin_fence_m,
-            [OBSTACLE_TYPE.FENCE_LUA]               = settings.margin_fence_m,
+            [OBSTACLE_TYPE.FENCE_CUSTOM]               = settings.margin_fence_m,
         }
     end
 
@@ -177,8 +177,8 @@ function DAAobstacles.new()
             return "Incl. Polygon"
         elseif obstacle_type == OBSTACLE_TYPE.FENCE_HOME then
             return "Tin Can"
-        elseif obstacle_type == OBSTACLE_TYPE.FENCE_LUA then
-            return "Lua Fence"
+        elseif obstacle_type == OBSTACLE_TYPE.FENCE_CUSTOM then
+            return "Custom Fence"
         elseif obstacle_type == OBSTACLE_TYPE.FENCE_ALT_MAX then
             return "Alt Max Fence"
         elseif obstacle_type == OBSTACLE_TYPE.FENCE_ALT_MIN then
@@ -217,8 +217,8 @@ function DAAobstacles.new()
         if type == OBSTACLE_TYPE.FENCE_POLYGON_EXCLUSION then
             return "fence:poly-exc"
         end
-        if type == OBSTACLE_TYPE.FENCE_LUA then
-            return "fence:lua"
+        if type == OBSTACLE_TYPE.FENCE_CUSTOM then
+            return "fence:custom"
         end
         if type == OBSTACLE_TYPE.FENCE_ALT_MAX then
             return "fence:alt-max"
@@ -297,7 +297,7 @@ function DAAobstacles.new()
         OBSTACLE_TYPE.FENCE_CIRCLE_EXCLUSION,
         OBSTACLE_TYPE.FENCE_POLYGON_INCLUSION,
         OBSTACLE_TYPE.FENCE_POLYGON_EXCLUSION,
-        OBSTACLE_TYPE.FENCE_LUA,
+        OBSTACLE_TYPE.FENCE_CUSTOM,
     }
 
     -- Most severe horizontal fence clearance (m) at loc, independent of whatever obstacle
