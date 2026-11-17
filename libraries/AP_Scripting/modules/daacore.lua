@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-028"
+DAAcore.SCRIPT_VERSION = "4.8.0-029"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -72,6 +72,50 @@ local function clamp_log_m(value_m)
         return LOG_CLEARANCE_MAX_M
     end
     return math.max(math.min(value_m, LOG_CLEARANCE_MAX_M), -LOG_CLEARANCE_MAX_M)
+end
+
+-- Compare both altitude limits in the location's frame: the fence floor and ceiling
+-- may use different frames. Resolve terrain at this location, not at home or the origin.
+local FENCE_TYPE_ALT_MAX = 1
+local FENCE_TYPE_ALT_MIN = 8
+local function altitude_fence_bounds(loc, margin_m)
+    if loc == nil or fence == nil then
+        return
+    end
+    local enabled = fence:get_enabled_fences()
+    local frame = loc:get_alt_frame()
+    local floor_m, ceiling_m, bound_loc
+    if (enabled & FENCE_TYPE_ALT_MAX) ~= 0 then
+        local safe_max_m, max_frame = fence:get_safe_alt_max()
+        if max_frame ~= frame then
+            bound_loc = loc:copy()
+            bound_loc:set_alt_m(safe_max_m, max_frame)
+            safe_max_m = bound_loc:get_alt_m(frame)
+        end
+        if safe_max_m ~= nil then
+            ceiling_m = safe_max_m - margin_m
+        end
+    end
+    if (enabled & FENCE_TYPE_ALT_MIN) ~= 0 then
+        local safe_min_m, min_frame = fence:get_safe_alt_min()
+        if min_frame ~= frame then
+            bound_loc = bound_loc or loc:copy()
+            bound_loc:set_alt_m(safe_min_m, min_frame)
+            safe_min_m = bound_loc:get_alt_m(frame)
+        end
+        if safe_min_m ~= nil then
+            floor_m = safe_min_m + margin_m
+        end
+    end
+    local effective_margin_m = margin_m
+    if floor_m ~= nil and ceiling_m ~= nil and floor_m > ceiling_m then
+        -- The requested DAA buffers do not fit. Their midpoint is also the
+        -- midpoint of the core safe limits, since the same buffer was added/subtracted.
+        effective_margin_m = math.max(0, margin_m + (ceiling_m - floor_m) * 0.5)
+        local midpoint_m = (floor_m + ceiling_m) * 0.5
+        floor_m, ceiling_m = midpoint_m, midpoint_m
+    end
+    return floor_m, ceiling_m, frame, effective_margin_m
 end
 
 function DAAcore.new(deps)
@@ -1054,34 +1098,21 @@ function DAAcore.new(deps)
         return distance_to_target_m
     end
 
-    -- AC_FENCE_TYPE bits (see AC_Fence.h) for the altitude fences we handle here
-    local FENCE_TYPE_ALT_MAX = 1    -- FENCE_TYPE bit 0
-    local FENCE_TYPE_ALT_MIN = 8    -- FENCE_TYPE bit 3
-
-    -- Clamp a target location's altitude into the safe altitude-fence band, leaving a DAA_MARGIN_ALT buffer
-    -- inside the fence's own safe limits. This is the "continue" half of clamp-and-continue: the horizontal
-    -- path is untouched, only the commanded altitude is corrected. Applied to every target we command via
-    -- update_target_location(), so it also enforces the band while avoiding a horizontal obstacle.
+    -- Horizontal navigation is unchanged; use the same ordered bounds as detection
+    -- so a floor correction cannot undo a ceiling correction when DAA buffers overlap.
     local function clamp_alt_to_fence(loc)
-        if loc == nil or fence == nil then
+        local floor_m, ceiling_m, frame = altitude_fence_bounds(loc, margin_alt_m)
+        if floor_m == nil and ceiling_m == nil then
             return
         end
-        local enabled = fence:get_enabled_fences()
-        if (enabled & FENCE_TYPE_ALT_MAX) ~= 0 then
-            local safe_max_alt_m, max_alt_frame = fence:get_safe_alt_max()
-            local ceiling_m = safe_max_alt_m - margin_alt_m
-            local current_alt_m = loc:get_alt_m(max_alt_frame)
-            if current_alt_m ~= nil and current_alt_m > ceiling_m then
-                loc:set_alt_m(ceiling_m, max_alt_frame)
-            end
+        local altitude_m = loc:get_alt_m(frame)
+        if altitude_m == nil then
+            return
         end
-        if (enabled & FENCE_TYPE_ALT_MIN) ~= 0 then
-            local safe_min_alt_m, min_alt_frame = fence:get_safe_alt_min()
-            local floor_alt_m = safe_min_alt_m + margin_alt_m
-            local current_alt_m = loc:get_alt_m(min_alt_frame)
-            if current_alt_m ~= nil and current_alt_m < floor_alt_m then
-                loc:set_alt_m(floor_alt_m, min_alt_frame)
-            end
+        if ceiling_m ~= nil and altitude_m > ceiling_m then
+            loc:set_alt_m(ceiling_m, frame)
+        elseif floor_m ~= nil and altitude_m < floor_m then
+            loc:set_alt_m(floor_m, frame)
         end
     end
 
@@ -1121,11 +1152,15 @@ function DAAcore.new(deps)
             alt_fence_near      = false
             return nil
         end
-        local enabled = fence:get_enabled_fences()
-        local alt_max_on = (enabled & FENCE_TYPE_ALT_MAX) ~= 0
-        local alt_min_on = (enabled & FENCE_TYPE_ALT_MIN) ~= 0
-        if not alt_max_on and not alt_min_on then
-            alt_fence_active    = false
+        local floor_m, ceiling_m, frame, effective_margin_m = altitude_fence_bounds(current_loc, margin_alt_m)
+        if floor_m == nil and ceiling_m == nil then
+            alt_fence_active = false
+            alt_fence_near = false
+            return nil
+        end
+        local current_alt_m = current_loc:get_alt_m(frame)
+        if current_alt_m == nil then
+            alt_fence_active = false
             alt_fence_near = false
             return nil
         end
@@ -1144,32 +1179,21 @@ function DAAcore.new(deps)
         -- enter when current or projected altitude is past the clamp limit; while latched, only release
         -- once we are DAA_ALT_HYST_M clear of the limit on both current and projected altitude.
         local otype, label_str, headroom_m
-        if alt_max_on then
-            local safe_max_alt_m, max_alt_frame = fence:get_safe_alt_max()
-            local current_alt_m = current_loc:get_alt_m(max_alt_frame)
-            if current_alt_m ~= nil then
-                local ceiling_m = safe_max_alt_m - margin_alt_m
-                local projected_alt_m = current_alt_m + climb_rate_ms * horizon_s
-                local enter = current_alt_m > ceiling_m or projected_alt_m > ceiling_m
-                local clear = current_alt_m < ceiling_m - alt_hyst_m and projected_alt_m < ceiling_m - alt_hyst_m
-                if enter or (alt_fence_active and not clear) then
-                    otype, label_str = OBSTACLE_TYPE.FENCE_ALT_MAX, "Alt Max Fence"
-                    headroom_m = safe_max_alt_m - current_alt_m     -- metres below the safe ceiling
-                end
+        local projected_alt_m = current_alt_m + climb_rate_ms * horizon_s
+        if ceiling_m ~= nil then
+            local enter = current_alt_m > ceiling_m or projected_alt_m > ceiling_m
+            local clear = current_alt_m < ceiling_m - alt_hyst_m and projected_alt_m < ceiling_m - alt_hyst_m
+            if enter or (alt_fence_active and not clear) then
+                otype, label_str = OBSTACLE_TYPE.FENCE_ALT_MAX, "Alt Max Fence"
+                headroom_m = ceiling_m + effective_margin_m - current_alt_m
             end
         end
-        if label_str == nil and alt_min_on then
-            local safe_min_alt_m, min_alt_frame = fence:get_safe_alt_min()
-            local current_alt_m = current_loc:get_alt_m(min_alt_frame)
-            if current_alt_m ~= nil then
-                local floor_alt_m = safe_min_alt_m + margin_alt_m
-                local projected_alt_m = current_alt_m + climb_rate_ms * horizon_s
-                local enter = current_alt_m < floor_alt_m or projected_alt_m < floor_alt_m
-                local clear = current_alt_m > floor_alt_m + alt_hyst_m and projected_alt_m > floor_alt_m + alt_hyst_m
-                if enter or (alt_fence_active and not clear) then
-                    otype, label_str = OBSTACLE_TYPE.FENCE_ALT_MIN, "Alt Min Fence"
-                    headroom_m = current_alt_m - safe_min_alt_m     -- metres above the safe floor
-                end
+        if label_str == nil and floor_m ~= nil then
+            local enter = current_alt_m < floor_m or projected_alt_m < floor_m
+            local clear = current_alt_m > floor_m + alt_hyst_m and projected_alt_m > floor_m + alt_hyst_m
+            if enter or (alt_fence_active and not clear) then
+                otype, label_str = OBSTACLE_TYPE.FENCE_ALT_MIN, "Alt Min Fence"
+                headroom_m = current_alt_m - (floor_m - effective_margin_m)
             end
         end
 
@@ -1178,15 +1202,15 @@ function DAAcore.new(deps)
         -- Announce once when we actually level off near the limit (within the clamp band), not while
         -- merely projecting a distant crossing. The "near" latch + cooldown collapses the brief
         -- trigger drop-outs during a long climb/descent into a single notice; the steady clamp is silent.
-        -- The reported distance is the steady-state clearance the plane settles at (DAA_MARGIN_ALT),
+        -- The reported distance is the steady-state clearance the plane settles at (the effective margin),
         -- not the trigger headroom.
-        local near = now_active and headroom_m ~= nil and headroom_m <= (margin_alt_m + alt_hyst_m)
+        local near = now_active and headroom_m ~= nil and headroom_m <= (effective_margin_m + alt_hyst_m)
         if near and not alt_fence_near and (now_ms - last_alt_alert_ms) > alt_cool_ms then
             gcs:send_named_string("DAA-ALERT", "alt-fence")
             gcs:send_named_string("DAA-OBSTCL", label_str)
             gcs:send_text(MAV_SEVERITY.NOTICE, SCRIPT_NAME_SHORT .. string.format(" levelling off %.0fm from %s",
-                                margin_alt_m, label_str))
-            gcs:send_named_float("DAA-DISTZ", margin_alt_m)
+                                effective_margin_m, label_str))
+            gcs:send_named_float("DAA-DISTZ", effective_margin_m)
             last_alt_alert_ms = now_ms
         end
 

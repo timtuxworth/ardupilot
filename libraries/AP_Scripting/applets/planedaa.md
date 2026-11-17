@@ -146,6 +146,16 @@ them only with good reason:
 | `FENCE_ACTION` | non-zero (autopilot default RTL) | The autopilot's own breach response, active in **all** modes. It fires immediately on a fence breach and **pre-empts** planedaa's trapped-failsafe for the fence case. planedaa adds proactive avoidance and a `DAA_TRAP_ACT` backstop, but only in nav modes (AUTO/GUIDED/RTL/LOITER/CRUISE/FBWB), so keeping `FENCE_ACTION` non-zero is recommended as the all-mode backstop. Set `0` (report-only) only if planedaa should own the fence trap and you never rely on fence protection while hand-flying. |
 | `FENCE_ALT_MAX_TP` / `FENCE_ALT_MIN_TP` | frame | Frame of the altitude fences; set to match your intent (see terrain note below). |
 
+Altitude targets normally stay `DAA_MARGIN_ALT` inside the core safe altitude
+limits, which already include `FENCE_MARGIN`. If both altitude fences are enabled
+and the requested DAA buffers overlap, DAA reduces its extra buffer and uses the
+midpoint of the core safe band. For example, a 90–100 m band with a 2 m fence
+margin has core safe limits of 92–98 m: with the default 20 m DAA margin, the
+fallback target is 95 m. Detection, target clamping and the reported buffer use
+the same limits. Floor and ceiling are compared in a common altitude frame;
+terrain-relative bounds are resolved at the location being checked. This fallback
+cannot make an invalid fence configuration safe or guarantee against overshoot.
+
 When flying near fences in wind, `DAA_WIND_MARG` widens the standoff in proportion
 to wind speed (above `DAA_WIND_MIN`) so cross-track drift is less likely to carry
 the aircraft across a boundary. See the Parameters table for both.
@@ -316,7 +326,7 @@ for the altitude/geo fences.
 | `DAA_LTR_COOL_S` | 10 | s | Time the aircraft loiter-to-altitude is held after the aircraft was last detected before releasing back to the mission. Hysteresis against a briefly-dropped or laggy ADS-B feed thrashing the vehicle between GUIDED (loiter) and AUTO (mission). Set to 0 to release as soon as the aircraft is no longer detected. |
 | `DAA_AVD_ALERT` | 1 | | Whether to alert on avoidance (0: none, 1: alert). |
 | `DAA_AVD_ACTION` | 1 | | Whether to act on avoidance (0: none, 1: avoid). |
-| `DAA_MARGIN_ALT` | 20 | m | Proactive buffer inside the safe altitude-fence limits at which DAA starts clamping the commanded altitude. |
+| `DAA_MARGIN_ALT` | 20 | m | Proactive buffer inside the safe altitude-fence limits at which DAA starts clamping the commanded altitude. If both DAA buffers overlap, use the core safe band midpoint with a reduced buffer. |
 | `DAA_ALT_HYST_M` | 10 | m | Hysteresis band for altitude-fence avoidance, preventing chatter as the plane levels off. |
 | `DAA_ALT_COOL_S` | 15 | s | Minimum time between altitude-fence "levelling off" notices, so brief re-engagements do not re-spam the GCS. |
 | `DAA_HEADING_INC` | 1.5 | deg | Angular step used when searching candidate headings around the target bearing for a collision-free path. The search sweeps a full circle in increments of this size, alternating left and right. Smaller values search more finely but cost more CPU per update. |

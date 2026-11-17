@@ -42,7 +42,7 @@ Inspired by the Copter/Rover AC_Avoidance implementation by Randy Mackay and Ris
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-121"
+SCRIPT_VERSION      = "4.8.0-122"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -214,7 +214,7 @@ PARAM.AVD_ACTION = bind_add_param('AVD_ACTION', 17, 1)
 --[[
     // @Param: DAA_MARGIN_ALT
     // @DisplayName: Altitude fence avoidance margin
-    // @Description: Proactive buffer (in metres) inside the safe altitude-fence limits at which DAA starts clamping the commanded altitude. The plane levels off this far inside the safe limit. Avoidance kicks in for FENCE_ALT_MAX (FENCE_TYPE bit 0) and/or FENCE_ALT_MIN (FENCE_TYPE bit 3) when enabled.
+    // @Description: Proactive buffer (in metres) inside the safe altitude-fence limits at which DAA starts clamping the commanded altitude. The plane levels off this far inside the safe limit. If both altitude fences are enabled and their DAA buffers overlap, the target is clamped to the midpoint of the core safe band with a reduced buffer. Avoidance kicks in for FENCE_ALT_MAX (FENCE_TYPE bit 0) and/or FENCE_ALT_MIN (FENCE_TYPE bit 3) when enabled.
     // @Units: m
     // @Range: 0 200
     // @Increment: 1
