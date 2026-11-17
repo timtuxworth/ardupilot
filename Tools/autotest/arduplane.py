@@ -8799,7 +8799,7 @@ return update()
         )])
         self.wait_text("Plane DAA", check_context=True, timeout=60)
         self.set_rc(7, 1000)
-        failure = "pDAA: Fence too close to home for safe DAA"
+        failure = "pDAA: Fence too close to home for DAA"
 
         def refresh_check():
             self.delay_sim_time(6, reason="allow DAA parameters and pre-arm check to refresh")

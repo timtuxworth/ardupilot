@@ -42,7 +42,7 @@ Inspired by the Copter/Rover AC_Avoidance implementation by Randy Mackay and Ris
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-120"
+SCRIPT_VERSION      = "4.8.0-121"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -1080,7 +1080,7 @@ local DAA = {
         local wind_ms = calculate_windspeed()
         local margin_m = margin_fence_m + PARAM.WIND_MARG:get() * math.max(0, wind_ms - PARAM.WIND_MIN:get())
         if clearance_m ~= nil and clearance_m <= margin_m then
-            arming:set_aux_auth_failed(arm_auth_id, SCRIPT_NAME_SHORT .. ": Fence too close to home for safe DAA")
+            arming:set_aux_auth_failed(arm_auth_id, SCRIPT_NAME_SHORT .. ": Fence too close to home for DAA")
         else
             arming:set_aux_auth_passed(arm_auth_id)
         end

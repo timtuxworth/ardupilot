@@ -229,7 +229,7 @@ the aircraft has launched) if it fires. This is only a live concern with
 
 ## Known limitations
 
-The pre-arm check reports `pDAA: Fence too close to home for safe DAA` and
+The pre-arm check reports `pDAA: Fence too close to home for DAA` and
 prevents arming when home is within the DAA fence margin (including wind
 allowance) of an enabled horizontal fence, or is already outside its permitted
 area. It uses auxiliary arming authorization, like `arming-checks.lua`, and
