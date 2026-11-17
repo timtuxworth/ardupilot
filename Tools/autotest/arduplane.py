@@ -13190,6 +13190,91 @@ return update()
         self.wait_altitude(48, 52, relative=True, timeout=60)
         self.disarm_vehicle(force=True)
 
+    def PlaneDAAAltitudeFenceBand(self):
+        """Overlapping DAA altitude buffers must not command outside the real fence band."""
+        self.install_planedaa_scripts()
+        self.install_script_content_context("daa-altitude-band-target.lua", """
+local SCRIPT_NAME = "DAA Altitude Band Test"
+local SCRIPT_NAME_SHORT = "DAABand"
+local SCRIPT_VERSION = "1.0.0"
+local function update()
+    local target = vehicle:get_target_location()
+    if target then
+        local altitude = target:get_alt_m(1)
+        if altitude then gcs:send_named_float(SCRIPT_NAME_SHORT, altitude) end
+    end
+    return update, 200
+end
+gcs:send_text(6, SCRIPT_NAME .. " " .. SCRIPT_VERSION)
+return update, 200
+""")
+        self.set_parameters({
+            "SCR_ENABLE": 1,
+            "SCR_VM_I_COUNT": 1000000,
+            "AVD_ENABLE": 1,
+            "FENCE_ENABLE": 0,
+            "FENCE_TYPE": 9,
+            "FENCE_ACTION": 0,
+            "FENCE_MARGIN": 2,
+            "FENCE_ALT_MIN_TP": 1,
+            "FENCE_ALT_MAX_TP": 1,
+        })
+        scenarios = [
+            # Both reported failures, plus a normal-width control and mixed frames.
+            dict(name="narrow band", lo=90, hi=100, margin=20, cruise=95, target=95, max_frame=1),
+            dict(name="large DAA buffer", lo=50, hi=100, margin=50, cruise=75, target=75, max_frame=1),
+            dict(name="normal band", lo=50, hi=150, margin=20, cruise=140, target=128, max_frame=1),
+            dict(name="mixed altitude frames", lo=90, hi=100, margin=20, cruise=95, target=95, max_frame=0),
+        ]
+        for scenario in scenarios:
+            self.start_subtest(scenario["name"])
+            self.context_push()
+            self.context_collect('STATUSTEXT')
+            home_alt = self.home_position_as_location().alt
+            self.set_parameters({
+                "FENCE_ALT_MIN": scenario["lo"],
+                "FENCE_ALT_MAX": scenario["hi"] + (home_alt if scenario["max_frame"] == 0 else 0),
+                "FENCE_ALT_MAX_TP": scenario["max_frame"],
+            })
+            self.reboot_sitl()
+            self.wait_ready_to_arm()
+            self.set_parameters({"DAA_MARGIN_ALT": scenario["margin"], "DAA_TRAP_ACT": 0})
+            # No traffic is injected: altitude-fence handling alone must stay contained.
+            self.start_flying_simple_relhome_mission([
+                (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, scenario["cruise"]),
+                (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 6000, 0, scenario["cruise"]),
+                (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+            ])
+            self.wait_current_waypoint(2, timeout=180)
+            self.wait_altitude(scenario["cruise"]-2, scenario["cruise"]+2,
+                               relative=True, minimum_duration=2, timeout=120)
+            self.wait_text("Plane DAA", check_context=True, timeout=60)
+            self.do_fence_enable()
+            self.wait_message_field_values('NAMED_VALUE_FLOAT', {
+                'name': 'DAABand', 'value': scenario["target"],
+            }, epsilon=0.2, timeout=30)
+
+            failures = []
+
+            def check_target(mav, message):
+                if message.get_type() == 'NAMED_VALUE_FLOAT' and message.name == 'DAABand':
+                    if abs(message.value - scenario["target"]) > 0.2:
+                        failures.append("target changed to %.2f m" % message.value)
+                elif message.get_type() == 'GLOBAL_POSITION_INT':
+                    altitude = message.relative_alt * 0.001
+                    if not scenario["lo"] <= altitude <= scenario["hi"]:
+                        failures.append("aircraft left fence band at %.2f m" % altitude)
+
+            self.install_message_hook_context(check_target)
+            self.delay_sim_time(12, reason="verify stable target and physical containment")
+            if failures:
+                raise NotAchievedException("%s: %s" % (scenario["name"], failures[0]))
+            if self.statustext_in_collections("fence breached") is not None:
+                raise NotAchievedException("altitude fence breached during %s" % scenario["name"])
+            self.do_fence_disable()
+            self.disarm_vehicle(force=True)
+            self.context_pop()
+
     def _PlaneDAAFenceAltitude(self, terrain=False):
         self.install_planedaa_scripts()
 
@@ -15582,6 +15667,7 @@ return update()
             Test(self.PlaneDAAFenceDriftReversal),
             Test(self.PlaneDAAFenceAltitude),
             Test(self.PlaneDAAFenceAltitudeTerrain),
+            Test(self.PlaneDAAAltitudeFenceBand),
             Test(self.PlaneDAASecondLegLookahead),
             Test(self.PlaneDAAClimbAltitudeSeparation),
             Test(self.PlaneDAADescentAltitudeSeparation),
