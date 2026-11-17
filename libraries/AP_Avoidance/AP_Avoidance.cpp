@@ -178,7 +178,7 @@ const AP_Param::GroupInfo AP_Avoidance::var_info[] = {
 
     // @Param: GND_ALT
     // @DisplayName: Ground contact altitude threshold
-    // @Description: A traffic contact (crewed aircraft or MAVLink drone) is excluded from avoidance while its own altitude is within this many metres of home AND its groundspeed is below AVD_GND_SPD - i.e. it is parked or taxiing, not flying. It is broadcasting an airborne emitter type is not evidence it is actually in the air: a real aircraft on the ground near a runway keeps reporting the same category it uses in flight, and is_ground_vehicle() only catches genuine ADS-B surface-vehicle categories. Without this, a stationary contact can win the single-closest-obstacle search purely because its keep-out radius (AVD_WCLR_XY for a crewed aircraft) is larger than a real threat's, masking that threat entirely. 0 disables the exemption (every contact is always a potential threat).
+    // @Description: A traffic contact (crewed aircraft or MAVLink drone) is excluded from avoidance while its own altitude is within this many metres of home AND its groundspeed is below AVD_GND_SPD - this is a parked-contact heuristic, not confirmation that the contact is on the ground. A hovering or slowly moving aircraft within the altitude band is also excluded. It is broadcasting an airborne emitter type is not evidence it is actually in the air: a real aircraft on the ground near a runway keeps reporting the same category it uses in flight, and is_ground_vehicle() only catches genuine ADS-B surface-vehicle categories. Without this, a stationary contact can win the single-closest-obstacle search purely because its keep-out radius (AVD_WCLR_XY for a crewed aircraft) is larger than a real threat's, masking that threat entirely. 0 disables the exemption (every contact is always a potential threat).
     // @Units: m
     // @Range: 0 20
     // @User: Standard
@@ -186,7 +186,7 @@ const AP_Param::GroupInfo AP_Avoidance::var_info[] = {
 
     // @Param: GND_SPD
     // @DisplayName: Ground contact groundspeed threshold
-    // @Description: The groundspeed half of the AVD_GND_ALT ground-contact exclusion - see that parameter. Both conditions must hold (low altitude AND low groundspeed) for a contact to be excluded, so a low, slow-moving aircraft that is genuinely flying (not simply parked) is still avoided.
+    // @Description: The groundspeed half of the AVD_GND_ALT ground-contact exclusion - see that parameter. Both conditions must hold (low altitude AND low groundspeed) for a contact to be excluded. A hovering or slowly moving aircraft satisfying both conditions is also excluded.
     // @Units: m/s
     // @Range: 0 10
     // @User: Standard

@@ -259,6 +259,27 @@ own crosstrack state (which the mission's waypoint-advance sets independently)
 is overwritten by the stale saved value once avoidance ends - possibly leaving
 the new leg flown direct-to-waypoint instead of along the leg, or vice versa.
 
+**Hovering traffic can be excluded:** the parked-contact filter uses altitude
+relative to this vehicle's home and reported groundspeed, not confirmation that
+the contact is on the ground. A drone hovering or moving slowly within
+`AVD_GND_ALT` of home altitude (10 m by default) can therefore be ignored. See
+[Parked and taxiing contacts are excluded](#parked-and-taxiing-contacts-are-excluded).
+
+**Trap recovery after position loss:** with `DAA_TRAP_ACT` enabled, a temporary
+loss of position or an unavailable navigation target while the trapped failsafe
+interrupts a crewed-aircraft avoidance loiter can discard the saved pre-loiter
+mode. If the trap later restores GUIDED, the plane may remain circling at the
+avoidance-loiter location instead of returning to AUTO. Pilot intervention may
+be needed to resume the intended flight mode.
+
+**GUIDED destination after position loss:** during ordinary avoidance in GUIDED,
+a temporary loss of position or an unavailable navigation target can cause a
+failed destination restore followed by loss of the saved original destination.
+When navigation becomes available again, the plane may fly to and circle at the
+last avoidance target instead. The pilot or companion may need to send the
+intended destination again. This can also occur with `DAA_TRAP_ACT=0` (the
+default); it does not require the trapped failsafe.
+
 Some unclassified traffic contacts can delay drone alerts and early avoidance.
 A pilot mode change made at the exact moment DAA starts or ends a manoeuvre may still
 be overridden; the script checks for mode changes, but the check and command
@@ -484,9 +505,15 @@ overrides which side gets committed.
 ### Parked and taxiing contacts are excluded
 
 A traffic contact (crewed aircraft or MAVLink drone) is excluded from avoidance while its
-own altitude is within `AVD_GND_ALT` of home AND its groundspeed is below `AVD_GND_SPD` —
-i.e. it is parked or taxiing, not flying. Broadcasting an airborne emitter type is not
-evidence a contact is actually in the air: a real aircraft on the ground near a runway
+own altitude is within `AVD_GND_ALT` of this vehicle's home altitude AND its groundspeed
+is below `AVD_GND_SPD`. This is a heuristic for parked or taxiing traffic, not confirmation
+that a contact is on the ground: a drone hovering or moving slowly within the altitude
+band is also excluded. The default 10 m band tolerates altitude-reference differences
+between nearby vehicles, but widens this hover exclusion. Reducing `AVD_GND_ALT` narrows
+the band; setting it to `0` disables the parked-contact exclusion.
+
+Broadcasting an airborne emitter type is not evidence a contact is actually in the air:
+a real aircraft on the ground near a runway
 keeps reporting the same category it uses in flight. Without this exclusion, a stationary
 contact can win the single-closest-obstacle search purely because its keep-out radius
 (e.g. `AVD_WCLR_XY` for a crewed aircraft) is larger than a real threat's, masking that
@@ -797,7 +824,7 @@ The `ObjT` field uses the following `OBSTACLE_TYPE` enumeration:
 | 5 | FENCE_CIRCLE_EXCLUSION | Circular exclusion fence |
 | 6 | FENCE_POLYGON_INCLUSION | Polygon inclusion fence |
 | 7 | FENCE_POLYGON_EXCLUSION | Polygon exclusion fence |
-| 8 | FENCE_LUA | Fence defined in Lua |
+| 8 | FENCE_LUA | Reserved for future Lua/KML fences; not currently reported |
 | 9 | PROXIMITY | Detected by a proximity sensor, typically close (not active by default) |
 | 10 | AIS | AIS-tracked maritime (ship) vehicle (not active by default) |
 | 11 | FENCE_ALT_MAX | Max altitude fence (FENCE_TYPE bit 0) |
