@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-029"
+DAAcore.SCRIPT_VERSION = "4.8.0-030"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -72,50 +72,6 @@ local function clamp_log_m(value_m)
         return LOG_CLEARANCE_MAX_M
     end
     return math.max(math.min(value_m, LOG_CLEARANCE_MAX_M), -LOG_CLEARANCE_MAX_M)
-end
-
--- Compare both altitude limits in the location's frame: the fence floor and ceiling
--- may use different frames. Resolve terrain at this location, not at home or the origin.
-local FENCE_TYPE_ALT_MAX = 1
-local FENCE_TYPE_ALT_MIN = 8
-local function altitude_fence_bounds(loc, margin_m)
-    if loc == nil or fence == nil then
-        return
-    end
-    local enabled = fence:get_enabled_fences()
-    local frame = loc:get_alt_frame()
-    local floor_m, ceiling_m, bound_loc
-    if (enabled & FENCE_TYPE_ALT_MAX) ~= 0 then
-        local safe_max_m, max_frame = fence:get_safe_alt_max()
-        if max_frame ~= frame then
-            bound_loc = loc:copy()
-            bound_loc:set_alt_m(safe_max_m, max_frame)
-            safe_max_m = bound_loc:get_alt_m(frame)
-        end
-        if safe_max_m ~= nil then
-            ceiling_m = safe_max_m - margin_m
-        end
-    end
-    if (enabled & FENCE_TYPE_ALT_MIN) ~= 0 then
-        local safe_min_m, min_frame = fence:get_safe_alt_min()
-        if min_frame ~= frame then
-            bound_loc = bound_loc or loc:copy()
-            bound_loc:set_alt_m(safe_min_m, min_frame)
-            safe_min_m = bound_loc:get_alt_m(frame)
-        end
-        if safe_min_m ~= nil then
-            floor_m = safe_min_m + margin_m
-        end
-    end
-    local effective_margin_m = margin_m
-    if floor_m ~= nil and ceiling_m ~= nil and floor_m > ceiling_m then
-        -- The requested DAA buffers do not fit. Their midpoint is also the
-        -- midpoint of the core safe limits, since the same buffer was added/subtracted.
-        effective_margin_m = math.max(0, margin_m + (ceiling_m - floor_m) * 0.5)
-        local midpoint_m = (floor_m + ceiling_m) * 0.5
-        floor_m, ceiling_m = midpoint_m, midpoint_m
-    end
-    return floor_m, ceiling_m, frame, effective_margin_m
 end
 
 function DAAcore.new(deps)
@@ -1101,7 +1057,7 @@ function DAAcore.new(deps)
     -- Horizontal navigation is unchanged; use the same ordered bounds as detection
     -- so a floor correction cannot undo a ceiling correction when DAA buffers overlap.
     local function clamp_alt_to_fence(loc)
-        local floor_m, ceiling_m, frame = altitude_fence_bounds(loc, margin_alt_m)
+        local floor_m, ceiling_m, frame = geometry.altitude_fence_bounds(loc, margin_alt_m, fence)
         if floor_m == nil and ceiling_m == nil then
             return
         end
@@ -1152,7 +1108,7 @@ function DAAcore.new(deps)
             alt_fence_near      = false
             return nil
         end
-        local floor_m, ceiling_m, frame, effective_margin_m = altitude_fence_bounds(current_loc, margin_alt_m)
+        local floor_m, ceiling_m, frame, effective_margin_m = geometry.altitude_fence_bounds(current_loc, margin_alt_m, fence)
         if floor_m == nil and ceiling_m == nil then
             alt_fence_active = false
             alt_fence_near = false

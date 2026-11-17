@@ -17,7 +17,7 @@
 
 local DAAgeometry = {}
 
-DAAgeometry.SCRIPT_VERSION = "4.8.0-006"
+DAAgeometry.SCRIPT_VERSION = "4.8.0-007"
 DAAgeometry.SCRIPT_NAME = "DAA geometry"
 DAAgeometry.SCRIPT_NAME_SHORT = "DAAgeo"
 
@@ -26,6 +26,50 @@ DAAgeometry.SCRIPT_NAME_SHORT = "DAAgeo"
 local BANNER_SEVERITY = 6
 
 local GRAVITY_MSS = 9.80665
+
+-- Compare both altitude limits in the location's frame: the fence floor and ceiling
+-- may use different frames. Resolve terrain at this location, not at home or the origin.
+local FENCE_TYPE_ALT_MAX = 1
+local FENCE_TYPE_ALT_MIN = 8
+function DAAgeometry.altitude_fence_bounds(loc, margin_m, fence)
+    if loc == nil or fence == nil then
+        return
+    end
+    local enabled = fence:get_enabled_fences()
+    local frame = loc:get_alt_frame()
+    local floor_m, ceiling_m, bound_loc
+    if (enabled & FENCE_TYPE_ALT_MAX) ~= 0 then
+        local safe_max_m, max_frame = fence:get_safe_alt_max()
+        if max_frame ~= frame then
+            bound_loc = loc:copy()
+            bound_loc:set_alt_m(safe_max_m, max_frame)
+            safe_max_m = bound_loc:get_alt_m(frame)
+        end
+        if safe_max_m ~= nil then
+            ceiling_m = safe_max_m - margin_m
+        end
+    end
+    if (enabled & FENCE_TYPE_ALT_MIN) ~= 0 then
+        local safe_min_m, min_frame = fence:get_safe_alt_min()
+        if min_frame ~= frame then
+            bound_loc = bound_loc or loc:copy()
+            bound_loc:set_alt_m(safe_min_m, min_frame)
+            safe_min_m = bound_loc:get_alt_m(frame)
+        end
+        if safe_min_m ~= nil then
+            floor_m = safe_min_m + margin_m
+        end
+    end
+    local effective_margin_m = margin_m
+    if floor_m ~= nil and ceiling_m ~= nil and floor_m > ceiling_m then
+        -- The requested DAA buffers do not fit. Their midpoint is also the
+        -- midpoint of the core safe limits, since the same buffer was added/subtracted.
+        effective_margin_m = math.max(0, margin_m + (ceiling_m - floor_m) * 0.5)
+        local midpoint_m = (floor_m + ceiling_m) * 0.5
+        floor_m, ceiling_m = midpoint_m, midpoint_m
+    end
+    return floor_m, ceiling_m, frame, effective_margin_m
+end
 
 function DAAgeometry.wrap_360(angle)
     local res = math.fmod(angle, 360.0)
