@@ -11917,7 +11917,45 @@ return update()
         second contact. DAA_TRAP_S/CLR_S are both shortened for test speed; the contact
         is withdrawn before DAA_TRAP_CLR_S elapses so the trap resumes GUIDED into a
         clear sky and does not immediately re-trap.'''
+        self._PlaneDAATrapResumeDuringLoiter()
+
+    def PlaneDAATrapLoiterDropout(self):
+        """An owned trap survives position/target dropout, but yields to pilot takeover."""
+        for dropout in ("position", "target", "pilot takeover"):
+            self.start_subtest("trapped loiter dropout: " + dropout)
+            self.context_push()
+            self._PlaneDAATrapResumeDuringLoiter(dropout)
+            self.context_pop()
+
+    def _PlaneDAATrapResumeDuringLoiter(self, dropout=None):
         self.install_planedaa_scripts()
+        if dropout is not None:
+            with open(self.installed_script_path("planedaa.lua")) as f:
+                content = f.read()
+            anchor = "    function DAA.get_vehicle_state(fetched_current_loc)\n"
+            content = content.replace(anchor, "    local test_trap_dropout_cycle = nil\n" + anchor)
+            anchor = "        current_loc = fetched_current_loc\n"
+            injection = '''
+        if test_trap_dropout_cycle == nil and trap_active and loiteralt.active and
+            current_mode == trap_fs_mode then
+            test_trap_dropout_cycle = 0
+        end
+        if test_trap_dropout_cycle ~= nil and test_trap_dropout_cycle < 4 then
+            test_trap_dropout_cycle = test_trap_dropout_cycle + 1
+            if test_trap_dropout_cycle <= 3 then
+                %s
+                %s
+            else
+                gcs:send_text(6, "DAA test trapped dropout ended")
+            end
+        end
+''' % (
+                "current_target_loc = nil" if dropout == "target" else "current_loc = nil",
+                '''assert(vehicle:set_mode(PLANE_MODE.MANUAL))
+                current_mode = vehicle:get_mode()''' if dropout == "pilot takeover" else "-- trap retains ownership")
+            if content.count(anchor) != 1:
+                raise NotAchievedException("DAA trapped dropout injection point changed")
+            self.install_script_content("planedaa.lua", content.replace(anchor, anchor + injection))
 
         self.set_parameters({
             "SCR_ENABLE": 1,
@@ -11981,17 +12019,26 @@ return update()
         tstart = self.get_sim_time()
         while self.get_sim_time() - tstart < 30:
             inject_aircraft(60)
-            if self.mav.flightmode == "RTL":
+            pilot_takeover = dropout == "pilot takeover" and self.mav.flightmode == "MANUAL"
+            if self.mav.flightmode == "RTL" or pilot_takeover:
                 break
             self.wait_heartbeat()
-        if self.mav.flightmode != "RTL":
+        if self.mav.flightmode != "RTL" and not (dropout == "pilot takeover" and self.mav.flightmode == "MANUAL"):
             raise NotAchievedException("trapped-failsafe never fired for the near-miss contact")
 
         # --- withdraw the contact (stop injecting - AP_Avoidance prunes it after 5 s)
         #     so the trap's recovery resumes into a clear sky rather than immediately
         #     re-tripping, then wait past DAA_TRAP_CLR_S for the recovery to GUIDED and,
         #     since the contact is gone, the aircraft loiter's own release back to AUTO.
-        self.wait_mode("AUTO", timeout=60)
+        if dropout is not None:
+            self.wait_text("DAA test trapped dropout ended", check_context=True, timeout=30)
+        if dropout == "pilot takeover":
+            self.wait_mode("MANUAL", timeout=10)
+            self.delay_sim_time(10, reason="verify the trap and loiter preserve pilot ownership")
+            if self.mav.flightmode != "MANUAL":
+                raise NotAchievedException("dropout recovery overrode pilot mode")
+        else:
+            self.wait_mode("AUTO", timeout=60)
         self.disarm_vehicle(force=True)
 
     def PlaneDAAHungTrapFires(self):
@@ -13274,7 +13321,9 @@ return update, 200
             "FENCE_MARGIN": 2,
             "FENCE_ALT_MIN_TP": 1,
             "FENCE_ALT_MAX_TP": 1,
+            "RC7_OPTION": 308,
         })
+        self.set_rc(7, 1000)
         scenarios = [
             # Both reported failures, plus a normal-width control and mixed frames.
             dict(name="narrow band", lo=90, hi=100, margin=20, cruise=95, target=95, max_frame=1),
@@ -13372,6 +13421,11 @@ return update, 200
             if self.statustext_in_collections("fence breached") is not None:
                 raise NotAchievedException("altitude fence breached during %s" % scenario["name"])
             if scenario["name"] == "normal band":
+                # Force the revert path while the fence still clamps the goal.
+                # Merely lifting an active clamp does not exercise goal mutation.
+                self.set_rc(7, 2000)
+                self.delay_sim_time(2, reason="clear avoidance while the altitude clamp remains enabled")
+                self.set_rc(7, 1000)
                 self.set_parameter("FENCE_ALT_MAX", 200)
                 self.wait_message_field_values('NAMED_VALUE_FLOAT', {
                     'name': 'DAABand', 'value': scenario["cruise"],
@@ -15783,6 +15837,7 @@ return update, 200
             Test(self.PlaneDAATrapNoFalseFire),
             Test(self.PlaneDAATrapCauseClassified),
             Test(self.PlaneDAATrapResumeDuringLoiter),
+            Test(self.PlaneDAATrapLoiterDropout),
             Test(self.PlaneDAAHungTrapFires),
             Test(self.PlaneDAADisableRevertsTarget),
             Test(self.PlaneDAADisableDuringLoiter),

@@ -42,7 +42,7 @@ Inspired by the Copter/Rover AC_Avoidance implementation by Randy Mackay and Ris
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-125"
+SCRIPT_VERSION      = "4.8.0-126"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -1139,7 +1139,14 @@ local DAA = {
         -- Always use this cycle's target for the compare-and-update binding. A
         -- missing target must not leave a stale snapshot available to cleanup.
         update_target_location_save_loc = current_target_loc
-        if restore_pending_mode ~= nil and
+        local trap_owns_mode = trap_active and current_mode == trap_fs_mode
+        if trap_owns_mode and (current_loc == nil or current_target_loc == nil) then
+            -- The trap temporarily owns the mode; this is not a pilot takeover.
+            -- Suspend navigation without erasing the loiter's saved return mode.
+            active = false
+            return
+        end
+        if not trap_owns_mode and restore_pending_mode ~= nil and
             (current_mode ~= restore_pending_mode or
              (current_target_loc ~= nil and
               not locations_equal(current_target_loc, commanded_target_loc) and
@@ -1168,7 +1175,7 @@ local DAA = {
             return
         end
 
-        if restore_pending_mode ~= nil then
+        if not trap_owns_mode and restore_pending_mode ~= nil then
             -- Retry a rejected restore before detection can adopt the avoidance
             -- point as a new destination. Keep the original goal until success.
             DAA.clear_avoidance()
@@ -1180,11 +1187,11 @@ local DAA = {
         end
 
         -- if the navigation target has changed to some other target not the DAA target, it must be vehicle navigation
-        if navigation_target_loc == nil or
+        if not trap_owns_mode and (navigation_target_loc == nil or
             (not locations_equal(navigation_target_loc, current_target_loc) and
                 not locations_equal(daa_target_loc, current_target_loc) and
                 not locations_equal(commanded_target_loc, current_target_loc)) or
-            (commanded_target_loc ~= nil and commanded_target_mode ~= current_mode) then
+            (commanded_target_loc ~= nil and commanded_target_mode ~= current_mode)) then
             -- the vehicle navigation code has changed it's target
             navigation_target_loc = current_target_loc:copy()
             commanded_target_loc = nil
@@ -1406,6 +1413,9 @@ local DAA = {
     -- Without this, disabling DAA mid-avoidance leaves the hijacked target in place and
     -- the vehicle flies to it instead of home (e.g. RTL flying straight past home).
     function DAA.clear_avoidance()
+        -- Leave loiter recovery suspended while our own trap holds its mode.
+        -- A different live mode remains an external takeover and is handled below.
+        if trap_active and vehicle:get_mode() == trap_fs_mode then return end
         -- An aircraft loiter hijacks the flight MODE (it commands GUIDED directly rather
         -- than going through set_avoid_location), so it leaves daa_target_loc nil and the
         -- check below would return without touching it.  Nothing else can stop it either:

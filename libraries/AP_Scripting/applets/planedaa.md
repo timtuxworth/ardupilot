@@ -240,6 +240,21 @@ takeoff/landing check and can still act (e.g. an RTL during rollout, or before
 the aircraft has launched) if it fires. This is only a live concern with
 `DAA_TRAP_ACT` set non-default.
 
+### Navigation recovery
+
+**Trap recovery after position loss:** while DAA's trapped failsafe controls the
+vehicle, a temporary loss of position or navigation target suspends loiter
+cleanup and preserves the pre-loiter mode. Once navigation is available and a
+recoverable trap releases, the aircraft loiter can finish its normal handback
+to AUTO or the original GUIDED destination. A pilot or external failsafe mode
+change still ends DAA's ownership; static fence traps still require intervention.
+
+**GUIDED destination recovery:** if position or the navigation target becomes
+unavailable during ordinary avoidance, DAA retains the original destination
+while a restore is pending and retries when navigation is available again. A
+pilot mode change or a new destination cancels that pending restore. This also
+applies with `DAA_TRAP_ACT=0`.
+
 ## Known limitations
 
 The pre-arm check reports `pDAA: Fence too close to home for DAA` and
@@ -277,19 +292,6 @@ relative to this vehicle's home and reported groundspeed, not confirmation that
 the contact is on the ground. A drone hovering or moving slowly within
 `AVD_GND_ALT` of home altitude (10 m by default) can therefore be ignored. See
 [Parked and taxiing contacts are excluded](#parked-and-taxiing-contacts-are-excluded).
-
-**Trap recovery after position loss:** with `DAA_TRAP_ACT` enabled, a temporary
-loss of position or an unavailable navigation target while the trapped failsafe
-interrupts a crewed-aircraft avoidance loiter can discard the saved pre-loiter
-mode. If the trap later restores GUIDED, the plane may remain circling at the
-avoidance-loiter location instead of returning to AUTO. Pilot intervention may
-be needed to resume the intended flight mode.
-
-**GUIDED destination recovery:** if position or the navigation target becomes
-unavailable during ordinary avoidance, DAA retains the original destination
-while a restore is pending and retries when navigation is available again. A
-pilot mode change or a new destination cancels that pending restore. This also
-applies with `DAA_TRAP_ACT=0`.
 
 Some unclassified traffic contacts can delay drone alerts and early avoidance.
 A pilot mode change made at the exact moment DAA starts or ends a manoeuvre may still
