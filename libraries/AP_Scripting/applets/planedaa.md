@@ -675,7 +675,9 @@ While a trapped failsafe controls the vehicle, HUNG tracking is reset: progress
 towards the interrupted destination is not expected. Tracking starts afresh after
 release, so the failsafe's own diversion cannot immediately trigger a HUNG trap.
 The reset is silent while the trap holds: the GCS continues to show `TRAPPED`
-until release, rather than reporting a premature HUNG clear. Ordinary HUNG
+until release, rather than reporting a premature HUNG clear. Pilot/failsafe mode
+takeover or disabling `DAA_TRAP_ACT` also clears the trap status
+without commanding a return to the interrupted mode. Ordinary HUNG
 recovery still announces clearing. A trap originally caused by genuine HUNG
 avoidance remains held until the mission advances or the pilot changes mode.
 

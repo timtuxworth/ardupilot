@@ -12164,7 +12164,15 @@ return update()
         """An ordinary HUNG alert must still announce clearing when the mission advances."""
         self._PlaneDAAHungTrapFires(alert_only=True)
 
-    def _PlaneDAAHungTrapFires(self, alert_only):
+    def PlaneDAATrapStatusCancellation(self):
+        """Pilot takeover and disabling the trap must clear its GCS status."""
+        for cancel in ("MANUAL", "LOITER", "disabled"):
+            self.start_subtest("trap cancellation: " + cancel)
+            self.context_push()
+            self._PlaneDAAHungTrapFires(alert_only=False, cancel=cancel)
+            self.context_pop()
+
+    def _PlaneDAAHungTrapFires(self, alert_only, cancel=None):
         self.install_planedaa_scripts()
 
         self.set_parameters({
@@ -12272,6 +12280,23 @@ return update()
             raise NotAchievedException("HUNG clear announced while the hung trap still held RTL")
         trap_status["holding"] = False
         release_index = len(avoid_values)
+        if cancel is not None:
+            if cancel == "disabled":
+                self.set_parameter("DAA_TRAP_ACT", 0)
+                expected_mode = "RTL"
+            else:
+                self.change_mode(cancel)
+                expected_mode = cancel
+            self.delay_sim_time(7, reason="receive cancellation status after the parameter refresh")
+            if "" not in avoid_values[release_index:]:
+                raise NotAchievedException("GCS TRAPPED status was not cleared on " + cancel)
+            if "TRAPPED" in avoid_values[release_index:]:
+                raise NotAchievedException("trap re-engaged after " + cancel)
+            if self.mav.flightmode != expected_mode:
+                raise NotAchievedException("trap cancellation overrode the current mode")
+            self.do_fence_disable()
+            self.disarm_vehicle(force=True)
+            return
         # the pilot advances the mission past the unreachable waypoint: the geometry that
         # hung the vehicle is no longer what it is being asked to fly, so the trap must let go
         self.set_current_waypoint(3)
@@ -15975,6 +16000,7 @@ return update, 200
             Test(self.PlaneDAATrapLoiterDropout),
             Test(self.PlaneDAAHungTrapFires),
             Test(self.PlaneDAAHungAlertClears),
+            Test(self.PlaneDAATrapStatusCancellation),
             Test(self.PlaneDAADisableRevertsTarget),
             Test(self.PlaneDAADisableDuringLoiter),
             Test(self.PlaneDAAFenceAvoidanceWind),

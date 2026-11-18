@@ -42,7 +42,7 @@ Inspired by the Copter/Rover AC_Avoidance implementation by Randy Mackay and Ris
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-130"
+SCRIPT_VERSION      = "4.8.0-131"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -941,6 +941,19 @@ local DAA = {
     -- "always leave crosstrack alone" rather than an undefined saved value.
     local saved_crosstrack_enabled = true
 
+    -- End ownership without changing mode: pilot/failsafe takeover and disabling
+    -- the trap must not resume an old mode, but must clear its latched GCS status.
+    local function trap_cancel()
+        if trap_active then gcs:send_named_string("DAA-AVOID", "") end
+        trap_active = false
+        trap_since_ms = uint32_t(0)
+        trap_prev_mode = -1
+        trap_saved_guided_target_loc = nil
+        trap_fs_mode = -1
+        trap_dynamic = false
+        trap_hung = false
+    end
+
     -- Last DAA_LKAHD_M this file announced a change for - the working value the sweep
     -- actually probes at is core.update_state()'s own copy (kept in sync via
     -- lookahead_param_m in configure_modules()); this is only a "did it change" sentinel
@@ -1119,6 +1132,13 @@ local DAA = {
     -- populate some local values with a static/consistent picture of the vehicle state.
     function DAA.get_vehicle_state(fetched_current_loc)
         local current_target_loc = vehicle:get_target_location()
+        -- This runs even in MANUAL, where the normal trap-update loop is inactive.
+        if trap_active and (current_mode ~= trap_fs_mode or trap_act == 0) then
+            if current_mode ~= trap_fs_mode then
+                gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. ": trap released (mode changed)")
+            end
+            trap_cancel()
+        end
 
         active      = true;
         current_loc = fetched_current_loc
@@ -1821,10 +1841,7 @@ local DAA = {
             gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. string.format(
                 ": trap clear but resume %s REFUSED", get_mode_string(trap_prev_mode)))
         end
-        trap_saved_guided_target_loc = nil
-        gcs:send_named_string("DAA-AVOID", "")
-        trap_active   = false
-        trap_since_ms = uint32_t(0)
+        trap_cancel()
     end
 
     -- Tell the pilot when the mission has moved on from a waypoint the vehicle never
@@ -1874,8 +1891,7 @@ local DAA = {
         hung_update()
         mission_skip_update()
         if trap_act == 0 then
-            trap_active = false
-            trap_since_ms = uint32_t(0)
+            trap_cancel()
             return false
         end
         local mode_now = vehicle:get_mode()
@@ -1901,8 +1917,7 @@ local DAA = {
         if mode_now ~= trap_fs_mode then
             -- the pilot (or another failsafe) changed mode: release, never fight it
             gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. ": trap released (mode changed)")
-            trap_active = false
-            trap_since_ms = uint32_t(0)
+            trap_cancel()
             return false
         end
         if trap_dynamic and (now_ms - trap_trigger_ms) >= (trap_clr_s * 1000) then
