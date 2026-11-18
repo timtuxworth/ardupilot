@@ -674,8 +674,10 @@ Horizontal obstacle avoidance still runs the watchdog.
 While a trapped failsafe controls the vehicle, HUNG tracking is reset: progress
 towards the interrupted destination is not expected. Tracking starts afresh after
 release, so the failsafe's own diversion cannot immediately trigger a HUNG trap.
-A trap originally caused by genuine HUNG avoidance still remains held until the
-mission advances or the pilot changes mode.
+The reset is silent while the trap holds: the GCS continues to show `TRAPPED`
+until release, rather than reporting a premature HUNG clear. Ordinary HUNG
+recovery still announces clearing. A trap originally caused by genuine HUNG
+avoidance remains held until the mission advances or the pilot changes mode.
 
 `DAA_HUNG_ALRT_S` measures a lack of _progress_, not a lack of headings. Detecting that
 the bendy ruler is genuinely boxed in — no clear heading exists at all — is a separate

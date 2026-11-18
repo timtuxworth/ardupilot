@@ -42,7 +42,7 @@ Inspired by the Copter/Rover AC_Avoidance implementation by Randy Mackay and Ris
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-128"
+SCRIPT_VERSION      = "4.8.0-129"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -1624,18 +1624,21 @@ local DAA = {
         return mode
     end
 
-    -- Drop the progress tracker.  Called whenever measuring progress is meaningless: not
-    -- avoiding, not in forward flight, deliberately loitering, or the navigation target
-    -- moved - a waypoint advancing IS progress, so the measurement starts again.
+    -- Clear measurement state without changing the trap's GCS status or latched cause.
+    local function hung_clear_tracker()
+        hung_active     = false
+        hung_best_m     = nil
+        hung_since_ms   = uint32_t(0)
+        hung_target_loc = nil
+    end
+
+    -- Normal recovery also clears the HUNG alert. A trap owns its own status until release.
     local function hung_reset()
         if hung_active then
             gcs:send_text(MAV_SEVERITY.INFO, SCRIPT_NAME_SHORT .. ": HUNG clear")
             gcs:send_named_string("DAA-AVOID", "")
         end
-        hung_active     = false
-        hung_best_m     = nil
-        hung_since_ms   = uint32_t(0)
-        hung_target_loc = nil
+        hung_clear_tracker()
     end
 
     -- Avoidance is "hung" when it is running but the vehicle is not closing on its navigation
@@ -1644,7 +1647,11 @@ local DAA = {
     local function hung_update()
         -- The trap deliberately flies another mode, not the interrupted goal.
         -- Start a fresh progress interval after it releases instead of re-trapping.
-        if hung_alrt_s <= 0 or not in_fw_flight or trap_active
+        if trap_active then
+            hung_clear_tracker()
+            return
+        end
+        if hung_alrt_s <= 0 or not in_fw_flight
             or daa_target_loc == nil or navigation_target_loc == nil or current_loc == nil
             or loiteralt.active
             -- Altitude-only avoidance leaves horizontal navigation in charge. A mission

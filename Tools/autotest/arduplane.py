@@ -11901,8 +11901,9 @@ return update()
 
     def PlaneDAATrapResetsHung(self):
         """A moving-obstacle trap must not count its own diversion as hung avoidance."""
-        for late in (False, True):
-            self.start_subtest("near-expired default HUNG timer" if late else "trap longer than HUNG timeout")
+        for late in (False, True, "latched"):
+            self.start_subtest("moving trap with HUNG latched" if late == "latched" else
+                               "near-expired default HUNG timer" if late else "trap longer than HUNG timeout")
             self.context_push()
             self.install_planedaa_scripts()
             if late:
@@ -11917,9 +11918,10 @@ return update()
             hung_best_m = math.max(0, current_loc:get_distance(navigation_target_loc) - 200)
             hung_target_loc = navigation_target_loc:copy()
             hung_since_ms = now_ms - uint32_t(58000)
+            %s
             gcs:send_text(6, "DAA test HUNG timer primed")
         end
-'''
+''' % ("hung_active = true" if late == "latched" else "-- not yet HUNG")
                 self.install_script_content("planedaa.lua", content.replace(anchor, anchor + injection))
             self.set_parameters({
                 "SCR_ENABLE": 1, "SCR_VM_I_COUNT": 1000000,
@@ -11982,7 +11984,7 @@ return update()
             self.delay_sim_time(12, reason="verify moving-trap recovery does not re-trap as HUNG")
             if self.mav.flightmode != "AUTO":
                 raise NotAchievedException("moving-trap recovery re-trapped into %s" % self.mav.flightmode)
-            for text in ("HUNG: no progress", "TRAPPED (hung)"):
+            for text in ("HUNG: no progress", "TRAPPED (hung)", "HUNG clear"):
                 if self.statustext_in_collections(text) is not None:
                     raise NotAchievedException("trap diversion incorrectly counted as hung: " + text)
             self.disarm_vehicle(force=True)
@@ -12155,6 +12157,13 @@ return update()
         "hung", and advancing the mission to a reachable waypoint must release it - progress
         toward the target cannot be the release test, because the trap's own RTL retargets
         the vehicle to home and would read as instant progress.'''
+        self._PlaneDAAHungTrapFires(alert_only=False)
+
+    def PlaneDAAHungAlertClears(self):
+        """An ordinary HUNG alert must still announce clearing when the mission advances."""
+        self._PlaneDAAHungTrapFires(alert_only=True)
+
+    def _PlaneDAAHungTrapFires(self, alert_only):
         self.install_planedaa_scripts()
 
         self.set_parameters({
@@ -12176,6 +12185,20 @@ return update()
             {"radius": excl_radius_m, "loc": self.offset_location_ne(home, excl_north_m, 0)},
         )])
 
+        trap_status = {"seen": False, "holding": True, "value": None, "cleared_early": False}
+        avoid_values = []
+
+        def watch_trap_status(mav, message):
+            if message.get_type() != 'NAMED_VALUE_STRING' or message.name != 'DAA-AVOID':
+                return
+            avoid_values.append(message.value)
+            if message.value == "TRAPPED":
+                trap_status["seen"] = True
+            elif trap_status["seen"] and trap_status["holding"]:
+                trap_status["cleared_early"] = True
+            trap_status["value"] = message.value
+
+        self.install_message_hook_context(watch_trap_status)
         self.context_collect('STATUSTEXT')
         self.reboot_sitl()
         self.wait_ready_to_arm()
@@ -12184,8 +12207,8 @@ return update()
             "WP_RADIUS": 20,            # the shortfall must not be swallowed by acceptance
             "DAA_MARGIN_FENCE": margin_m,
             "DAA_HUNG_ALRT_S": 20,
-            "DAA_TRAP_S": 5,
-            "DAA_TRAP_ACT": 1,          # RTL: no VTOL on this airframe, and it retargets to
+            "DAA_TRAP_S": 0,  # latch the genuine HUNG event before the orbit geometry changes
+            "DAA_TRAP_ACT": 0 if alert_only else 1,  # RTL: no VTOL on this airframe, and it retargets to
                                         # home - which is what the release rule must survive
             # The 100 m shortfall this test is built around (excl_radius/margin/
             # wp_from_centre above) was tuned against 1000 m probe/target-placement
@@ -12221,6 +12244,15 @@ return update()
             "HUNG: no progress",
             "avoidance orbited an unreachable waypoint without ever reporting it as hung",
             timeout=300)
+        if alert_only:
+            self.set_current_waypoint(3)
+            require_text("HUNG clear", "ordinary HUNG recovery did not announce clearing", timeout=30)
+            self.wait_mode("AUTO", timeout=10)
+            if self.statustext_in_collections("TRAPPED") is not None:
+                raise NotAchievedException("alert-only HUNG unexpectedly engaged the trap")
+            self.do_fence_disable()
+            self.disarm_vehicle(force=True)
+            return
         self.progress("hung avoidance detected - the failsafe must follow")
 
         require_text(
@@ -12230,6 +12262,15 @@ return update()
             timeout=60)
         self.wait_mode("RTL", timeout=30)
 
+        self.delay_sim_time(5, reason="verify TRAPPED status remains visible while RTL is held")
+        if not trap_status["seen"]:
+            raise NotAchievedException("GCS never received the TRAPPED named-string status")
+        if trap_status["cleared_early"] or trap_status["value"] != "TRAPPED":
+            raise NotAchievedException("GCS TRAPPED status cleared while the hung trap still held RTL")
+        if self.statustext_in_collections("HUNG clear") is not None:
+            raise NotAchievedException("HUNG clear announced while the hung trap still held RTL")
+        trap_status["holding"] = False
+        release_index = len(avoid_values)
         # the pilot advances the mission past the unreachable waypoint: the geometry that
         # hung the vehicle is no longer what it is being asked to fly, so the trap must let go
         self.set_current_waypoint(3)
@@ -12238,6 +12279,9 @@ return update()
             "the mission was advanced to a reachable waypoint but the hung trap held on",
             timeout=60)
         self.wait_mode("AUTO", timeout=30)
+        self.delay_sim_time(1, reason="receive the trap-release named-string status")
+        if "" not in avoid_values[release_index:]:
+            raise NotAchievedException("GCS TRAPPED status was not cleared on release")
         self.progress("hung trap released after the mission moved on")
 
         self.set_parameter("DAA_TRAP_ACT", 0)   # stand the failsafe down before cleanup
@@ -15929,6 +15973,7 @@ return update, 200
             Test(self.PlaneDAATrapResumeDuringLoiter),
             Test(self.PlaneDAATrapLoiterDropout),
             Test(self.PlaneDAAHungTrapFires),
+            Test(self.PlaneDAAHungAlertClears),
             Test(self.PlaneDAADisableRevertsTarget),
             Test(self.PlaneDAADisableDuringLoiter),
             Test(self.PlaneDAAFenceAvoidanceWind),
