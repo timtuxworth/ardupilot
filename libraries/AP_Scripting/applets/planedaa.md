@@ -614,6 +614,14 @@ does bind is still safe for urgent manoeuvres: it is bypassed when the estimated
 time-to-conflict falls below `DAA_SLEW_URG`, and also whenever slewing at
 `DAA_SLEW_DPS` could not complete the required change before the conflict.
 
+Side commitment and slew limiting are retained while their resulting path is
+clear. A blocked smoothed path is replaced by a fully clear candidate when one
+is available, or by positive clearance if the smoothed path is already in
+violation. The replacement becomes the committed side, so alternating candidates
+do not immediately turn it back. If all alternatives remain blocked, smoothing
+is not bypassed merely for a slightly better negative clearance; no safe escape
+is implied in that case.
+
 ### Network-fed traffic and data-link quality
 
 If traffic reaches the autopilot over a network link (a companion computer, an LTE
@@ -789,7 +797,7 @@ target to dodge it has been computed.
 | ------- | ------------- |
 | `Obs` | Obstacle found (1/0) |
 | `DstF` | Clearance of the **worst** heading in the sweep (m) — the closest any candidate came to an obstacle, which is what names the obstacle being avoided. It is normal for this to be very negative: some candidate heading usually points straight at the obstacle. **It is not the clearance of the path being flown** — read `DstB` for that. |
-| `DstB` | Clearance of the heading actually **chosen**, `HdgB` (m). Negative means no heading cleared and the best available one still breaches — the genuine boxed-in signal. Clamped to ±9999; a heading that clears everything reports the clamp. For a fence this is exact. For a moving obstacle it is the clearance at the point the clearance-hysteresis check ran; the side-commitment and slew-rate smoothing that can still adjust `HdgB` afterwards do not re-measure, so treat it as the best available figure rather than an exact one in that case. |
+| `DstB` | Clearance of the heading actually **chosen**, `HdgB` (m). Negative means no heading cleared and the best available one still breaches — the genuine boxed-in signal. Clamped to ±9999; a heading that clears everything reports the clamp. The chosen path is checked again if side commitment or slew limiting changes its heading, so the logged clearance corresponds to `HdgB`. |
 | `DstT` | Distance to the proposed new target that avoids the obstacle (m) |
 | `HdgB` | Best bearing found to avoid the obstacle (deg) |
 | `Tfnd` | Avoidance target found (1/0) |

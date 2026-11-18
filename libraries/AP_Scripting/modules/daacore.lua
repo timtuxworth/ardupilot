@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-030"
+DAAcore.SCRIPT_VERSION = "4.8.0-031"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -690,8 +690,8 @@ function DAAcore.new(deps)
     Post-process the raw bendy-ruler heading into a smooth command for a MOVING
     obstacle, WITHOUT ever overriding a turn the sweep needs to clear an obstacle.
 
-    resist_bearing_change() already produces a bearing that clears the moving obstacle
-    and only makes a large change when the new side is clearly clearer. So:
+    resist_bearing_change() favours the previously flown bearing unless the new
+    candidate has sufficiently better positive clearance. So:
       * An urgent encounter, or a large change there is no time to damp, is a
         genuine avoidance turn -> obey it exactly, no smoothing.  (This is the
         safety fix: previously the side-commit could mirror such a turn onto the
@@ -707,10 +707,10 @@ function DAAcore.new(deps)
         in one sortie, the worst 180 degrees in 0.26 s, none of them urgent.
         Asking instead whether the slew limit can deliver the change before the
         conflict leaves only the 3 that really were out of time.
-      * Only SMALL residual changes (the left/right jitter) are damped, via a side
-        commitment and a heading slew-rate limit. When holding a committed side we
-        keep the LAST FLOWN bearing (known clear) rather than a mirrored one that
-        was never clearance-checked.
+      * Changes with time in hand are damped via side commitment and a heading
+        slew-rate limit. Recheck any resulting heading: a previously clear held
+        bearing can become blocked as traffic moves. Bypass damping for a clear
+        alternative, without chasing negative score improvements when boxed in.
     --]]
     -- (2) Side commitment: once a side is chosen, hold it until the sweep has wanted the
     -- other one continuously for DAA_SIDE_HOLD_S.  Returns the bearing to fly.
@@ -729,7 +729,8 @@ function DAAcore.new(deps)
             return bearing
         end
         -- sweep wants the opposite side: only honour it once it has persisted; meanwhile
-        -- hold the last flown (clearance-proven) bearing, do NOT mirror
+        -- hold the last flown bearing, do NOT mirror; refine_avoidance_bearing()
+        -- checks its current clearance before accepting it.
         if not side_flip_pending then
             side_flip_pending = true
             side_flip_want_ms = now_ms
@@ -768,11 +769,8 @@ function DAAcore.new(deps)
                                             motion, obstacle, target_loc)
         local ttc_s = motion.ttc
 
-        -- (1) clearance hysteresis: the safe, multi-obstacle, anti-flip baseline.  The
-        -- returned distance is only accurate for `resisted` itself - apply_side_commitment
-        -- and apply_slew_limit below can move the bearing further without a matching
-        -- re-measurement, so a bearing damped by either is logged against this value as
-        -- the best available figure, not a guaranteed-exact one.
+        -- Clearance hysteresis remains the anti-flip baseline. Any later damping
+        -- that changes its heading must be checked against the same path geometry.
         local resisted, resisted_distance_m =
                 resist_bearing_change(last_avoid_bearing_deg, raw_bearing_deg, raw_distance_m, target_loc)
         local bearing = resisted
@@ -803,6 +801,34 @@ function DAAcore.new(deps)
             -- same bearing)
             bearing = apply_side_commitment(bearing, side)
             bearing = apply_slew_limit(bearing)
+        end
+        if math.abs(wrap_180(bearing - resisted)) > 0.01 then
+            local distance, _, blocker = probe_bearing(bearing, direct_bearing_deg,
+                                                        FLT_MAX, target_loc, false)
+            local smoothed = bearing
+            -- Keep safe damping intact. If it is blocked, prefer a fully clear
+            -- alternative, or positive clearance over an actual violation. Do not
+            -- chase small score improvements between blocked headings: that can
+            -- restart side-to-side oscillation when no escape is available.
+            local function consider(candidate)
+                local clearance, _, obstacle_found = probe_bearing(candidate, direct_bearing_deg,
+                                                                    FLT_MAX, target_loc, false)
+                if blocker ~= nil and (obstacle_found == nil or (distance <= 0 and clearance > 0)) then
+                    bearing, distance, blocker = candidate, clearance, obstacle_found
+                end
+            end
+            if blocker ~= nil then
+                consider(resisted)
+                if blocker ~= nil and math.abs(wrap_180(raw_bearing_deg - resisted)) > 0.01 then
+                    consider(raw_bearing_deg)
+                end
+            end
+            if math.abs(wrap_180(bearing - smoothed)) > 0.01 then
+                local chosen_side = wrap_180(bearing - direct_bearing_deg)
+                committed_side_sign = chosen_side > 1 and 1 or (chosen_side < -1 and -1 or 0)
+                side_flip_pending = false
+            end
+            resisted_distance_m = distance
         end
         last_cmd_bearing_ms = now_ms
 
