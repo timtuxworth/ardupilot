@@ -42,7 +42,7 @@ Inspired by the Copter/Rover AC_Avoidance implementation by Randy Mackay and Ris
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-122"
+SCRIPT_VERSION      = "4.8.0-123"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -1601,7 +1601,12 @@ local DAA = {
     local function hung_update()
         if hung_alrt_s <= 0 or not in_fw_flight
             or daa_target_loc == nil or navigation_target_loc == nil or current_loc == nil
-            or loiteralt.active then
+            or loiteralt.active
+            -- Altitude-only avoidance leaves horizontal navigation in charge. A mission
+            -- loiter deliberately makes no progress towards its centre.
+            or (obstacle_avoiding ~= nil and
+                (obstacle_avoiding.type == OBSTACLE_TYPE.FENCE_ALT_MAX or
+                 obstacle_avoiding.type == OBSTACLE_TYPE.FENCE_ALT_MIN)) then
             hung_reset()
             return
         end

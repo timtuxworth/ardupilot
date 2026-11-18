@@ -13192,6 +13192,13 @@ return update()
 
     def PlaneDAAAltitudeFenceBand(self):
         """Overlapping DAA altitude buffers must not command outside the real fence band."""
+        self._PlaneDAAAltitudeFenceBand(loiter=False)
+
+    def PlaneDAAAltitudeFenceLoiter(self):
+        """Altitude-only avoidance must not trap a deliberate mission loiter."""
+        self._PlaneDAAAltitudeFenceBand(loiter=True)
+
+    def _PlaneDAAAltitudeFenceBand(self, loiter):
         self.install_planedaa_scripts()
         self.install_script_content_context("daa-altitude-band-target.lua", """
 local SCRIPT_NAME = "DAA Altitude Band Test"
@@ -13226,6 +13233,10 @@ return update, 200
             dict(name="normal band", lo=50, hi=150, margin=20, cruise=140, target=128, max_frame=1),
             dict(name="mixed altitude frames", lo=90, hi=100, margin=20, cruise=95, target=95, max_frame=0),
         ]
+        if loiter:
+            scenarios = [scenarios[0], scenarios[2],
+                         dict(name="unclamped loiter control", lo=50, hi=150, margin=20,
+                              cruise=95, target=95, max_frame=1)]
         for scenario in scenarios:
             self.start_subtest(scenario["name"])
             self.context_push()
@@ -13238,17 +13249,23 @@ return update, 200
             })
             self.reboot_sitl()
             self.wait_ready_to_arm()
-            self.set_parameters({"DAA_MARGIN_ALT": scenario["margin"], "DAA_TRAP_ACT": 0})
+            self.set_parameters({"DAA_MARGIN_ALT": scenario["margin"],
+                                 "DAA_TRAP_ACT": 1 if loiter else 0,
+                                 "DAA_HUNG_ALRT_S": 20, "DAA_TRAP_S": 2})
             # No traffic is injected: altitude-fence handling alone must stay contained.
             self.start_flying_simple_relhome_mission([
                 (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, scenario["cruise"]),
-                (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 6000, 0, scenario["cruise"]),
+                (mavutil.mavlink.MAV_CMD_NAV_LOITER_UNLIM if loiter else
+                 mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 1000 if loiter else 6000, 0, scenario["cruise"]),
                 (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
             ])
             self.wait_current_waypoint(2, timeout=180)
             self.wait_altitude(scenario["cruise"]-2, scenario["cruise"]+2,
                                relative=True, minimum_duration=2, timeout=120)
             self.wait_text("Plane DAA", check_context=True, timeout=60)
+            if loiter:
+                self.wait_distance_to_location(self.offset_location_ne(self.home_position_as_location(), 1000, 0),
+                                               50, 150, timeout=120)
             self.do_fence_enable()
             self.wait_message_field_values('NAMED_VALUE_FLOAT', {
                 'name': 'DAABand', 'value': scenario["target"],
@@ -13266,7 +13283,12 @@ return update, 200
                         failures.append("aircraft left fence band at %.2f m" % altitude)
 
             self.install_message_hook_context(check_target)
-            self.delay_sim_time(12, reason="verify stable target and physical containment")
+            self.delay_sim_time(45 if loiter else 12, reason="verify stable target and physical containment")
+            if loiter:
+                if self.mav.flightmode != "AUTO":
+                    raise NotAchievedException("altitude-only avoidance interrupted mission loiter")
+                if self.statustext_in_collections("HUNG:") is not None:
+                    raise NotAchievedException("altitude-only avoidance reported false HUNG")
             if failures:
                 raise NotAchievedException("%s: %s" % (scenario["name"], failures[0]))
             if self.statustext_in_collections("fence breached") is not None:
@@ -15668,6 +15690,7 @@ return update, 200
             Test(self.PlaneDAAFenceAltitude),
             Test(self.PlaneDAAFenceAltitudeTerrain),
             Test(self.PlaneDAAAltitudeFenceBand),
+            Test(self.PlaneDAAAltitudeFenceLoiter),
             Test(self.PlaneDAASecondLegLookahead),
             Test(self.PlaneDAAClimbAltitudeSeparation),
             Test(self.PlaneDAADescentAltitudeSeparation),
