@@ -42,7 +42,7 @@ Inspired by the Copter/Rover AC_Avoidance implementation by Randy Mackay and Ris
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-127"
+SCRIPT_VERSION      = "4.8.0-128"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -928,6 +928,7 @@ local DAA = {
     local update_target_location_save_loc = nil -- this is the saved current_target for use by update_target_location ONLY
     -- Keep the actual command separate from the original goal, including after
     -- altitude-only avoidance ends. Otherwise our clamped command becomes a new goal.
+    ---@type Location_ud|nil
     local commanded_target_loc = nil
     local commanded_target_mode = -1
     local restore_pending_mode = nil
@@ -1386,7 +1387,7 @@ local DAA = {
         -- if the "new" target is different from the current DAA target then lets try to go there
         if not locations_equal(daa_target_loc, new_target_loc) then
             local entering_avoidance = (daa_target_loc == nil)
-            if update_target_location(new_target_loc) then
+            if update_target_location(new_target_loc) and commanded_target_loc ~= nil then
                 if entering_avoidance then
                     -- save the pre-avoidance state so it can be restored on exit, below.
                     local enabled = vehicle:get_crosstrack_enabled()
