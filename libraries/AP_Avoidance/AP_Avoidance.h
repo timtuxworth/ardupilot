@@ -128,7 +128,7 @@ public:
     void handle_msg(const mavlink_message_t &msg);
 
 #if AP_OA_SCRIPTING_ENABLED
-    // For AP_AOScripting to check for obstacles
+    // For AP_OAScripting to check for obstacles
     float get_obstacle_radius_m(uint8_t emitter_type) const;
     float get_obstacle_height_m(uint8_t emitter_type) const;
     // exclude_src_id, when has_exclude_src_id is true, skips one specific contact - used to

@@ -11008,18 +11008,19 @@ return update()
             m = dfreader.recv_match(type=['DAAR'])
             if m is None:
                 break
-            if m.Sel == OBSTACLE_TYPE_UNCREWED_AIRCRAFT and m.Gon == 0 and m.Held == 1:
+            if (m.Sel == OBSTACLE_TYPE_UNCREWED_AIRCRAFT and m.Gon == 0 and m.Held == 1 and
+                    m.FPrD >= -1.0):
                 saw_fence_override_of_active_drone = True
                 # FPrD is the same candidate path's fence-only clearance (also
                 # signed, positive clear): only trust CmdD<0 as a DRONE breach when
                 # the fence itself was not also breached that cycle, or a real fence
                 # breach (ObjT==FENCE_POLYGON_EXCLUSION winning find_closest_obstacle())
                 # reads as a false drone breach here.
-                if m.CmdD < -1.0 and m.FPrD >= -1.0 and (breach_m is None or m.CmdD < breach_m):
+                if m.CmdD < -1.0 and (breach_m is None or m.CmdD < breach_m):
                     breach_m = m.CmdD
         if not saw_fence_override_of_active_drone:
             raise NotAchievedException(
-                "never saw DAAR.Sel==UNCREWED_AIRCRAFT with Gon==0 and Held==1 - the fence "
+                "never saw a fence-clear DAAR.Sel==UNCREWED_AIRCRAFT with Gon==0 and Held==1 - the fence "
                 "candidate never overrode an actively-avoided (non-dismissed) drone, "
                 "geometry did not reproduce")
         if breach_m is not None:

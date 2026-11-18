@@ -15,7 +15,7 @@
 
 local DAAobstacles = {}
 
-DAAobstacles.SCRIPT_VERSION = "4.8.0-012"
+DAAobstacles.SCRIPT_VERSION = "4.8.0-013"
 DAAobstacles.SCRIPT_NAME = "DAA obstacles"
 DAAobstacles.SCRIPT_NAME_SHORT = "DAAobs"
 
@@ -36,7 +36,7 @@ DAAobstacles.OBSTACLE_TYPE = {
     FENCE_CIRCLE_EXCLUSION      = 5,
     FENCE_POLYGON_INCLUSION     = 6,
     FENCE_POLYGON_EXCLUSION     = 7,
-    FENCE_CUSTOM                   = 8,
+    FENCE_CUSTOM                = 8,
     PROXIMITY                   = 9,   -- detected by a proximty sensor, typically quite close
     AIS                         = 10,   -- Automatic Identification System for ship (maritime) vehicles
     FENCE_ALT_MAX               = 11,   -- max altitude fence (AC_FENCE_TYPE_ALT_MAX, FENCE_TYPE bit 0)
@@ -133,7 +133,7 @@ function DAAobstacles.new()
             [OBSTACLE_TYPE.FENCE_CIRCLE_EXCLUSION]  = settings.margin_fence_m,
             [OBSTACLE_TYPE.FENCE_POLYGON_INCLUSION] = settings.margin_fence_m,
             [OBSTACLE_TYPE.FENCE_POLYGON_EXCLUSION] = settings.margin_fence_m,
-            [OBSTACLE_TYPE.FENCE_CUSTOM]               = settings.margin_fence_m,
+            [OBSTACLE_TYPE.FENCE_CUSTOM]            = settings.margin_fence_m,
         }
     end
 

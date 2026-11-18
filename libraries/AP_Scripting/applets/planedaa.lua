@@ -42,7 +42,7 @@ Inspired by the Copter/Rover AC_Avoidance implementation by Randy Mackay and Ris
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-129"
+SCRIPT_VERSION      = "4.8.0-130"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -259,7 +259,7 @@ PARAM.HEADING_INC = bind_add_param('HEADING_INC', 21, DEFAULT_HEADING_INC_DEG)
 --[[
     // @Param: DAA_WIND_MIN
     // @DisplayName: Minimum wind speed for wind-aware avoidance
-    // @Description: Minimum wind speed (in m/s) before the avoidance look-ahead accounts for wind-driven drift while turning onto a candidate heading. Below this the still-air path is used, so calm-air behaviour is unchanged. Set very high to disable the wind-aware path entirely.
+    // @Description: Minimum wind speed (in m/s) above which DAA_WIND_MARG widens the fence avoidance margin. Below this threshold the margin is not widened. This threshold does not disable wind modelling in the candidate path.
     // @Units: m/s
     // @Range: 0 50
     // @Increment: 0.5

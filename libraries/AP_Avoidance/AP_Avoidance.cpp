@@ -1020,7 +1020,7 @@ bool AP_Avoidance::is_adsb_aircraft(uint8_t emitter_type)
     return false;
 }
 
-// For AP_AOScripting to check for obstacles and return the closest one.
+// For AP_OAScripting to check for obstacles and return the closest one.
 // Crewed aircraft are found separately, by distance_to_aircraft(): that applies the
 // caller's vertical gate, whereas this uses the per-emitter table.
 float AP_Avoidance::distance_to_obstacle(const Vector3f &start_NED_m, const Vector3f &end_NED_m,
@@ -1106,7 +1106,7 @@ float AP_Avoidance::distance_to_obstacle(const Vector3f &start_NED_m, const Vect
     return distance_new_m;
 }
 
-// For AP_AOScripting to check for crewed aircraft and return the closest one
+// For AP_OAScripting to check for crewed aircraft and return the closest one
 float AP_Avoidance::distance_to_aircraft(const Vector3f &vehicle_NED_m, const float lookahead_m, const float vertical_lookahead_m,
                                             // return values
                                             Obstacle &avoid_obstacle
