@@ -285,13 +285,11 @@ mode. If the trap later restores GUIDED, the plane may remain circling at the
 avoidance-loiter location instead of returning to AUTO. Pilot intervention may
 be needed to resume the intended flight mode.
 
-**GUIDED destination after position loss:** during ordinary avoidance in GUIDED,
-a temporary loss of position or an unavailable navigation target can cause a
-failed destination restore followed by loss of the saved original destination.
-When navigation becomes available again, the plane may fly to and circle at the
-last avoidance target instead. The pilot or companion may need to send the
-intended destination again. This can also occur with `DAA_TRAP_ACT=0` (the
-default); it does not require the trapped failsafe.
+**GUIDED destination recovery:** if position or the navigation target becomes
+unavailable during ordinary avoidance, DAA retains the original destination
+while a restore is pending and retries when navigation is available again. A
+pilot mode change or a new destination cancels that pending restore. This also
+applies with `DAA_TRAP_ACT=0`.
 
 Some unclassified traffic contacts can delay drone alerts and early avoidance.
 A pilot mode change made at the exact moment DAA starts or ends a manoeuvre may still

@@ -13202,8 +13202,53 @@ return update()
         """Clamping must preserve an absolute GUIDED goal and accept a new goal."""
         self._PlaneDAAAltitudeFenceBand(loiter=False, guided=True)
 
-    def _PlaneDAAAltitudeFenceBand(self, loiter, guided=False):
+    def PlaneDAAGuidedDropoutRecovery(self):
+        """Rejected dropout restores retain the goal, but yield to newer instructions."""
+        for dropout in ("position", "target", "new goal", "mode change"):
+            self.start_subtest("GUIDED dropout: " + dropout)
+            self._PlaneDAAAltitudeFenceBand(loiter=False, guided=True, dropout=dropout)
+
+    def _PlaneDAAAltitudeFenceBand(self, loiter, guided=False, dropout=None):
         self.install_planedaa_scripts()
+        if dropout is not None:
+            # Inject at the Lua state-fetch boundary: GPS loss alone need not make
+            # AHRS position unavailable. Refuse cleanup commands for three cycles.
+            with open(self.installed_script_path("planedaa.lua")) as f:
+                content = f.read()
+            anchor = "    function DAA.get_vehicle_state(fetched_current_loc)\n"
+            content = content.replace(anchor, "    local test_dropout_cycle = nil\n" + anchor)
+            anchor = "        current_loc = fetched_current_loc\n"
+            injection = '''
+        if test_dropout_cycle == nil and daa_target_loc ~= nil and current_mode == PLANE_MODE.GUIDED then
+            test_dropout_cycle = 0
+            DAA.enabled = false
+        end
+        if test_dropout_cycle ~= nil and test_dropout_cycle < 4 then
+            test_dropout_cycle = test_dropout_cycle + 1
+            if test_dropout_cycle <= 3 then
+                %s
+            else
+                %s
+                gcs:send_text(6, "DAA test dropout ended")
+            end
+        end
+''' % ("current_target_loc = nil" if dropout == "target" else "current_loc = nil", {
+                "new goal": '''local goal = navigation_target_loc:copy()
+                goal:set_alt_m(110, 1)
+                assert(vehicle:set_target_location(goal))
+                current_target_loc = vehicle:get_target_location()''',
+                "mode change": '''assert(vehicle:set_mode(PLANE_MODE.RTL))
+                current_mode = vehicle:get_mode()
+                current_target_loc = vehicle:get_target_location()''',
+            }.get(dropout, "DAA.enabled = true"))
+            if content.count(anchor) != 1:
+                raise NotAchievedException("DAA dropout injection point changed")
+            content = content.replace(anchor, anchor + injection)
+            anchor = "    local function update_target_location(new_target_loc)\n"
+            content = content.replace(anchor, anchor + '''
+        if test_dropout_cycle ~= nil and test_dropout_cycle <= 3 then return false end
+''')
+            self.install_script_content("planedaa.lua", content)
         self.install_script_content_context("daa-altitude-band-target.lua", """
 local SCRIPT_NAME = "DAA Altitude Band Test"
 local SCRIPT_NAME_SHORT = "DAABand"
@@ -13280,6 +13325,26 @@ return update, 200
                 self.wait_distance_to_location(self.offset_location_ne(self.home_position_as_location(), 1000, 0),
                                                50, 150, timeout=120)
             self.do_fence_enable()
+            if dropout is not None:
+                self.wait_text("DAA test dropout ended", check_context=True, timeout=30)
+                if dropout == "mode change":
+                    self.wait_mode("RTL", timeout=10)
+                else:
+                    self.wait_message_field_values('NAMED_VALUE_FLOAT', {
+                        'name': 'DAABand', 'value': 110 if dropout == "new goal" else scenario["target"],
+                    }, epsilon=0.2, timeout=30)
+                self.do_fence_disable()
+                if dropout != "mode change":
+                    expected = 110 if dropout == "new goal" else scenario["cruise"]
+                    self.wait_message_field_values('NAMED_VALUE_FLOAT', {
+                        'name': 'DAABand', 'value': expected,
+                    }, epsilon=0.2, timeout=30)
+                self.delay_sim_time(5, reason="verify recovery respects current ownership")
+                if self.mav.flightmode != ("RTL" if dropout == "mode change" else "GUIDED"):
+                    raise NotAchievedException("dropout recovery changed flight mode")
+                self.disarm_vehicle(force=True)
+                self.context_pop()
+                continue
             self.wait_message_field_values('NAMED_VALUE_FLOAT', {
                 'name': 'DAABand', 'value': scenario["target"],
             }, epsilon=0.2, timeout=30)
@@ -15728,6 +15793,7 @@ return update, 200
             Test(self.PlaneDAAAltitudeFenceBand),
             Test(self.PlaneDAAAltitudeFenceLoiter),
             Test(self.PlaneDAAAltitudeFenceGuidedGoal),
+            Test(self.PlaneDAAGuidedDropoutRecovery),
             Test(self.PlaneDAASecondLegLookahead),
             Test(self.PlaneDAAClimbAltitudeSeparation),
             Test(self.PlaneDAADescentAltitudeSeparation),

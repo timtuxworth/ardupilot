@@ -42,7 +42,7 @@ Inspired by the Copter/Rover AC_Avoidance implementation by Randy Mackay and Ris
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-124"
+SCRIPT_VERSION      = "4.8.0-125"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -930,6 +930,7 @@ local DAA = {
     -- altitude-only avoidance ends. Otherwise our clamped command becomes a new goal.
     local commanded_target_loc = nil
     local commanded_target_mode = -1
+    local restore_pending_mode = nil
     local navigation_target_loc = nil           -- this is where the vehicle is trying to get to (i.e. next waypoint if no avoidance)
     local daa_target_loc        = nil           -- this is where the DAA is currently trying to go in order to avoid obstacles (nil if not avoiding)
     -- Crosstrack (horizontal path-following) state saved from just before avoidance
@@ -1135,15 +1136,30 @@ local DAA = {
             return
         end
 
+        -- Always use this cycle's target for the compare-and-update binding. A
+        -- missing target must not leave a stale snapshot available to cleanup.
+        update_target_location_save_loc = current_target_loc
+        if restore_pending_mode ~= nil and
+            (current_mode ~= restore_pending_mode or
+             (current_target_loc ~= nil and
+              not locations_equal(current_target_loc, commanded_target_loc) and
+              not locations_equal(current_target_loc, daa_target_loc) and
+              not locations_equal(current_target_loc, navigation_target_loc))) then
+            -- A mode change or a new destination supersedes our pending recovery.
+            navigation_target_loc = nil
+            daa_target_loc = nil
+            commanded_target_loc = nil
+            restore_pending_mode = nil
+        end
+
         if current_loc == nil or current_target_loc == nil then
-            -- no position or not navigating - revert any in-progress avoidance (and
-            -- loiter) before dropping the state below, or the hijacked avoidance
-            -- target becomes the permanent navigation target on the next good cycle:
-            -- clear_avoidance() needs navigation_target_loc/daa_target_loc still set
-            -- to know what to revert to.
+            if restore_pending_mode == nil then restore_pending_mode = current_mode end
             DAA.clear_avoidance()
-            navigation_target_loc   = nil
-            daa_target_loc          = nil
+            if daa_target_loc == nil and not loiteralt.active then
+                navigation_target_loc = nil
+                commanded_target_loc = nil
+                restore_pending_mode = nil
+            end
             if navigating then
                 gcs:send_text(MAV_SEVERITY.WARNING, SCRIPT_NAME_SHORT .. "NOT NAVIGATING")
                 navigating = false
@@ -1152,9 +1168,16 @@ local DAA = {
             return
         end
 
-        -- if we got here we have a current location (AHRS active) and a current navigation target
-        -- No :copy(): this is only ever read elsewhere, never mutated in place.
-        update_target_location_save_loc = current_target_loc
+        if restore_pending_mode ~= nil then
+            -- Retry a rejected restore before detection can adopt the avoidance
+            -- point as a new destination. Keep the original goal until success.
+            DAA.clear_avoidance()
+            if daa_target_loc ~= nil or loiteralt.active then
+                active = false
+                return
+            end
+            restore_pending_mode = nil
+        end
 
         -- if the navigation target has changed to some other target not the DAA target, it must be vehicle navigation
         if navigation_target_loc == nil or
@@ -1322,7 +1345,8 @@ local DAA = {
 
     -- a wrapper around vehicle:update_target_location()
     local function update_target_location(new_target_loc)
-        if new_target_loc == nil or update_target_location_save_loc == nil then
+        if new_target_loc == nil or update_target_location_save_loc == nil
+            or vehicle:get_mode() ~= current_mode then
             return false
         end
         -- Clamp a command copy; the caller may be passing the saved original goal.
