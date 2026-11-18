@@ -42,7 +42,7 @@ Inspired by the Copter/Rover AC_Avoidance implementation by Randy Mackay and Ris
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-123"
+SCRIPT_VERSION      = "4.8.0-124"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -926,6 +926,10 @@ local DAA = {
     local NMAC_label            = ""
 
     local update_target_location_save_loc = nil -- this is the saved current_target for use by update_target_location ONLY
+    -- Keep the actual command separate from the original goal, including after
+    -- altitude-only avoidance ends. Otherwise our clamped command becomes a new goal.
+    local commanded_target_loc = nil
+    local commanded_target_mode = -1
     local navigation_target_loc = nil           -- this is where the vehicle is trying to get to (i.e. next waypoint if no avoidance)
     local daa_target_loc        = nil           -- this is where the DAA is currently trying to go in order to avoid obstacles (nil if not avoiding)
     -- Crosstrack (horizontal path-following) state saved from just before avoidance
@@ -1155,11 +1159,12 @@ local DAA = {
         -- if the navigation target has changed to some other target not the DAA target, it must be vehicle navigation
         if navigation_target_loc == nil or
             (not locations_equal(navigation_target_loc, current_target_loc) and
-                not locations_equal(daa_target_loc, current_target_loc)) then
+                not locations_equal(daa_target_loc, current_target_loc) and
+                not locations_equal(commanded_target_loc, current_target_loc)) or
+            (commanded_target_loc ~= nil and commanded_target_mode ~= current_mode) then
             -- the vehicle navigation code has changed it's target
-            -- :copy() needed: update_target_location(navigation_target_loc) mutates its
-            -- argument in place via change_alt_frame(), so this must be a private object.
             navigation_target_loc = current_target_loc:copy()
+            commanded_target_loc = nil
         end
 
         -- one fetch, not two: :length() and :angle() both read the same vector
@@ -1320,11 +1325,14 @@ local DAA = {
         if new_target_loc == nil or update_target_location_save_loc == nil then
             return false
         end
-        -- enforce the altitude fences on every commanded target (clamp-and-continue)
+        -- Clamp a command copy; the caller may be passing the saved original goal.
+        new_target_loc = new_target_loc:copy()
         core.clamp_alt_to_fence(new_target_loc)
         new_target_loc:change_alt_frame(update_target_location_save_loc:get_alt_frame())
         local updated_location = vehicle:update_target_location(update_target_location_save_loc, new_target_loc)
         if updated_location then
+            commanded_target_loc = new_target_loc
+            commanded_target_mode = current_mode
             return true
         end
         return false
@@ -1360,7 +1368,7 @@ local DAA = {
                 -- own waypoint-advance (Plane::set_next_WP()) re-enables crosstrack whenever it
                 -- moves to the next leg, even while avoidance is still active.
                 vehicle:set_crosstrack_enabled(false)
-                daa_target_loc = new_target_loc:copy()
+                daa_target_loc = commanded_target_loc:copy()
                 return true
             end
         end

@@ -155,6 +155,9 @@ fallback target is 95 m. Detection, target clamping and the reported buffer use
 the same limits. Floor and ceiling are compared in a common altitude frame;
 terrain-relative bounds are resolved at the location being checked. This fallback
 cannot make an invalid fence configuration safe or guarantee against overshoot.
+Clamping changes only the commanded target, preserving the original navigation
+goal. If the fence is disabled or its limits permit the original altitude again,
+DAA restores that altitude. A new vehicle or GUIDED target replaces the saved goal.
 
 When flying near fences in wind, `DAA_WIND_MARG` widens the standoff in proportion
 to wind speed (above `DAA_WIND_MIN`) so cross-track drift is less likely to carry
@@ -663,6 +666,10 @@ vehicle never breaches, so the core fence library never acts and there is nothin
 defer to — it is precisely the situation in which everything else has already declined
 to help. Still worth confirming against the startup messages rather than assuming the
 fence branch is armed.
+
+Altitude-only avoidance does not run the HUNG progress watchdog: a mission loiter
+can deliberately hold a constant distance from its centre while DAA limits altitude.
+Horizontal obstacle avoidance still runs the watchdog.
 
 `DAA_HUNG_ALRT_S` measures a lack of _progress_, not a lack of headings. Detecting that
 the bendy ruler is genuinely boxed in — no clear heading exists at all — is a separate
