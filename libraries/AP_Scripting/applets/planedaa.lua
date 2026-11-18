@@ -42,7 +42,7 @@ Inspired by the Copter/Rover AC_Avoidance implementation by Randy Mackay and Ris
 
 SCRIPT_NAME         = "Plane DAA"
 SCRIPT_NAME_SHORT   = "pDAA"
-SCRIPT_VERSION      = "4.8.0-126"
+SCRIPT_VERSION      = "4.8.0-127"
 
 STARTUP_DELAY       = 25  -- wait this many seconds for the FC to come up before starting the main loop
 
@@ -1641,7 +1641,9 @@ local DAA = {
     -- target.  This is neither a breach nor a boxed-in sweep: the bendy ruler keeps finding
     -- headings and the plane keeps flying them, it simply never arrives.
     local function hung_update()
-        if hung_alrt_s <= 0 or not in_fw_flight
+        -- The trap deliberately flies another mode, not the interrupted goal.
+        -- Start a fresh progress interval after it releases instead of re-trapping.
+        if hung_alrt_s <= 0 or not in_fw_flight or trap_active
             or daa_target_loc == nil or navigation_target_loc == nil or current_loc == nil
             or loiteralt.active
             -- Altitude-only avoidance leaves horizontal navigation in charge. A mission

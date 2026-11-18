@@ -671,6 +671,12 @@ Altitude-only avoidance does not run the HUNG progress watchdog: a mission loite
 can deliberately hold a constant distance from its centre while DAA limits altitude.
 Horizontal obstacle avoidance still runs the watchdog.
 
+While a trapped failsafe controls the vehicle, HUNG tracking is reset: progress
+towards the interrupted destination is not expected. Tracking starts afresh after
+release, so the failsafe's own diversion cannot immediately trigger a HUNG trap.
+A trap originally caused by genuine HUNG avoidance still remains held until the
+mission advances or the pilot changes mode.
+
 `DAA_HUNG_ALRT_S` measures a lack of _progress_, not a lack of headings. Detecting that
 the bendy ruler is genuinely boxed in — no clear heading exists at all — is a separate
 condition and is **not implemented**; a boxed-in vehicle is caught only once it stops
