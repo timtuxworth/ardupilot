@@ -1,0 +1,60 @@
+name: Plane Follow 100x benchmark
+run-name: Plane Follow 100x (${{ github.ref_name }})
+
+on:
+  push:
+    branches:
+      - 'planefollow-autotest-100x-trial-*'
+
+permissions:
+  contents: read
+
+jobs:
+  plane-follow:
+    name: Measure clocks (${{ github.ref_name }})
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    container:
+      image: ardupilot/ardupilot-dev-base:v0.2.0
+      options: --privileged --cap-add=SYS_PTRACE --security-opt apparmor=unconfined --security-opt seccomp=unconfined
+    defaults:
+      run:
+        shell: bash
+    env:
+      SITL_PANIC_EXIT: '1'
+      SITL_MULTICAST_IF_ADDR: '127.0.0.1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - name: Install test dependencies
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          python3 -m pip install --user ./modules/mavlink/pymavlink
+          git clone --depth 1 https://github.com/ardupilot/MAVProxy /tmp/plane-follow-mavproxy
+          python3 -m pip install --user --no-deps /tmp/plane-follow-mavproxy
+          python3 -m pip install --user defusedxml pyserial numpy pynmeagps
+      - name: Build Plane SITL
+        run: |
+          ./waf configure --board sitl --debug --num-aux-imus=2
+          ./waf plane -j "$(nproc)"
+      - name: Run dual-SITL Plane Follow
+        run: |
+          export PATH="$HOME/.local/bin:/github/home/.local/bin:$PATH"
+          export BUILDLOGS="$GITHUB_WORKSPACE/plane-follow-autotest-logs"
+          mkdir -p plane-follow-clock-results
+          python3 -u Tools/autotest/autotest.py --timeout=240 --show-test-timings \
+            test.PlaneTests1b.PlaneFollowApplet 2>&1 | tee plane-follow-clock-results/console.txt
+      - name: Summarize rates and clock drift
+        if: always()
+        run: |
+          mkdir -p plane-follow-clock-results
+          touch plane-follow-clock-results/console.txt
+          python3 Tools/autotest/plane_follow_clock_report.py \
+            plane-follow-clock-results/console.txt plane-follow-clock-results/clocks.csv
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: plane-follow-clocks
+          path: plane-follow-clock-results/
+          retention-days: 7
