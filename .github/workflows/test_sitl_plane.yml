@@ -283,3 +283,48 @@ jobs:
            path: /__w/ardupilot/ardupilot/logs
            retention-days: 7
 
+  plane-follow-clock-benchmark:
+    name: Plane Follow 100x trial ${{ matrix.trial }}
+    if: github.event_name == 'pull_request' && github.event.pull_request.number == 33432
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    container:
+      image: ardupilot/ardupilot-dev-base:v0.2.0
+      options: --privileged --cap-add=SYS_PTRACE --security-opt apparmor=unconfined --security-opt seccomp=unconfined
+    strategy:
+      fail-fast: false
+      matrix:
+        trial: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/setup-ccache
+        with:
+          key-suffix: base
+      - name: Run the instrumented Plane Follow test
+        id: benchmark
+        env:
+          CI_BUILD_TARGET: sitltest-plane-follow-clock-benchmark
+          CI_BUILD_DEBUG: '1'
+          PLANE_FOLLOW_CLOCK_BENCHMARK: '1'
+          BUILDLOGS: /tmp/plane-follow-clock-buildlogs
+        shell: bash
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          export PATH="/github/home/.local/bin:$PATH"
+          mkdir -p /tmp/plane-follow-clock-results
+          Tools/scripts/build_ci.sh 2>&1 | tee /tmp/plane-follow-clock-results/console.txt
+      - name: Summarize both simulated clocks
+        if: always() && steps.benchmark.outcome != 'skipped'
+        shell: bash
+        run: |
+          python3 Tools/autotest/plane_follow_clock_report.py \
+            /tmp/plane-follow-clock-results/console.txt \
+            /tmp/plane-follow-clock-results/clocks.csv
+      - uses: actions/upload-artifact@v7
+        if: always() && steps.benchmark.outcome != 'skipped'
+        with:
+          name: plane-follow-100x-trial-${{ matrix.trial }}
+          path: /tmp/plane-follow-clock-results/
+          retention-days: 7
