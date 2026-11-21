@@ -10037,6 +10037,23 @@ return update()
         target_sysid = 2
         target_arm_attempted = False
         follower_arm_attempted = False
+        clock_benchmark = os.environ.get("PLANE_FOLLOW_CLOCK_BENCHMARK") == "1"
+        clock_phase = None
+        last_clock_sample = 0.0
+
+        def record_clocks(force: bool = False) -> None:
+            nonlocal last_clock_sample
+            if not clock_benchmark or clock_phase is None:
+                return
+            now = time.monotonic()
+            if not force and now - last_clock_sample < 0.25:
+                return
+            follower_time = self.mav.messages.get('SYSTEM_TIME')
+            target_time = target_mav.messages.get('SYSTEM_TIME')
+            if follower_time is None or target_time is None:
+                return
+            print(f"PFCLOCK,{clock_phase},{now:.6f},{follower_time.time_boot_ms},{target_time.time_boot_ms}", flush=True)
+            last_clock_sample = now
 
         try:
             # ------------------------------------------------------------
@@ -10044,7 +10061,7 @@ return update()
             # ------------------------------------------------------------
             # Mission upload ACKs can be dropped when SERIAL0 is busy.
             # Set up both vehicles at a lower rate, then accelerate the flight.
-            follow_speedup = self.speedup
+            follow_speedup = 100 if clock_benchmark else self.speedup
             self.context_set_speedup(5)
             self.progress("Configuring primary vehicle as FOLLOWER")
             self.install_applet_script_context("plane_follow.lua")
@@ -10249,6 +10266,8 @@ return update()
                 raise NotAchievedException("Could not set TARGET SIM_SPEEDUP to %u" % follow_speedup)
             self.context_set_speedup(follow_speedup)
             self.progress("Both vehicles are now running at %ux" % follow_speedup)
+            clock_phase = "acquire"
+            record_clocks(force=True)
 
             def vehicle_separation_m():
                 follower_gpi = self.assert_receive_message(
@@ -10356,6 +10375,7 @@ return update()
                     self.progress("Acquiring: separation=%.1fm offset_error=%.1fm (%.0fs elapsed)" % (
                         sep, ofs_err, now - tstart))
                     last_update = now
+                record_clocks()
                 if ofs_err <= LOITER_ACQUIRE_M:
                     self.progress("Follower acquired target: separation=%.1fm offset_error=%.1fm after %.0fs" % (
                         sep, ofs_err, now - tstart))
@@ -10378,6 +10398,9 @@ return update()
             sep, ofs_err, follower_alt, target_alt = follow_offset_error_m()
             self.progress("Separation at release: %.1fm offset_error=%.1fm" % (sep, ofs_err))
 
+            clock_phase = "release"
+            record_clocks(force=True)
+
             # skip the loiter item (item 2) and jump to the first nav leg
             target_mav.mav.mission_set_current_send(target_sysid, 1, 3)
 
@@ -10386,6 +10409,7 @@ return update()
             while time.time() - tstart < 2:
                 self.drain_all_pexpects()
                 target_mav.recv_match(type='MISSION_CURRENT', blocking=False)
+                record_clocks()
                 time.sleep(DRAIN_INTERVAL_S)
 
             # give the follower time to react to the target starting to move
@@ -10402,9 +10426,12 @@ return update()
             last_acquire_report = tstart
             best_error = None
             best_error_time = tstart
+            clock_phase = "reacquire"
+            record_clocks(force=True)
             while self.get_sim_time_cached() - tstart < ACQUIRE_TIME_S:
                 self.drain_all_pexpects()
                 sep, ofs_err, follower_alt, target_alt = follow_offset_error_m()
+                record_clocks()
                 if ofs_err <= OFFSET_CONVERGE_M:
                     self.progress(
                         "Follower re-acquired moving target: "
@@ -10464,6 +10491,8 @@ return update()
             tstart = self.get_sim_time()
             last_report = tstart
             self.progress("Monitoring loop start: sim_time=%.1f" % tstart)
+            clock_phase = "tracking"
+            record_clocks(force=True)
             while True:
                 if self.get_sim_time_cached() - tstart >= MISSION_TIMEOUT_S:
                     sep, ofs_err, follower_alt, target_alt = follow_offset_error_m()
@@ -10499,6 +10528,7 @@ return update()
 
                 # print any statustext from target
                 st_target = target_mav.recv_match(type='STATUSTEXT', blocking=False)
+                record_clocks()
                 if st_target is not None:
                     self.progress("TARGET: %s" % st_target.text)
 
@@ -10565,6 +10595,7 @@ return update()
 
                 time.sleep(DRAIN_INTERVAL_S)
 
+            record_clocks(force=True)
             self.progress("FOLLOWER successfully tracked target through mission")
 
             # ------------------------------------------------------------
@@ -10575,6 +10606,7 @@ return update()
             self.disarm_vehicle(force=True)
             self.disarm_vehicle(mav=target_mav, force=True, target_sysid=target_sysid)
         except Exception:
+            record_clocks(force=True)
             if follower_arm_attempted:
                 try:
                     self.disarm_vehicle(force=True)

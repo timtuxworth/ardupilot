@@ -199,6 +199,10 @@ for t in $CI_BUILD_TARGET; do
         run_autotest "Plane" "build.Plane" "test.PlaneTests1a"
         continue
     fi
+    if [ "$t" == "sitltest-plane-follow-clock-benchmark" ]; then
+        run_autotest "Plane" "build.Plane" "test.PlaneTests1b.PlaneFollowApplet"
+        continue
+    fi
     if [ "$t" == "sitltest-plane-tests1b" ]; then
        run_autotest "Plane" "build.Plane" "test.PlaneTests1b"
         continue
