@@ -85,8 +85,13 @@ void ModeRTL::navigate()
                     plane.fence.check_location_within_fence(plane.next_WP_loc, horizontal_fences);
 #endif
 #if HAL_QUADPLANE_ENABLED
-    if (plane.quadplane.available() && !defer_landing) {
+    if (plane.quadplane.available()) {
         if (plane.quadplane.rtl_mode == QuadPlane::RTL_MODE::VTOL_APPROACH_QRTL) {
+            if (defer_landing) {
+                // An RTL orbit can stay outside the fence even with its centre inside.
+                plane.nav_controller->update_waypoint(plane.current_loc, plane.next_WP_loc);
+                return;
+            }
             // VTOL approach landing
             AP_Mission::Mission_Command cmd;
             cmd.content.location = plane.next_WP_loc;
@@ -97,7 +102,7 @@ void ModeRTL::navigate()
             return;
         }
 
-        if ((AP_HAL::millis() - plane.last_mode_change_ms > 1000) && switch_QRTL()) {
+        if (!defer_landing && (AP_HAL::millis() - plane.last_mode_change_ms > 1000) && switch_QRTL()) {
             return;
         }
     }

@@ -398,7 +398,8 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
             for enable_method in ('parameter', 'arming', 'auxiliary'):
                 self.fence_rtl_before_qrtl(fence_type, enable_method)
 
-    def fence_rtl_before_qrtl(self, fence_type, enable_method):
+    def fence_rtl_before_qrtl(self, fence_type: int, enable_method: str, *,
+                              qrtl_mode: int = 1, fence_radius: int = 400, rtl_radius: int = 80):
         self.start_subtest(f'fence type {fence_type}, {enable_method}')
         self.context_push()
         home = self.home_position_as_location()
@@ -411,18 +412,19 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
                 ])
             self.set_parameters({
                 'FENCE_TYPE': fence_type,
-                'FENCE_RADIUS': 400,
+                'FENCE_RADIUS': fence_radius,
                 'FENCE_ACTION': 1,
                 'FENCE_AUTOENABLE': 3 if enable_method == 'arming' else 0,
                 'FENCE_ENABLE': 1 if enable_method == 'parameter' else 0,
                 'RC7_OPTION': 11 if enable_method == 'auxiliary' else 0,
-                'Q_RTL_MODE': 1,
+                'Q_RTL_MODE': qrtl_mode,
                 'Q_RTL_ALT': 20,
                 'RTL_ALTITUDE': 80,
-                'RTL_RADIUS': 80,
+                'RTL_RADIUS': rtl_radius,
+                'Q_FW_LND_APR_RAD': 80,
                 # Make the automatic QRTL switch eligible while still
                 # outside the fence, without putting the RTL loiter outside it.
-                'Q_TRANS_DECEL': 0.2,
+                'Q_TRANS_DECEL': 0.2 if qrtl_mode == 1 else 2,
             })
             self.set_rc(7, 1000)
             if enable_method == 'auxiliary':
@@ -451,6 +453,8 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
                     if status.breach_status != 0:
                         raise NotAchievedException('QRTL started before the fence breach cleared')
                     break
+                if qrtl_mode == 2 and self.get_altitude(relative=True) < 65:
+                    raise NotAchievedException('Started VTOL approach descent before fence clearance')
                 seen_rtl = any(m.custom_mode == rtl_mode for m in self.context_collection('HEARTBEAT'))
                 if not self.mode_is('RTL', cached=True) and (seen_rtl or not self.mode_is('AUTO', cached=True)):
                     raise NotAchievedException('Left RTL during fence recovery: mode=%u' % self.get_mode(cached=True))
@@ -465,6 +469,10 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
                 self.disarm_vehicle(force=True)
             self.context_pop()
             self.reboot_sitl()
+
+    def FenceRTLVtolApproach(self):
+        """Recover before entering the VTOL approach when the RTL orbit exceeds the fence."""
+        self.fence_rtl_before_qrtl(2, 'parameter', qrtl_mode=2, fence_radius=200, rtl_radius=300)
 
     def FenceRTLDisable(self):
         '''allow automatic QRTL landing after disabling a breached fence with AUX'''
@@ -4844,6 +4852,7 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
             self.ParameterChecks,
             self.TestLogDownload,
             self.FenceRTLBeforeQRTL,
+            self.FenceRTLVtolApproach,
             self.FenceRTLDisable,
             self.FenceRTLOutsideRally,
             self.FenceRTLLandingExceptions,
