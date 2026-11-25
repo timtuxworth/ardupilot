@@ -76,16 +76,16 @@ void ModeRTL::update()
 
 void ModeRTL::navigate()
 {
-    bool fence_breached = false;
+    bool defer_landing = false;
 #if AP_FENCE_ENABLED
-    // Return inside horizontal fences before starting a landing approach.
-    // The immediate VTOL handovers in _enter() remain available at low speed.
-    fence_breached = plane.fence.get_action() != AC_Fence::Action::REPORT_ONLY &&
-                     (plane.fence.get_breaches() & plane.fence.get_enabled_fences() &
-                      (AC_FENCE_TYPE_CIRCLE | AC_FENCE_TYPE_POLYGON));
+    // An RTL destination outside the fence cannot clear the breach.
+    constexpr uint8_t horizontal_fences = AC_FENCE_TYPE_CIRCLE | AC_FENCE_TYPE_POLYGON;
+    defer_landing = plane.fence.get_action() != AC_Fence::Action::REPORT_ONLY &&
+                    (plane.fence.get_breaches() & plane.fence.get_enabled_fences() & horizontal_fences) &&
+                    plane.fence.check_location_within_fence(plane.next_WP_loc, horizontal_fences);
 #endif
 #if HAL_QUADPLANE_ENABLED
-    if (plane.quadplane.available() && !fence_breached) {
+    if (plane.quadplane.available() && !defer_landing) {
         if (plane.quadplane.rtl_mode == QuadPlane::RTL_MODE::VTOL_APPROACH_QRTL) {
             // VTOL approach landing
             AP_Mission::Mission_Command cmd;
@@ -110,7 +110,7 @@ void ModeRTL::navigate()
 
     plane.update_loiter(radius);
 
-    if (fence_breached) {
+    if (defer_landing) {
         return;
     }
 

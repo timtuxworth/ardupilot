@@ -501,21 +501,22 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
                         (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 1200, 0, 80),
                     ])
                     self.wait_distance_to_home(600, 700, timeout=120)
-                    # Exclude home and its loiter so the breach cannot clear
-                    # before we exercise the disable switch.
+                    # Breach the fence while keeping home a valid RTL destination.
+                    exclusion = [self.offset_location_ne(home, north, east) for north, east in
+                                 ((150, -1500), (150, 1500), (1500, 1500), (1500, -1500))]
                     self.upload_fences_from_locations([
-                        (mavutil.mavlink.MAV_CMD_NAV_FENCE_POLYGON_VERTEX_EXCLUSION, vertices),
+                        (mavutil.mavlink.MAV_CMD_NAV_FENCE_POLYGON_VERTEX_EXCLUSION, exclusion),
                     ])
                     self.wait_message_field_values('FENCE_STATUS', {'breach_status': 1})
                     self.wait_mode('RTL')
                     tstart = self.get_sim_time()
-                    while self.get_sim_time_cached() - tstart < 90:
+                    while self.get_sim_time_cached() - tstart < 3:
                         self.wait_heartbeat()
                         self.assert_mode_is('RTL')
-                        if self.get_altitude(relative=True) < 65:
-                            raise NotAchievedException('Started landing descent while fence breached')
                     self.set_rc(7, 2000)
                     self.delay_sim_time(1, reason='AUX switch debounce before disabling')
+                    if self.poll_message('FENCE_STATUS', quiet=True).breach_status != 1:
+                        raise NotAchievedException('Fence cleared before the AUX disable')
                     self.set_rc(7, 1000)
                     self.wait_sensor_state(mavutil.mavlink.MAV_SYS_STATUS_GEOFENCE,
                                            present=True, enabled=False, healthy=True)
@@ -526,6 +527,42 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
                         self.disarm_vehicle(force=True)
                     self.context_pop()
                     self.reboot_sitl()
+
+    def FenceRTLOutsideRally(self):
+        """Continue the VTOL landing when the configured rally point cannot clear the fence."""
+        self.wait_ready_to_arm()
+        home = self.home_position_as_location()
+        rally = self.offset_location_ne(home, 700, 0)
+        rally.set_alt_m(80, AltFrame.ABOVE_HOME)
+        self.set_parameters({
+            'FENCE_TYPE': 2,
+            'FENCE_RADIUS': 400,
+            'FENCE_ACTION': 1,
+            'FENCE_ENABLE': 1,
+            'RALLY_LIMIT_KM': 5,
+            'Q_RTL_MODE': 2,
+            'Q_RTL_ALT': 20,
+            'Q_FW_LND_APR_RAD': 80,
+            'RTL_ALTITUDE': 80,
+            'RTL_RADIUS': 80,
+        })
+        self.upload_rally_points_from_locations([rally])
+        try:
+            self.start_flying_simple_relhome_mission([
+                (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 80),
+                (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 1200, 0, 80),
+            ])
+            self.wait_message_field_values('FENCE_STATUS', {'breach_status': 1}, timeout=120)
+            self.wait_mode('RTL')
+            self.wait_mode('QRTL', timeout=120)
+            if self.poll_message('FENCE_STATUS', quiet=True).breach_status != 1:
+                raise NotAchievedException('Expected the fence to remain breached at QRTL entry')
+            self.wait_disarmed(timeout=180)
+            self.wait_location(rally, accuracy=35, height_accuracy=None)
+        finally:
+            if self.armed():
+                self.disarm_vehicle(force=True)
+            self.upload_rally_points_from_locations([])
 
     def FenceRTLLandingExceptions(self):
         '''preserve report-only fences and explicitly configured VTOL-only RTL'''
@@ -4808,6 +4845,7 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
             self.TestLogDownload,
             self.FenceRTLBeforeQRTL,
             self.FenceRTLDisable,
+            self.FenceRTLOutsideRally,
             self.FenceRTLLandingExceptions,
             self.FenceRTLActiveVTOL,
             self.FenceAutoDisableLanding,
