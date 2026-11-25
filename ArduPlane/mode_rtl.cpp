@@ -87,8 +87,9 @@ void ModeRTL::navigate()
 #endif
     if (plane.quadplane.available()) {
         if (plane.quadplane.rtl_mode == QuadPlane::RTL_MODE::VTOL_APPROACH_QRTL) {
-            if (defer_landing) {
-                // An RTL orbit can stay outside the fence even with its centre inside.
+            if (defer_landing && plane.vtol_approach_s.approach_stage == Plane::VTOLApproach::Stage::RTL) {
+                // Fly inside before starting the approach. Once descending, the
+                // approach needs to finish its orbit to reach the breakout heading.
                 plane.nav_controller->update_waypoint(plane.current_loc, plane.next_WP_loc);
                 return;
             }

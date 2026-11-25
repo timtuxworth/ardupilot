@@ -474,6 +474,32 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
         """Recover before entering the VTOL approach when the RTL orbit exceeds the fence."""
         self.fence_rtl_before_qrtl(2, 'parameter', qrtl_mode=2, fence_radius=200, rtl_radius=300)
 
+    def FenceRTLVtolApproachRebreach(self):
+        """Complete an in-progress VTOL approach whose orbit crosses the fence."""
+        self.set_parameters({
+            'FENCE_TYPE': 2,
+            'FENCE_RADIUS': 200,
+            'FENCE_ACTION': 1,
+            'FENCE_ENABLE': 1,
+            'Q_RTL_MODE': 2,
+            'Q_RTL_ALT': 20,
+            'Q_FW_LND_APR_RAD': 250,
+            'RTL_ALTITUDE': 80,
+        })
+        self.start_flying_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 80),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 1200, 0, 80),
+        ])
+        self.wait_message_field_values('FENCE_STATUS', {'breach_status': 1}, timeout=120)
+        self.wait_mode('RTL')
+        self.wait_message_field_values('FENCE_STATUS', {'breach_status': 0}, timeout=120)
+        # The descent from RTL_ALTITUDE begins once the approach loiter is captured.
+        self.wait_altitude(15, 65, relative=True, timeout=90)
+        self.wait_message_field_values('FENCE_STATUS', {'breach_status': 1}, timeout=10)
+        self.assert_mode_is('RTL')
+        self.wait_mode('QRTL', timeout=120)
+        self.wait_disarmed(timeout=180)
+
     def FenceRTLDisable(self):
         '''allow automatic QRTL landing after disabling a breached fence with AUX'''
         for qrtl_mode in (1, 2):
@@ -4853,6 +4879,7 @@ class AutoTestQuadPlane(vehicle_test_suite.TestSuite):
             self.TestLogDownload,
             self.FenceRTLBeforeQRTL,
             self.FenceRTLVtolApproach,
+            self.FenceRTLVtolApproachRebreach,
             self.FenceRTLDisable,
             self.FenceRTLOutsideRally,
             self.FenceRTLLandingExceptions,
