@@ -76,6 +76,7 @@ void ModeRTL::update()
 
 void ModeRTL::navigate()
 {
+#if HAL_QUADPLANE_ENABLED
     bool defer_landing = false;
 #if AP_FENCE_ENABLED
     // An RTL destination outside the fence cannot clear the breach.
@@ -84,7 +85,6 @@ void ModeRTL::navigate()
                     (plane.fence.get_breaches() & plane.fence.get_enabled_fences() & horizontal_fences) &&
                     plane.fence.check_location_within_fence(plane.next_WP_loc, horizontal_fences);
 #endif
-#if HAL_QUADPLANE_ENABLED
     if (plane.quadplane.available()) {
         if (plane.quadplane.rtl_mode == QuadPlane::RTL_MODE::VTOL_APPROACH_QRTL) {
             if (defer_landing) {
@@ -114,10 +114,6 @@ void ModeRTL::navigate()
     }
 
     plane.update_loiter(radius);
-
-    if (defer_landing) {
-        return;
-    }
 
     if (!plane.auto_state.checked_for_autoland) {
         if ((plane.g.rtl_autoland == RtlAutoland::RTL_IMMEDIATE_DO_LAND_START) ||
