@@ -1531,28 +1531,27 @@ function DAAcore.new(deps)
     -- independently-conflicting contact can have been masked behind it the whole time.
     -- validate_horizontal_release() uses this identity to re-probe excluding just the
     -- dismissed contact, rather than accepting the release on its say-so alone.
-    local function resolve_moving_bearing(bearing_deg, target_loc, best_bearing_deg, best_distance_m)
+    local function resolve_moving_bearing(obstacle, bearing_deg, target_loc, best_bearing_deg, best_distance_m)
         -- resist_fence_bearing_change()'s reversal latch is fence-specific state: clear it
         -- whenever the resolver switches to a moving obstacle instead, so it cannot survive
         -- stale into a later, unrelated fence episode.
         reversal_target_sign = nil
-        local dismissed_candidate = obstacle_avoiding
-        local motion = assess_obstacle_motion(obstacle_avoiding)
+        local motion = assess_obstacle_motion(obstacle)
         local resume_conflict = false
-        if not motion.is_conflict and moving_command.sysid ~= nil and moving_command.sysid == dismissed_candidate.sysid then
+        if not motion.is_conflict and moving_command.sysid ~= nil and moving_command.sysid == obstacle.sysid then
             -- The current velocity already reflects our detour. Returning to the waypoint
             -- can close on the same contact again, so test that course before giving it back.
             local distance_m = math.min(detect_m, current_loc:get_distance(target_loc))
-            local resume = assess_obstacle_motion(dismissed_candidate, bearing_deg, distance_m)
-            resume_conflict = resume.cpa_miss <= get_standoff(dismissed_candidate.type, true)
+            local resume = assess_obstacle_motion(obstacle, bearing_deg, distance_m)
+            resume_conflict = resume.cpa_miss <= get_standoff(obstacle.type, true)
         end
         if not motion.is_conflict and not resume_conflict then
             obstacle_avoiding       = nil
             reset_horizontal_avoidance()
-            return best_bearing_deg, best_distance_m, true, dismissed_candidate
+            return best_bearing_deg, best_distance_m, true, obstacle
         end
         best_bearing_deg, best_distance_m = refine_avoidance_bearing(
-            bearing_deg, best_bearing_deg, best_distance_m, motion, obstacle_avoiding, target_loc)
+            bearing_deg, best_bearing_deg, best_distance_m, motion, obstacle, target_loc)
         last_avoid_bearing_deg  = best_bearing_deg
         return best_bearing_deg, best_distance_m, false, nil
     end
@@ -1894,7 +1893,7 @@ function DAAcore.new(deps)
                     resolve_fence_bearing(target_loc, best_bearing_deg, best_distance_m)
         elseif obstacle_avoiding ~= nil then
             best_bearing_deg, best_distance_m, gone, dismissed_obstacle =
-                    resolve_moving_bearing(bearing_deg, target_loc, best_bearing_deg, best_distance_m)
+                    resolve_moving_bearing(obstacle_avoiding, bearing_deg, target_loc, best_bearing_deg, best_distance_m)
             if gone then
                 obstacle_avoiding = nil
             end
