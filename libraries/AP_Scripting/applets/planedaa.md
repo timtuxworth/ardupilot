@@ -505,6 +505,8 @@ The CPA decision uses fresh contact data each cycle. Before clearing a detour fo
 an active contact, DAA also projects closest approach on the course back to the
 navigation target, within `DAA_DETECT_M`. It retains avoidance if that course
 would bring it back within the contact's standoff and aircraft traffic margin.
+If the sweep briefly misses the aircraft, DAA checks the rejoin against its last
+fix for up to one second, provided the fix itself is no more than one second old.
 
 `DAA_SIDE_HOLD` commits to whichever side of a moving obstacle is actually being
 flown at the start of an episode — not, on that first commit, a "pass behind the
