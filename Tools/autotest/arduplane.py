@@ -9115,7 +9115,7 @@ return update()
                 module,
             )
         # planedaa + its modules need more than the default 200 KB SITL heap to run.
-        self.set_parameters({"SCR_HEAP_SIZE": 262144})
+        self.set_parameters({"SCR_HEAP_SIZE": 278528})
 
     def PlaneDAAHomeFencePreArm(self):
         """Home inside the DAA fence buffer must fail auxiliary arming checks."""
@@ -9576,18 +9576,20 @@ return update()
 
     def PlaneDAAHoveringDroneMissionRejoin(self):
         '''Keep avoiding a hovering MAVLink drone until the mission leg clears it.'''
+        radius_m = 150
+        buffer_m = 50
         self.install_planedaa_scripts()
         self.set_parameters({
             "SCR_ENABLE": 1,
             "SCR_VM_I_COUNT": 1000000,
             "AVD_ENABLE": 1,
-            "AVD_UAV_XY": 150,
+            "AVD_UAV_XY": radius_m,
             "AVD_UAV_Z": 25,
         })
         self.context_collect("STATUSTEXT")
         self.reboot_sitl()
         self.wait_ready_to_arm()
-        self.set_parameter("DAA_MARGIN_UAV", 50)
+        self.set_parameter("DAA_MARGIN_UAV", buffer_m)
 
         home = self.home_position_as_location()
         drone = self.offset_location_ne(home, 1000, 0)
@@ -9602,35 +9604,41 @@ return update()
         self.wait_text("Plane DAA", check_context=True, timeout=60)
 
         start = self.get_sim_time()
+        last_sample_time = start - 1
         sample = 0
         completed = False
-        while self.get_sim_time() - start < 240 and self.mav.waypoint_current() == 2:
-            # Model a hovering x500's direct MAVLink feed, with a few cm of
-            # position noise to distinguish live hover from a frozen estimate.
-            old_sysid = self.mav.mav.srcSystem
-            self.mav.mav.srcSystem = 30
-            sample += 1
-            try:
-                self.mav.mav.global_position_int_send(
-                    0, int(drone.lat * 1e7) + sample % 2, int(drone.lng * 1e7),
-                    altitude_mm, 80000, 0, 0, 0, 65535,
-                )
-            finally:
-                self.mav.mav.srcSystem = old_sysid
+        while self.mav.messages["MISSION_CURRENT"].seq == 2:
+            now = self.get_sim_time_cached()
+            if now - start >= 240:
+                break
+            if now - last_sample_time >= 0.2:
+                # Model the x500's MAVLink feed with centimetre-scale position
+                # noise to distinguish live hover from a frozen estimate.
+                old_sysid = self.mav.mav.srcSystem
+                self.mav.mav.srcSystem = 30
+                sample += 1
+                try:
+                    self.mav.mav.global_position_int_send(
+                        int(now * 1000), int(drone.lat * 1e7) + sample % 2, int(drone.lng * 1e7),
+                        altitude_mm, 80000, 0, 0, 0, 65535,
+                    )
+                finally:
+                    self.mav.mav.srcSystem = old_sysid
+                last_sample_time = now
 
-            text = self.mav.recv_match(type="STATUSTEXT", blocking=True, timeout=0.2)
-            if text is None or "AVOIDING: SYSID:30 done" not in text.text:
+            msg = self.mav.recv_match(type=["SYSTEM_TIME", "STATUSTEXT", "MISSION_CURRENT"], blocking=True, timeout=0.5)
+            if msg is None or msg.get_type() != "STATUSTEXT" or "AVOIDING: SYSID:30 done" not in msg.text:
                 continue
             here = self.get_location()
             angle = math.radians(self.get_bearing(here, drone) - self.get_bearing(here, target))
             if math.cos(angle) > 0:
                 clearance = abs(self.get_distance(here, drone) * math.sin(angle))
                 self.progress("Mission rejoin clearance from hovering drone: %.1fm" % clearance)
-                if clearance < 145:
+                if clearance < radius_m + buffer_m - 5:
                     raise NotAchievedException("Released avoidance into the hovering drone's keep-out")
             completed = True
 
-        if not completed or self.mav.waypoint_current() != 3:
+        if not completed or self.mav.messages["MISSION_CURRENT"].seq != 3:
             raise NotAchievedException("Did not complete the drone detour and resume the mission")
         self.disarm_vehicle(force=True)
 
