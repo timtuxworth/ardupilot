@@ -9576,9 +9576,36 @@ return update()
 
     def PlaneDAAHoveringDroneMissionRejoin(self):
         '''Keep avoiding a hovering MAVLink drone until the mission leg clears it.'''
+        self.fly_daa_hovering_drone_rejoin()
+
+    def PlaneDAAHoveringDroneMissedSweep(self):
+        '''Keep the detour when one sweep misses the hovering drone.'''
+        self.fly_daa_hovering_drone_rejoin(miss_sweep=True)
+
+    def fly_daa_hovering_drone_rejoin(self, miss_sweep=False):
         radius_m = 150
         buffer_m = 50
         self.install_planedaa_scripts()
+        miss_marker = "DAA test forced one missed sweep"
+        if miss_sweep:
+            module = self.installed_script_module_path("daacore.lua")
+            with open(module) as f:
+                content = f.read()
+            anchor = "        local raw_bearing_deg, raw_distance_m = best_bearing_deg, best_distance_m\n"
+            if content.count(anchor) != 1:
+                raise NotAchievedException("DAA sweep test seam changed")
+            # Keep transmitting traffic. Suppress only one sweep result after
+            # the controller has already committed to a detour.
+            injection = f'''        if not self.test_missed_sweep and last_avoid_bearing_deg ~= nil
+                and obstacle_avoiding ~= nil and obstacle_avoiding.sysid == 30 then
+            self.test_missed_sweep = true
+            obstacle_avoiding = nil
+            best_bearing_deg, best_distance_m = bearing_deg, FLT_MAX
+            gcs:send_text(6, "{miss_marker}")
+        end
+'''
+            with open(module, "w") as f:
+                f.write(content.replace(anchor, injection + anchor))
         self.set_parameters({
             "SCR_ENABLE": 1,
             "SCR_VM_I_COUNT": 1000000,
@@ -9640,6 +9667,8 @@ return update()
 
         if not completed or self.mav.messages["MISSION_CURRENT"].seq != 3:
             raise NotAchievedException("Did not complete the drone detour and resume the mission")
+        if miss_sweep and self.statustext_in_collections(miss_marker) is None:
+            raise NotAchievedException("The test never forced a missed sweep")
         self.disarm_vehicle(force=True)
 
     def PlaneDAAParkedAircraftDoesNotMaskDrone(self):
@@ -16473,6 +16502,7 @@ return update, 200
             Test(self.PlaneDAAStandoffNotDoubleCounted),
             Test(self.PlaneDAADroneCrossing),
             Test(self.PlaneDAAHoveringDroneMissionRejoin),
+            Test(self.PlaneDAAHoveringDroneMissedSweep),
             Test(self.PlaneDAAAircraftLoiterNoFlip),
             Test(self.PlaneDAAAvdAltZeroNoLoiter),
             Test(self.PlaneDAALoiterFailNoState),
