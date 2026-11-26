@@ -9574,6 +9574,66 @@ return update()
         self.wait_current_waypoint(3, timeout=400)
         self.disarm_vehicle(force=True)
 
+    def PlaneDAAHoveringDroneMissionRejoin(self):
+        '''Keep avoiding a hovering MAVLink drone until the mission leg clears it.'''
+        self.install_planedaa_scripts()
+        self.set_parameters({
+            "SCR_ENABLE": 1,
+            "SCR_VM_I_COUNT": 1000000,
+            "AVD_ENABLE": 1,
+            "AVD_UAV_XY": 150,
+            "AVD_UAV_Z": 25,
+        })
+        self.context_collect("STATUSTEXT")
+        self.reboot_sitl()
+        self.wait_ready_to_arm()
+        self.set_parameter("DAA_MARGIN_UAV", 50)
+
+        home = self.home_position_as_location()
+        drone = self.offset_location_ne(home, 1000, 0)
+        target = self.offset_location_ne(home, 2400, 0)
+        altitude_mm = int((home.get_alt_m(AltFrame.ABSOLUTE) + 80) * 1000)
+        self.start_flying_simple_relhome_mission([
+            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 50),
+            (mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 2400, 0, 80),
+            (mavutil.mavlink.MAV_CMD_NAV_RETURN_TO_LAUNCH, 0, 0, 0),
+        ])
+        self.wait_current_waypoint(2, timeout=120)
+        self.wait_text("Plane DAA", check_context=True, timeout=60)
+
+        start = self.get_sim_time()
+        sample = 0
+        completed = False
+        while self.get_sim_time() - start < 240 and self.mav.waypoint_current() == 2:
+            # Model a hovering x500's direct MAVLink feed, with a few cm of
+            # position noise to distinguish live hover from a frozen estimate.
+            old_sysid = self.mav.mav.srcSystem
+            self.mav.mav.srcSystem = 30
+            sample += 1
+            try:
+                self.mav.mav.global_position_int_send(
+                    0, int(drone.lat * 1e7) + sample % 2, int(drone.lng * 1e7),
+                    altitude_mm, 80000, 0, 0, 0, 65535,
+                )
+            finally:
+                self.mav.mav.srcSystem = old_sysid
+
+            text = self.mav.recv_match(type="STATUSTEXT", blocking=True, timeout=0.2)
+            if text is None or "AVOIDING: SYSID:30 done" not in text.text:
+                continue
+            here = self.get_location()
+            angle = math.radians(self.get_bearing(here, drone) - self.get_bearing(here, target))
+            if math.cos(angle) > 0:
+                clearance = abs(self.get_distance(here, drone) * math.sin(angle))
+                self.progress("Mission rejoin clearance from hovering drone: %.1fm" % clearance)
+                if clearance < 145:
+                    raise NotAchievedException("Released avoidance into the hovering drone's keep-out")
+            completed = True
+
+        if not completed or self.mav.waypoint_current() != 3:
+            raise NotAchievedException("Did not complete the drone detour and resume the mission")
+        self.disarm_vehicle(force=True)
+
     def PlaneDAAParkedAircraftDoesNotMaskDrone(self):
         '''AP_Avoidance's find_threats()/find_aircraft() return a single closest obstacle,
         compared by clearance to each obstacle's OWN keep-out radius (AVD_WCLR_XY for a
@@ -16404,6 +16464,7 @@ return update, 200
             Test(self.PlaneDAAStaleAdsbNotExcluded),
             Test(self.PlaneDAAStandoffNotDoubleCounted),
             Test(self.PlaneDAADroneCrossing),
+            Test(self.PlaneDAAHoveringDroneMissionRejoin),
             Test(self.PlaneDAAAircraftLoiterNoFlip),
             Test(self.PlaneDAAAvdAltZeroNoLoiter),
             Test(self.PlaneDAALoiterFailNoState),
