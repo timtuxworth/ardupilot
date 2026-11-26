@@ -12330,7 +12330,7 @@ return update()
             side_hold_s, slew_dps, slew_urg_s = hold, slew, 1
             committed_side_sign, side_flip_pending = side, false
             last_avoid_bearing_deg = last
-            now_ms, last_cmd_bearing_ms = uint32_t(10000), uint32_t(9900)
+            now_ms, moving_command.time_ms = uint32_t(10000), uint32_t(9900)
             probe_bearing = function(bearing)
                 local key = math.floor(wrap_360(bearing) * 100 + 0.5) / 100
                 local path = assert(paths[key], "unexpected probe bearing " .. key)
