@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-033"
+DAAcore.SCRIPT_VERSION = "4.8.0-034"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -1915,9 +1915,14 @@ function DAAcore.new(deps)
                     and (now_ms - command_ms):tofloat() <= MISSED_SWEEP_HOLD_MS
                     and (now_ms - uint32_t(previous.timestamp_ms)):tofloat() <= MISSED_SWEEP_HOLD_MS
                     and moving_command.rejoin_conflicts(previous, bearing_deg, target_loc) then
-                obstacle_avoiding = previous
-                best_bearing_deg = last_avoid_bearing_deg
-                best_distance_m = probe_bearing(best_bearing_deg, bearing_deg, distance_to_target_m, target_loc, false)
+                local held_distance_m, _, blocker =
+                    probe_bearing(last_avoid_bearing_deg, bearing_deg, distance_to_target_m, target_loc, false)
+                -- A blocked detour must go through the normal release checks with the sweep result.
+                if blocker == nil then
+                    obstacle_avoiding = previous
+                    best_bearing_deg = last_avoid_bearing_deg
+                    best_distance_m = held_distance_m
+                end
             end
         end
 
