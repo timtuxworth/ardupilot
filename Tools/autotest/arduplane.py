@@ -13998,6 +13998,8 @@ return update, 200
             "FENCE_ALT_MIN_TP": 1,
             "FENCE_ALT_MAX_TP": 1,
             "RC7_OPTION": 308,
+            # This fixture loads an extra Lua script to report the active target.
+            "SCR_HEAP_SIZE": 294912,
         })
         self.set_rc(7, 1000)
         scenarios = [
