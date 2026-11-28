@@ -507,6 +507,9 @@ navigation target, within `DAA_DETECT_M`. It retains avoidance if that course
 would bring it back within the contact's standoff and aircraft traffic margin.
 If the sweep briefly misses the aircraft, DAA checks the rejoin against its last
 fix for up to one second, provided the fix itself is no more than one second old.
+If an AUTO waypoint lies inside an active contact's effective standoff, Plane may
+advance the mission after crossing the waypoint's finish line while still flying
+the detour, without passing close to the waypoint.
 
 `DAA_SIDE_HOLD` commits to whichever side of a moving obstacle is actually being
 flown at the start of an episode — not, on that first commit, a "pass behind the
