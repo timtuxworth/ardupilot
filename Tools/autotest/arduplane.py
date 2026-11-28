@@ -9582,7 +9582,11 @@ return update()
         '''Keep the detour when one sweep misses the hovering drone.'''
         self.fly_daa_hovering_drone_rejoin(miss_sweep=True)
 
-    def fly_daa_hovering_drone_rejoin(self, miss_sweep=False):
+    def PlaneDAAMissedSweepBlockedDetour(self) -> None:
+        '''Reject the previous detour when a second live MAVLink drone blocks it.'''
+        self.fly_daa_hovering_drone_rejoin(miss_sweep=True, block_detour=True)
+
+    def fly_daa_hovering_drone_rejoin(self, miss_sweep: bool = False, block_detour: bool = False) -> None:
         radius_m = 150
         buffer_m = 50
         self.install_planedaa_scripts()
@@ -9604,6 +9608,38 @@ return update()
             gcs:send_text(6, "{miss_marker}")
         end
 '''
+            if block_detour:
+                # Force the miss only after the normal probe sees the second MAVLink contact
+                # on the held bearing and the first contact still gates mission rejoin.
+                injection = '''        if raw_ok and not self.test_missed_sweep and last_avoid_bearing_deg ~= nil
+                and moving_command.obstacle ~= nil and moving_command.obstacle.sysid == 30
+                and (now_ms - moving_command.time_ms):tofloat() <= MISSED_SWEEP_HOLD_MS
+                and (now_ms - uint32_t(moving_command.obstacle.timestamp_ms)):tofloat() <= MISSED_SWEEP_HOLD_MS
+                and moving_command.rejoin_conflicts(moving_command.obstacle, bearing_deg, target_loc) then
+            if not self.test_detour_announced then
+                self.test_detour_announced = true
+                gcs:send_text(6, string.format("DAA test detour %.1f", last_avoid_bearing_deg))
+            end
+            local _, _, blocker = probe_bearing(
+                last_avoid_bearing_deg, bearing_deg, distance_to_target_m, target_loc, false)
+            if blocker ~= nil and blocker.sysid == 31 then
+                self.test_missed_sweep = last_avoid_bearing_deg
+                obstacle_avoiding = nil
+                best_bearing_deg, best_distance_m = bearing_deg, FLT_MAX
+            end
+        end
+'''
+                outcome = "        local target_loc = detect_impl()\n"
+                if content.count(outcome) != 1:
+                    raise NotAchievedException("DAA detect test seam changed")
+                content = content.replace(outcome, outcome + '''        if type(self.test_missed_sweep) == "number" then
+            local held_bearing = self.test_missed_sweep
+            self.test_missed_sweep = "checked"
+            local retained = target_loc ~= nil
+                and math.abs(wrap_180(math.deg(current_loc:get_bearing(target_loc)) - held_bearing)) < 1
+            gcs:send_text(6, retained and "DAA test kept blocked detour" or "DAA test rejected blocked detour")
+        end
+''')
             with open(module, "w") as f:
                 f.write(content.replace(anchor, injection + anchor))
         self.set_parameters({
@@ -9634,6 +9670,7 @@ return update()
         last_sample_time = start - 1
         sample = 0
         completed = False
+        second_drone = None
         while self.mav.messages["MISSION_CURRENT"].seq == 2:
             now = self.get_sim_time_cached()
             if now - start >= 240:
@@ -9649,12 +9686,32 @@ return update()
                         int(now * 1000), int(drone.lat * 1e7) + sample % 2, int(drone.lng * 1e7),
                         altitude_mm, 80000, 0, 0, 0, 65535,
                     )
+                    if second_drone is not None:
+                        self.mav.mav.srcSystem = 31
+                        self.mav.mav.global_position_int_send(
+                            int(now * 1000), int(second_drone.lat * 1e7) + sample % 2,
+                            int(second_drone.lng * 1e7), altitude_mm, 80000, 0, 0, 0, 65535,
+                        )
                 finally:
                     self.mav.mav.srcSystem = old_sysid
                 last_sample_time = now
 
             msg = self.mav.recv_match(type=["SYSTEM_TIME", "STATUSTEXT", "MISSION_CURRENT"], blocking=True, timeout=0.5)
-            if msg is None or msg.get_type() != "STATUSTEXT" or "AVOIDING: SYSID:30 done" not in msg.text:
+            if msg is None or msg.get_type() != "STATUSTEXT":
+                continue
+            if block_detour:
+                if msg.text.startswith("DAA test detour "):
+                    bearing = math.radians(float(msg.text.split()[-1]))
+                    second_drone = self.offset_location_ne(
+                        self.get_location(), 200 * math.cos(bearing), 200 * math.sin(bearing),
+                    )
+                elif "DAA test kept blocked detour" in msg.text:
+                    raise NotAchievedException("Missed sweep retained a detour blocked by the second drone")
+                elif "DAA test rejected blocked detour" in msg.text:
+                    self.disarm_vehicle(force=True)
+                    return
+                continue
+            if "AVOIDING: SYSID:30 done" not in msg.text:
                 continue
             here = self.get_location()
             angle = math.radians(self.get_bearing(here, drone) - self.get_bearing(here, target))
@@ -9665,6 +9722,8 @@ return update()
                     raise NotAchievedException("Released avoidance into the hovering drone's keep-out")
             completed = True
 
+        if block_detour:
+            raise NotAchievedException("The test never forced a missed sweep with the detour blocked")
         if not completed or self.mav.messages["MISSION_CURRENT"].seq != 3:
             raise NotAchievedException("Did not complete the drone detour and resume the mission")
         if miss_sweep and self.statustext_in_collections(miss_marker) is None:
@@ -16505,6 +16564,7 @@ return update, 200
             Test(self.PlaneDAADroneCrossing),
             Test(self.PlaneDAAHoveringDroneMissionRejoin),
             Test(self.PlaneDAAHoveringDroneMissedSweep),
+            Test(self.PlaneDAAMissedSweepBlockedDetour),
             Test(self.PlaneDAAAircraftLoiterNoFlip),
             Test(self.PlaneDAAAvdAltZeroNoLoiter),
             Test(self.PlaneDAALoiterFailNoState),
