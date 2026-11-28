@@ -21,7 +21,7 @@
 
 local DAAcore = {}
 
-DAAcore.SCRIPT_VERSION = "4.8.0-034"
+DAAcore.SCRIPT_VERSION = "4.8.0-035"
 DAAcore.SCRIPT_NAME = "DAA core"
 DAAcore.SCRIPT_NAME_SHORT = "DAAcore"
 
@@ -1965,9 +1965,9 @@ function DAAcore.new(deps)
                 best_bearing_deg, best_distance_m, obstacle_avoiding =
                         resolved_bearing_deg, resolved_distance_m, resolved_obstacle
                 if held then
-                    -- The fence-hold path bypasses resolve_fence_bearing()'s own
-                    -- bookkeeping - sync it the same way, or the next cycle's slew
-                    -- limiter anchors to a stale heading.
+                    -- Match resolve_fence_bearing()'s bookkeeping. Clearing the
+                    -- previous traffic timestamp leaves the first traffic command
+                    -- after a fence hold unslewed.
                     last_avoid_bearing_deg = best_bearing_deg
                     moving_command.time_ms = nil
                     moving_command.obstacle = nil
